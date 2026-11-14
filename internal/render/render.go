@@ -125,5 +125,10 @@ func Render(pkgDir string, m *manifest.Manifest, opts Options) ([]string, error)
 			return w.changed, fmt.Errorf("claude-code adapter: %w", err)
 		}
 	}
+	if opts.has(AdapterOpenCode) {
+		if err := renderOpenCode(w, m, opts.OpenCodeV2); err != nil {
+			return w.changed, fmt.Errorf("opencode adapter: %w", err)
+		}
+	}
 	return w.changed, nil
 }

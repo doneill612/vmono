@@ -241,5 +241,12 @@ func (c *Core) adapters() []string {
 // Render regenerates every generated file in a package, returning the
 // relative paths that changed. It never touches git.
 func (c *Core) Render(p *Package) ([]string, error) {
-	return render.Render(p.Dir, p.M, render.Options{Adapters: c.adapters()})
+	opts := render.Options{Adapters: c.adapters()}
+	for _, name := range c.Cfg.HarnessNames() {
+		if h := c.Cfg.Harness[name]; h.Adapter == render.AdapterOpenCode {
+			opts.OpenCodeV2 = render.OpenCodeV2(h.Command)
+			break
+		}
+	}
+	return render.Render(p.Dir, p.M, opts)
 }
