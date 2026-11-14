@@ -118,6 +118,9 @@ func renderOpenCode(w *writer, m *manifest.Manifest, v2 bool) error {
 	if err := w.file(openCodeConfigPath, string(data)+"\n"); err != nil {
 		return err
 	}
+	if err := writeBundledSkill(w, ".opencode/skills"); err != nil {
+		return err
+	}
 	return syncMemberSkills(w, m, skillRoot{dest: ".opencode/skills", sources: []string{".opencode/skills", ".claude/skills"}})
 }
 

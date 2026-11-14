@@ -210,3 +210,37 @@ func TestRewriteSkillName(t *testing.T) {
 		t.Error("text without frontmatter must be unchanged")
 	}
 }
+
+func TestBundledSkillWrittenForBothAdapters(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	if _, err := Render(dir, m, Options{Adapters: []string{AdapterClaudeCode, AdapterOpenCode}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{".claude/skills/vmono/SKILL.md", ".opencode/skills/vmono/SKILL.md"} {
+		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("%s: %v", rel, err)
+		}
+		text := string(data)
+		for _, want := range []string{"name: vmono", "vmono show --json", "vmono note", "vmono describe --context", "vmono role", "vmono add", "Never remove a member", "VMONO_PACKAGE"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s missing %q", rel, want)
+			}
+		}
+	}
+	// The bundled skill is not a member copy and must survive pruning.
+	if _, err := Render(dir, m, Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".claude/skills/vmono/SKILL.md")); err != nil {
+		t.Error("bundled skill pruned")
+	}
+	// Without adapters no harness config is written.
+	bare := t.TempDir()
+	if _, err := Render(bare, m, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(bare, ".claude")); !os.IsNotExist(err) {
+		t.Error("no adapter, no .claude directory")
+	}
+}
