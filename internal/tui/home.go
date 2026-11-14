@@ -55,7 +55,7 @@ type homeModel struct {
 
 // newHome builds Home, optionally with a message on arrival.
 func newHome(e *env, msg string) *homeModel {
-	f := textinput.New()
+	f := newTextInput()
 	f.Prompt = "/ "
 	f.Placeholder = "filter"
 	return &homeModel{e: e, filter: f, previews: map[string]previewMsg{}, msg: msg}
@@ -226,10 +226,20 @@ func (m *homeModel) updateKeys(k tea.KeyMsg) (screen, tea.Cmd) {
 
 // updateActions handles keys that open other screens.
 func (m *homeModel) updateActions(key string, sel core.Summary, has bool) (screen, tea.Cmd) {
+	if key == "n" {
+		return m, goTo(newEditor(m.e, nil))
+	}
 	if !has {
 		return m, nil
 	}
 	switch key {
+	case "e":
+		p, err := m.e.core.Load(sel.Name)
+		if err != nil {
+			m.msg = styleErr.Render(err.Error())
+			return m, nil
+		}
+		return m, goTo(newEditor(m.e, p))
 	case "l":
 		return m, goTo(newLaunchPicker(m.e, sel.Name, "Launch with"))
 	case "s":

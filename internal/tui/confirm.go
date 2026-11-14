@@ -33,7 +33,7 @@ type confirmModel struct {
 // newConfirm builds the screen.
 func newConfirm(e *env, title, name string, rows []core.MemberSafety, showBranches bool,
 	onConfirm func(force, deleteBranches bool) screen, onCancel func() screen) *confirmModel {
-	t := textinput.New()
+	t := newTextInput()
 	t.Prompt = "> "
 	t.Placeholder = name
 	t.CharLimit = 128

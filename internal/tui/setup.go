@@ -32,7 +32,7 @@ var harnessOrder = []string{"claude", "opencode", "codex", "pi"}
 // newSetup builds the setup screen with detected defaults.
 func newSetup(e *env) *setupModel {
 	m := &setupModel{e: e, installed: map[string]bool{}, order: harnessOrder}
-	m.src = textinput.New()
+	m.src = newTextInput()
 	m.src.Placeholder = "~/source (optional)"
 	m.src.Prompt = ""
 	m.src.CharLimit = 512
@@ -41,7 +41,7 @@ func newSetup(e *env) *setupModel {
 			m.src.SetValue("~/source")
 		}
 	}
-	m.pkg = textinput.New()
+	m.pkg = newTextInput()
 	m.pkg.Prompt = ""
 	m.pkg.CharLimit = 512
 	m.pkg.SetValue(e.core.Cfg.PackageRoot)
