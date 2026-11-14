@@ -33,35 +33,45 @@ func (e *BranchExistsError) Error() string {
 	return fmt.Sprintf("%s: branch %q already exists in the source repo (use --reuse-branch to check it out)", e.Member, e.Branch)
 }
 
-// prepareMembers fills member names, sources, remotes and defaults on m,
-// resolving each source to an absolute repo root. It returns the absolute
-// source path per member name. It mutates m.
+// prepareMember resolves one member's source to an absolute repo root,
+// defaults its name and remote, and stores the source contracted. It
+// returns the absolute source path. It does not apply path/base defaults,
+// which need the whole manifest.
+func prepareMember(mem *manifest.Member) (string, error) {
+	if mem.Source == "" {
+		return "", errors.New("member has no source")
+	}
+	src, err := paths.Abs(mem.Source)
+	if err != nil {
+		return "", err
+	}
+	top, err := gitx.TopLevel(src)
+	if err != nil {
+		return "", NotFound("%s is not a git repository", src)
+	}
+	if bare, err := gitx.IsBare(top); err != nil || bare {
+		return "", fmt.Errorf("%s is a bare repository; members must be non-bare", top)
+	}
+	if mem.Name == "" {
+		mem.Name = manifest.Slugify(filepath.Base(top))
+	}
+	if mem.Remote == "" {
+		mem.Remote = gitx.RemoteURL(top, "origin")
+	}
+	mem.Source = paths.Contract(top)
+	return top, nil
+}
+
+// prepareMembers prepares every member of m and applies manifest defaults.
+// It returns the absolute source path per member name. It mutates m.
 func (c *Core) prepareMembers(m *manifest.Manifest) (map[string]string, error) {
 	abs := map[string]string{}
 	for i := range m.Members {
-		mem := &m.Members[i]
-		if mem.Source == "" {
-			return nil, fmt.Errorf("member %d has no source", i+1)
-		}
-		src, err := paths.Abs(mem.Source)
+		top, err := prepareMember(&m.Members[i])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("member %d: %w", i+1, err)
 		}
-		top, err := gitx.TopLevel(src)
-		if err != nil {
-			return nil, NotFound("%s is not a git repository", src)
-		}
-		if bare, err := gitx.IsBare(top); err != nil || bare {
-			return nil, fmt.Errorf("%s is a bare repository; members must be non-bare", top)
-		}
-		if mem.Name == "" {
-			mem.Name = manifest.Slugify(filepath.Base(top))
-		}
-		if mem.Remote == "" {
-			mem.Remote = gitx.RemoteURL(top, "origin")
-		}
-		mem.Source = paths.Contract(top)
-		abs[mem.Name] = top
+		abs[m.Members[i].Name] = top
 	}
 	m.ApplyDefaults(c.Cfg.BranchPrefix)
 	return abs, nil
@@ -80,29 +90,35 @@ func resolveRef(src, ref string, warn func(string)) (string, error) {
 	return resolved, nil
 }
 
-// preflight performs create step 1: everything that can be checked before
-// touching disk. It returns the branches that already exist per member.
-func (c *Core) preflight(m *manifest.Manifest, srcs map[string]string, dir string, opts CreateOptions) (existing map[string]bool, err error) {
-	if _, err := os.Stat(dir); err == nil {
-		return nil, fmt.Errorf("package %q already exists at %s", m.Name, dir)
-	}
+// preflightMembers checks the members in check before anything touches
+// disk: sources are usable, no two active members share a repo, the package
+// branch is not checked out elsewhere, and base/ref resolve. srcs maps every
+// member of m (not only check) to its absolute source. It returns the
+// members whose package branch already exists in their source.
+func preflightMembers(m *manifest.Manifest, srcs map[string]string, check []manifest.Member, reuse bool) (existing map[string]bool, err error) {
 	existing = map[string]bool{}
 	activeSources := map[string]string{}
 	for _, mem := range m.Members {
+		if mem.Mode != manifest.ModeActive {
+			continue
+		}
+		src := srcs[mem.Name]
+		if other, dup := activeSources[src]; dup {
+			return nil, fmt.Errorf("members %s and %s are the same repo; one branch can only be checked out once", other, mem.Name)
+		}
+		activeSources[src] = mem.Name
+	}
+	for _, mem := range check {
 		src := srcs[mem.Name]
 		switch mem.Mode {
 		case manifest.ModeActive:
-			if other, dup := activeSources[src]; dup {
-				return nil, fmt.Errorf("members %s and %s are the same repo; one branch can only be checked out once", other, mem.Name)
-			}
-			activeSources[src] = mem.Name
 			if at, err := gitx.BranchCheckedOutAt(src, m.Branch); err != nil {
 				return nil, fmt.Errorf("%s: %w", mem.Name, err)
 			} else if at != "" {
 				return nil, fmt.Errorf("%s: branch %q is already checked out at %s", mem.Name, m.Branch, at)
 			}
 			if gitx.BranchExists(src, m.Branch) {
-				if !opts.ReuseBranch {
+				if !reuse {
 					return nil, &BranchExistsError{Member: mem.Name, Branch: m.Branch}
 				}
 				existing[mem.Name] = true
@@ -147,7 +163,10 @@ func (c *Core) Create(m *manifest.Manifest, opts CreateOptions) (*Package, error
 	if err != nil {
 		return nil, err
 	}
-	existing, err := c.preflight(m, srcs, dir, opts)
+	if _, err := os.Stat(dir); err == nil {
+		return nil, fmt.Errorf("package %q already exists at %s", m.Name, dir)
+	}
+	existing, err := preflightMembers(m, srcs, m.Members, opts.ReuseBranch)
 	if err != nil {
 		return nil, err
 	}

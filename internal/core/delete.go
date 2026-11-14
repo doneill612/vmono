@@ -128,36 +128,11 @@ func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
 
 	var steps []apply.Step
 	for _, mem := range p.M.Members {
-		mem := mem
-		src, err := paths.Abs(mem.Source)
+		ms, err := c.removeMemberSteps(p, mem, opts.Force, opts.DeleteBranches, &res)
 		if err != nil {
 			return res, err
 		}
-		dir := p.MemberDir(mem)
-		steps = append(steps, apply.Step{Member: mem.Name, Name: "worktree remove", Run: func(warn func(string)) error {
-			if _, err := os.Stat(dir); err == nil {
-				if err := gitx.WorktreeRemove(src, dir, opts.Force); err != nil {
-					return err
-				}
-			}
-			if _, err := os.Stat(src); err != nil {
-				warn("source repo is missing; skipping prune")
-				return nil
-			}
-			return gitx.WorktreePrune(src)
-		}})
-		if opts.DeleteBranches && mem.Mode == manifest.ModeActive {
-			steps = append(steps, apply.Step{Member: mem.Name, Name: "delete branch", Run: func(warn func(string)) error {
-				kept, deleted := deleteMergedBranch(src, p.M.Branch, mem.Base)
-				if deleted {
-					res.BranchesDeleted = append(res.BranchesDeleted, mem.Name+":"+p.M.Branch)
-				} else if kept != "" {
-					res.BranchesKept = append(res.BranchesKept, mem.Name+":"+p.M.Branch)
-					warn("kept branch " + p.M.Branch + ": " + kept)
-				}
-				return nil
-			}})
-		}
+		steps = append(steps, ms...)
 	}
 	steps = append(steps, apply.Step{Name: "remove package", Run: func(func(string)) error {
 		return os.RemoveAll(p.Dir)
@@ -185,4 +160,42 @@ func deleteMergedBranch(src, branch, base string) (keptReason string, deleted bo
 		return err.Error(), false
 	}
 	return "", true
+}
+
+// removeMemberSteps returns the apply steps that take one member out of a
+// package: remove its worktree (forcibly only when force is set), prune the
+// source, and optionally delete the package branch if it is merged into its
+// base. Outcomes for branches are recorded into res. Safety checks are the
+// caller's job.
+func (c *Core) removeMemberSteps(p *Package, mem manifest.Member, force, deleteBranch bool, res *DeleteResult) ([]apply.Step, error) {
+	src, err := paths.Abs(mem.Source)
+	if err != nil {
+		return nil, err
+	}
+	dir := p.MemberDir(mem)
+	steps := []apply.Step{{Member: mem.Name, Name: "worktree remove", Run: func(warn func(string)) error {
+		if _, err := os.Stat(dir); err == nil {
+			if err := gitx.WorktreeRemove(src, dir, force); err != nil {
+				return err
+			}
+		}
+		if _, err := os.Stat(src); err != nil {
+			warn("source repo is missing; skipping prune")
+			return nil
+		}
+		return gitx.WorktreePrune(src)
+	}}}
+	if deleteBranch && mem.Mode == manifest.ModeActive {
+		steps = append(steps, apply.Step{Member: mem.Name, Name: "delete branch", Run: func(warn func(string)) error {
+			kept, deleted := deleteMergedBranch(src, p.M.Branch, mem.Base)
+			if deleted {
+				res.BranchesDeleted = append(res.BranchesDeleted, mem.Name+":"+p.M.Branch)
+			} else if kept != "" {
+				res.BranchesKept = append(res.BranchesKept, mem.Name+":"+p.M.Branch)
+				warn("kept branch " + p.M.Branch + ": " + kept)
+			}
+			return nil
+		}})
+	}
+	return steps, nil
 }
