@@ -340,3 +340,33 @@ func TestEditAppliesEditorChanges(t *testing.T) {
 		t.Errorf("package must survive a rejected edit: %v", err)
 	}
 }
+
+func TestSyncCommand(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	out, _, err := run(t, "new", "sy", "--active", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := strings.TrimSpace(out)
+	if out, _, err = run(t, "sync", "sy"); err != nil || !strings.Contains(out, "already in sync") {
+		t.Fatalf("clean sync = %q, %v", out, err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "alpha")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "stray"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = run(t, "sync", "sy", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res core.SyncResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil || len(res.Recreated) != 1 || len(res.Unlisted) != 1 {
+		t.Errorf("sync --json = %q, %v", out, err)
+	}
+	if _, _, err := run(t, "sync", "ghost"); ExitCode(err) != ExitNotFound {
+		t.Errorf("unknown package: exit %d", ExitCode(err))
+	}
+}
