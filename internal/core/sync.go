@@ -201,7 +201,7 @@ func unlistedDirs(p *Package) []string {
 		listed[slash] = true
 		listed[strings.SplitN(slash, "/", 2)[0]] = true
 	}
-	var out []string
+	out := []string{}
 	scan := func(rel string) {
 		entries, err := os.ReadDir(filepath.Join(p.Dir, filepath.FromSlash(rel)))
 		if err != nil {

@@ -414,3 +414,46 @@ func TestDoctorAndInspectCommands(t *testing.T) {
 		t.Error("doctor --fix should have recreated the worktree")
 	}
 }
+
+// TestEveryReadCommandEmitsValidJSON guards the spec's promise that every
+// read command takes --json, including on empty state where a nil slice
+// would encode as null.
+func TestEveryReadCommandEmitsValidJSON(t *testing.T) {
+	env := testutil.NewEnv(t)
+
+	// Empty state: no packages, no repos, no source roots.
+	for _, args := range [][]string{{"ls", "--json"}, {"repos", "--json"}, {"doctor", "--json"}} {
+		out, _, err := run(t, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		var v any
+		if err := json.Unmarshal([]byte(out), &v); err != nil || v == nil {
+			t.Errorf("%v: invalid or null JSON %q (%v)", args, out, err)
+		}
+		if strings.Contains(out, "null") {
+			t.Errorf("%v: nil slice leaked as null: %s", args, out)
+		}
+	}
+
+	a := env.NewSource(t, "alpha")
+	if _, _, err := run(t, "new", "js", "--active", a); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"ls", "--json"}, {"repos", "--json"}, {"status", "js", "--json"}, {"show", "js", "--json"},
+		{"inspect", "js", "--json"}, {"path", "js", "--json"}, {"sync", "js", "--json"}, {"doctor", "--json"},
+	} {
+		out, _, err := run(t, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		var v any
+		if err := json.Unmarshal([]byte(out), &v); err != nil {
+			t.Errorf("%v: invalid JSON %q: %v", args, out, err)
+		}
+		if strings.Contains(out, ": null") {
+			t.Errorf("%v: null field in %s", args, out)
+		}
+	}
+}

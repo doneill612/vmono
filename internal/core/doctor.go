@@ -63,7 +63,7 @@ func (r DoctorResult) Remaining() int {
 // Directories and worktrees it cannot attribute are only reported, never
 // deleted.
 func (c *Core) Doctor(fix bool) (DoctorResult, error) {
-	var res DoctorResult
+	res := DoctorResult{Findings: []Finding{}}
 	root, err := c.PackageRoot()
 	if err != nil {
 		return res, err

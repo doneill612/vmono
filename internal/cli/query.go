@@ -165,8 +165,9 @@ func aheadBehind(m core.MemberStatus) string {
 
 // newPathCmd builds `vmono path`.
 func newPathCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "path <pkg>",
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "path <pkg> [--json]",
 		Short: "Print the package path, for cd \"$(vmono path x)\"",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -178,10 +179,15 @@ func newPathCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), map[string]string{"name": p.Name, "path": p.Dir})
+			}
 			fprintf(cmd.OutOrStdout(), "%s\n", p.Dir)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
+	return cmd
 }
 
 // newDeleteCmd builds `vmono delete`.

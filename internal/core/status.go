@@ -36,7 +36,7 @@ type PackageStatus struct {
 // Status inspects every member's worktree. A member whose directory is
 // missing is reported as Missing rather than failing the whole call.
 func (c *Core) Status(p *Package) PackageStatus {
-	out := PackageStatus{Name: p.Name, Path: p.Dir, Branch: p.M.Branch}
+	out := PackageStatus{Name: p.Name, Path: p.Dir, Branch: p.M.Branch, Members: []MemberStatus{}}
 	for _, mem := range p.M.Members {
 		out.Members = append(out.Members, memberStatus(p, mem))
 	}
