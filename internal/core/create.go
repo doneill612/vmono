@@ -77,6 +77,15 @@ func (c *Core) prepareMembers(m *manifest.Manifest) (map[string]string, error) {
 	return abs, nil
 }
 
+// realPath cleans a path and resolves symlinks where possible, so paths git
+// reports (which are resolved) compare equal to ones vmono built.
+func realPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return filepath.Clean(r)
+	}
+	return filepath.Clean(p)
+}
+
 // resolveRef returns the ref to use for a member's base or ref, falling
 // back to HEAD with a warning when origin/HEAD does not exist.
 func resolveRef(src, ref string, warn func(string)) (string, error) {
@@ -95,7 +104,7 @@ func resolveRef(src, ref string, warn func(string)) (string, error) {
 // branch is not checked out elsewhere, and base/ref resolve. srcs maps every
 // member of m (not only check) to its absolute source. It returns the
 // members whose package branch already exists in their source.
-func preflightMembers(m *manifest.Manifest, srcs map[string]string, check []manifest.Member, reuse bool) (existing map[string]bool, err error) {
+func preflightMembers(m *manifest.Manifest, srcs map[string]string, check []manifest.Member, reuse bool, removing map[string]bool) (existing map[string]bool, err error) {
 	existing = map[string]bool{}
 	activeSources := map[string]string{}
 	for _, mem := range m.Members {
@@ -114,7 +123,7 @@ func preflightMembers(m *manifest.Manifest, srcs map[string]string, check []mani
 		case manifest.ModeActive:
 			if at, err := gitx.BranchCheckedOutAt(src, m.Branch); err != nil {
 				return nil, fmt.Errorf("%s: %w", mem.Name, err)
-			} else if at != "" {
+			} else if at != "" && !removing[realPath(at)] {
 				return nil, fmt.Errorf("%s: branch %q is already checked out at %s", mem.Name, m.Branch, at)
 			}
 			if gitx.BranchExists(src, m.Branch) {
@@ -166,7 +175,7 @@ func (c *Core) Create(m *manifest.Manifest, opts CreateOptions) (*Package, error
 	if _, err := os.Stat(dir); err == nil {
 		return nil, fmt.Errorf("package %q already exists at %s", m.Name, dir)
 	}
-	existing, err := preflightMembers(m, srcs, m.Members, opts.ReuseBranch)
+	existing, err := preflightMembers(m, srcs, m.Members, opts.ReuseBranch, nil)
 	if err != nil {
 		return nil, err
 	}

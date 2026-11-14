@@ -212,3 +212,125 @@ func TestShow(t *testing.T) {
 		t.Errorf("member = %+v", m)
 	}
 }
+
+// edited returns a deep copy of the package manifest for editing.
+func edited(p *Package) *manifest.Manifest { return clone(p.M) }
+
+func TestApplyEditAddRemoveSwitchAndMeta(t *testing.T) {
+	c, env := newCore(t)
+	p, _ := newPackage(t, c, env, "diff")
+	b := env.NewSource(t, "beta")
+
+	// Metadata-only edit touches no worktrees.
+	e := edited(p)
+	e.Purpose = "edited purpose"
+	e.Members[0].Role = "edited role"
+	plan, err := c.ApplyEdit(p, e, EditOptions{})
+	if err != nil || len(plan.Add) != 0 || len(plan.Remove) != 0 || len(plan.Update) != 1 || !plan.MetaChanged {
+		t.Fatalf("meta edit: %+v, %v", plan, err)
+	}
+	if again, err := c.ApplyEdit(p, edited(p), EditOptions{}); err != nil || !again.Empty() {
+		t.Errorf("no-op edit: %+v, %v", again, err)
+	}
+
+	// Add a member by editing the manifest text.
+	e = edited(p)
+	e.Members = append(e.Members, manifest.Member{Source: b, Mode: manifest.ModeActive, Role: "added"})
+	if plan, err = c.ApplyEdit(p, e, EditOptions{}); err != nil || len(plan.Add) != 1 {
+		t.Fatalf("add edit: %+v, %v", plan, err)
+	}
+	if _, err := os.Stat(filepath.Join(p.Dir, "beta", "README.md")); err != nil {
+		t.Fatal("added member worktree missing")
+	}
+
+	// Switch beta active -> reference: branch kept; switching back needs reuse.
+	e = edited(p)
+	for i := range e.Members {
+		if e.Members[i].Name == "beta" {
+			e.Members[i].Mode, e.Members[i].Path, e.Members[i].Base, e.Members[i].Ref = manifest.ModeReference, "", "", ""
+		}
+	}
+	if plan, err = c.ApplyEdit(p, e, EditOptions{}); err != nil || len(plan.Switch) != 1 {
+		t.Fatalf("switch to reference: %+v, %v", plan, err)
+	}
+	if st, _ := gitx.StatusOf(filepath.Join(p.Dir, "_ref", "beta")); !st.Detached {
+		t.Error("beta should now be a detached reference")
+	}
+	if _, err := os.Stat(filepath.Join(p.Dir, "beta")); !os.IsNotExist(err) {
+		t.Error("old active worktree should be gone")
+	}
+	if !gitx.BranchExists(b, "vmono/diff") {
+		t.Error("switching modes must keep the branch")
+	}
+	e = edited(p)
+	for i := range e.Members {
+		if e.Members[i].Name == "beta" {
+			e.Members[i].Mode, e.Members[i].Path, e.Members[i].Base, e.Members[i].Ref = manifest.ModeActive, "", "", ""
+		}
+	}
+	var be *BranchExistsError
+	if _, err = c.ApplyEdit(p, e, EditOptions{}); !errors.As(err, &be) {
+		t.Fatalf("switch back without reuse = %v", err)
+	}
+	if _, err = c.ApplyEdit(p, e, EditOptions{ReuseBranch: true}); err != nil {
+		t.Fatalf("switch back with reuse: %v", err)
+	}
+
+	// Removal of a dirty member is refused, then forced.
+	testutil.WriteFile(t, filepath.Join(p.Dir, "beta", "wip"), "x")
+	e = edited(p)
+	e.Members = e.Members[:1]
+	ep, err := c.PlanEdit(p, e)
+	if err != nil || len(ep.Unsafe) != 1 || ep.Unsafe[0].Name != "beta" {
+		t.Fatalf("PlanEdit unsafe = %+v, %v", ep, err)
+	}
+	if _, err := c.ApplyEdit(p, e, EditOptions{}); !errors.Is(err, ErrRefused) {
+		t.Fatalf("dirty removal = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(p.Dir, "beta")); err != nil {
+		t.Fatal("refused edit must change nothing")
+	}
+	if _, err := c.ApplyEdit(p, e, EditOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, _ := c.Load("diff")
+	if len(reloaded.M.Members) != 1 || reloaded.M.Purpose != "edited purpose" {
+		t.Errorf("final manifest = %+v", reloaded.M)
+	}
+	if log := strings.Join(subjects(t, p.Dir), "|"); !strings.Contains(log, "vmono: edit (user)") {
+		t.Errorf("edit not committed: %s", log)
+	}
+}
+
+func TestApplyEditRejectsIdentityChangesAndReplacesSource(t *testing.T) {
+	c, env := newCore(t)
+	p, a := newPackage(t, c, env, "ident")
+
+	e := edited(p)
+	e.Name = "renamed"
+	if _, err := c.ApplyEdit(p, e, EditOptions{}); err == nil {
+		t.Error("renaming a package must be rejected")
+	}
+	e = edited(p)
+	e.Branch = "other/branch"
+	if _, err := c.ApplyEdit(p, e, EditOptions{}); err == nil {
+		t.Error("changing the branch with active members must be rejected")
+	}
+	e = edited(p)
+	e.Members[0].Path = "../escape"
+	if _, err := c.ApplyEdit(p, e, EditOptions{}); err == nil {
+		t.Error("invalid manifest must be rejected")
+	}
+
+	// Pointing a member at a different base re-creates it on the same path.
+	testutil.Git(t, a, "branch", "release", "origin/main")
+	e = edited(p)
+	e.Members[0].Base = "release"
+	plan, err := c.ApplyEdit(p, e, EditOptions{})
+	if err != nil || len(plan.Remove) != 1 || len(plan.Add) != 1 {
+		t.Fatalf("replace edit: %+v, %v", plan, err)
+	}
+	if br := gitx.CurrentBranch(filepath.Join(p.Dir, "alpha")); br != "vmono/ident" {
+		t.Errorf("replaced worktree branch = %q", br)
+	}
+}

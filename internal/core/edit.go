@@ -141,7 +141,7 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 		srcs[existing.Name] = abs
 	}
 	srcs[added.Name] = src
-	existing, err := preflightMembers(next, srcs, []manifest.Member{added}, opts.ReuseBranch)
+	existing, err := preflightMembers(next, srcs, []manifest.Member{added}, opts.ReuseBranch, nil)
 	if err != nil {
 		return added, err
 	}
