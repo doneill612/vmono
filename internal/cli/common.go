@@ -13,6 +13,7 @@ import (
 	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/discover"
+	"github.com/doneill612/vmono/internal/harness"
 )
 
 // Exit codes from the spec.
@@ -27,9 +28,12 @@ const (
 // lost (--force overrides), 3 when something was not found, 1 otherwise.
 func ExitCode(err error) int {
 	var nf *discover.NotFoundError
+	var he *harness.ExitError
 	switch {
 	case err == nil:
 		return ExitOK
+	case errors.As(err, &he):
+		return he.Code
 	case errors.Is(err, core.ErrRefused):
 		return ExitRefused
 	case errors.Is(err, core.ErrNotFound), errors.As(err, &nf):

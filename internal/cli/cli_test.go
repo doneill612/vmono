@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/doneill612/vmono/internal/core"
+	"github.com/doneill612/vmono/internal/harness"
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
@@ -127,5 +128,44 @@ func TestInitWritesConfig(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(env.Root, "cfg", "config.toml"))
 	if err != nil || !strings.Contains(string(data), root) {
 		t.Fatalf("config not written: %v\n%s", err, data)
+	}
+}
+
+func TestOpenPassesArgsAndHarness(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	if _, stderr, err := run(t, "new", "demo", "--active", a); err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+
+	var got *harness.Launch
+	var replace bool
+	orig := launchHarness
+	launchHarness = func(l *harness.Launch, r bool) error { got, replace = l, r; return nil }
+	t.Cleanup(func() { launchHarness = orig })
+
+	// "sh" stands in for an installed harness on every unix CI image.
+	cfgPath := filepath.Join(env.Root, "cfg", "config.toml")
+	testutil.WriteFile(t, cfgPath, "default_harness = \"fake\"\n[harness.fake]\ncommand = \"sh\"\nargs = [\"-c\"]\n")
+
+	if _, _, err := run(t, "open", "demo", "--", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Name != "fake" || !replace {
+		t.Fatalf("launch = %+v replace=%v", got, replace)
+	}
+	if len(got.Args) != 2 || got.Args[0] != "-c" || got.Args[1] != "true" {
+		t.Errorf("args = %v", got.Args)
+	}
+	if !strings.HasSuffix(got.Dir, "demo") {
+		t.Errorf("dir = %q", got.Dir)
+	}
+
+	_, _, err := run(t, "open", "demo", "--harness", "ghost")
+	if ExitCode(err) != ExitNotFound {
+		t.Errorf("unknown harness exit = %d (%v)", ExitCode(err), err)
+	}
+	if _, _, err := run(t, "open", "a", "b"); err == nil {
+		t.Error("two packages should be rejected")
 	}
 }
