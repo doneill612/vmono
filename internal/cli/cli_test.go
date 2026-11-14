@@ -169,3 +169,111 @@ func TestOpenPassesArgsAndHarness(t *testing.T) {
 		t.Error("two packages should be rejected")
 	}
 }
+
+func TestAgentCommandsInferPackageFromCwd(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	out, stderr, err := run(t, "new", "work", "--active", a)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	dir := strings.TrimSpace(out)
+
+	// Outside any package, inference fails with not-found.
+	if _, _, err := run(t, "note", "orphan"); ExitCode(err) != ExitNotFound {
+		t.Errorf("note outside a package: exit %d (%v)", ExitCode(err), err)
+	}
+
+	t.Chdir(filepath.Join(dir, "alpha"))
+	t.Setenv("VMONO_AUTHOR", "agent:claude")
+
+	if _, _, err := run(t, "note", "decided to freeze v3"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run(t, "describe", "--context", "Ticket PLAT-9."); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run(t, "role", "alpha", "Owns the gateway"); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, err := run(t, "add", b, "--role", "SDK client"); err != nil {
+		t.Fatalf("add: %v\n%s", err, stderr)
+	}
+
+	out, _, err = run(t, "show", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s core.ShowResult
+	if err := json.Unmarshal([]byte(out), &s); err != nil {
+		t.Fatalf("show --json: %v\n%s", err, out)
+	}
+	if s.Context != "Ticket PLAT-9." || len(s.Notes) != 1 || s.Notes[0].By != "agent:claude" || len(s.Members) != 2 {
+		t.Errorf("show = %+v", s)
+	}
+	if s.Members[0].Role != "Owns the gateway" || s.Members[1].Role != "SDK client" {
+		t.Errorf("roles = %+v", s.Members)
+	}
+	if text, _, _ := run(t, "show"); !strings.Contains(text, "Ticket PLAT-9.") || !strings.Contains(text, "SDK client") {
+		t.Errorf("show text = %q", text)
+	}
+
+	// Explicit package argument works from anywhere.
+	t.Chdir(env.Root)
+	if _, _, err := run(t, "note", "work", "second note"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run(t, "role", "work", "beta", "Updated"); err != nil {
+		t.Fatal(err)
+	}
+
+	// rm: dirty member is refused (exit 2); clean one is removed.
+	testutil.WriteFile(t, filepath.Join(dir, "beta", "wip"), "x")
+	_, _, err = run(t, "rm", "work", "beta")
+	if ExitCode(err) != ExitRefused {
+		t.Fatalf("rm dirty: exit %d (%v)", ExitCode(err), err)
+	}
+	if _, _, err := run(t, "rm", "work", "beta", "--force"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run(t, "rm", "work", "beta"); ExitCode(err) != ExitNotFound {
+		t.Errorf("rm unknown member: exit %d", ExitCode(err))
+	}
+
+	log := testutil.Git(t, dir, "log", "--format=%s")
+	for _, want := range []string{"vmono: note (agent:claude)", "vmono: add beta (agent:claude)", "vmono: rm beta (agent:claude)"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("shell log missing %q:\n%s", want, log)
+		}
+	}
+}
+
+func TestDescribeFlags(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	if _, _, err := run(t, "new", "d", "--active", a); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run(t, "describe", "d"); err == nil {
+		t.Error("describe with no flags must fail")
+	}
+	if _, _, err := run(t, "describe", "d", "--purpose", "x", "--purpose-file", "y"); err == nil {
+		t.Error("text and file flags together must fail")
+	}
+	f := filepath.Join(env.Root, "p.md")
+	testutil.WriteFile(t, f, "From file.\n")
+	if _, _, err := run(t, "describe", "d", "--purpose-file", f); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ := run(t, "show", "d", "--json")
+	if !strings.Contains(out, "From file.") {
+		t.Errorf("purpose not replaced: %s", out)
+	}
+	if _, _, err := run(t, "describe", "d", "--purpose", ""); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, _ := run(t, "show", "d", "--json"); !strings.Contains(out, `"purpose": ""`) {
+		t.Errorf("purpose should be cleared: %s", out)
+	}
+}
