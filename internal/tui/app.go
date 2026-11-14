@@ -97,10 +97,38 @@ func (a *App) View() string { return a.cur.View() }
 // Launch returns the launch request chosen during the session, if any.
 func (a *App) Launch() *LaunchRequest { return a.env.launch }
 
-// Run opens the TUI. When the user picks a harness, the terminal is
-// restored, vmono execs the harness (replacing itself on macOS and Linux),
-// or, with return_to_tui and always on Windows, runs it as a child and
-// reopens Home when it exits.
+// runHarness starts a prepared harness. It is a variable so tests can
+// observe the handoff without replacing the test process.
+var runHarness = harness.Run
+
+// handoff runs after the TUI has released the terminal. It prepares the
+// harness for the request and starts it. Without return_to_tui (macOS and
+// Linux) vmono is replaced by the harness and the result is final. With it
+// (always on Windows) the harness runs as a child; again is true so the
+// caller reopens Home when it exits, carrying message if the launch itself
+// failed. A harness's own non-zero exit is not a vmono failure.
+func handoff(c *core.Core, req *LaunchRequest) (message string, again bool, err error) {
+	pkg, err := c.Load(req.Package)
+	if err != nil {
+		return err.Error(), true, nil
+	}
+	l, err := harness.Prepare(c, pkg, req.Harness, nil)
+	if err != nil {
+		return err.Error(), true, nil
+	}
+	if !c.Cfg.ReturnToTUI {
+		return "", false, runHarness(l, true)
+	}
+	var exit *harness.ExitError
+	if err := runHarness(l, false); err != nil && !errors.As(err, &exit) {
+		return err.Error(), true, nil
+	}
+	return "", true, nil
+}
+
+// Run opens the TUI and, when the user picks a harness, hands the terminal
+// over to it (see handoff). It loops while return_to_tui is on, reopening
+// Home after each harness exits.
 func Run() error {
 	message := ""
 	for {
@@ -112,9 +140,7 @@ func Run() error {
 		if err != nil {
 			return err
 		}
-		app := NewApp(c, message)
-		message = ""
-		final, err := tea.NewProgram(app, tea.WithAltScreen()).Run()
+		final, err := tea.NewProgram(NewApp(c, message), tea.WithAltScreen()).Run()
 		if err != nil {
 			return err
 		}
@@ -122,22 +148,10 @@ func Run() error {
 		if req == nil {
 			return nil
 		}
-		pkg, err := c.Load(req.Package)
-		if err != nil {
-			message = err.Error()
-			continue
+		msg, again, err := handoff(c, req)
+		if !again {
+			return err
 		}
-		l, err := harness.Prepare(c, pkg, req.Harness, nil)
-		if err != nil {
-			message = err.Error()
-			continue
-		}
-		if !cfg.ReturnToTUI {
-			return harness.Run(l, true)
-		}
-		var exit *harness.ExitError
-		if err := harness.Run(l, false); err != nil && !errors.As(err, &exit) {
-			message = err.Error()
-		}
+		message = msg
 	}
 }
