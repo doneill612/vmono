@@ -370,3 +370,47 @@ func TestSyncCommand(t *testing.T) {
 		t.Errorf("unknown package: exit %d", ExitCode(err))
 	}
 }
+
+func TestDoctorAndInspectCommands(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	out, _, err := run(t, "new", "dr", "--active", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := strings.TrimSpace(out)
+
+	out, _, err = run(t, "inspect", "dr", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ins core.InspectResult
+	if err := json.Unmarshal([]byte(out), &ins); err != nil || len(ins.Members) != 1 || ins.Members[0].GitCommonDir == "" {
+		t.Fatalf("inspect = %q, %v", out, err)
+	}
+
+	if out, _, err = run(t, "doctor"); err != nil || !strings.Contains(out, "no problems") {
+		t.Fatalf("healthy doctor = %q, %v", out, err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "alpha")); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = run(t, "doctor")
+	if err == nil || !strings.Contains(out, "missing-worktree") || !strings.Contains(err.Error(), "--fix") {
+		t.Fatalf("drift doctor = %q, %v", out, err)
+	}
+	if ExitCode(err) != ExitError {
+		t.Errorf("remaining problems should exit 1, got %d", ExitCode(err))
+	}
+	out, _, err = run(t, "doctor", "--fix", "--json")
+	if err != nil {
+		t.Fatalf("doctor --fix: %v\n%s", err, out)
+	}
+	var res core.DoctorResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil || res.Remaining() != 0 {
+		t.Errorf("doctor --fix --json = %q, %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "alpha", "README.md")); err != nil {
+		t.Error("doctor --fix should have recreated the worktree")
+	}
+}
