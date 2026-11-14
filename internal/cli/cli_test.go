@@ -277,3 +277,15 @@ func TestDescribeFlags(t *testing.T) {
 		t.Errorf("purpose should be cleared: %s", out)
 	}
 }
+
+func TestShellInit(t *testing.T) {
+	for _, sh := range []string{"zsh", "bash", "fish", "pwsh"} {
+		out, _, err := run(t, "shell-init", sh)
+		if err != nil || !strings.Contains(out, "vcd") || !strings.Contains(out, "vmono path") {
+			t.Errorf("%s: %q, %v", sh, out, err)
+		}
+	}
+	if _, _, err := run(t, "shell-init", "tcsh"); err == nil {
+		t.Error("unsupported shell must fail")
+	}
+}
