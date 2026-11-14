@@ -11,10 +11,20 @@ vmono manages **packages**: directories that bring several git repos together so
 ## Install
 
 ```sh
-go install github.com/doneill612/vmono/cmd/vmono@latest
+make install
 ```
 
-Requires git 2.30 or newer.
+This builds the binary and copies it to `~/.local/bin/vmono`; make sure that directory is on your `PATH`. Requires Go and git 2.30 or newer.
+
+| Target | Does |
+| --- | --- |
+| `make build` | Compile to `bin/vmono` |
+| `make install` | Build, then install to `~/.local/bin` (override with `PREFIX=` or `BINDIR=`) |
+| `make uninstall` | Remove the installed binary |
+| `make test` | Run `go vet` and the test suite |
+| `make clean` | Remove `bin/` |
+
+Without `make` (for example on Windows), `go install github.com/doneill612/vmono/cmd/vmono@latest` also works.
 
 ## Quick start
 
@@ -26,10 +36,10 @@ Or from the command line:
 
 ```sh
 vmono init --source-root ~/source
-vmono new platform-auth --active api-gateway,sdk-go --ref contracts \
+vmono new project --active member-a,member-b --ref member-c \
     --purpose-file purpose.md
-vmono open platform-auth   # launches your default harness at the package root
-cd "$(vmono path platform-auth)" && claude    # same thing, by hand
+vmono open project   # launches your default harness at the package root
+cd "$(vmono path project)" && claude    # same thing, by hand
 ```
 
 Add `eval "$(vmono shell-init zsh)"` (or `bash`, `fish`, `pwsh`) to your shell rc for a `vcd <pkg>` function.
@@ -47,14 +57,14 @@ Add `eval "$(vmono shell-init zsh)"` (or `bash`, `fish`, `pwsh`) to your shell r
 A package looks like this:
 
 ```text
-~/.vmono/platform-auth/
+~/.vmono/project/
 ├── .vmono/manifest.toml     source of truth
 ├── AGENTS.md                generated block + your own notes
 ├── CLAUDE.md                generated: @AGENTS.md
 ├── .claude/                 generated: settings.json, skills
 ├── opencode.json            generated
-├── api-gateway/             active member (worktree)
-└── _ref/contracts/          reference member (detached worktree)
+├── member-a/                active member (worktree)
+└── _ref/member-c/           reference member (detached worktree)
 ```
 
 Everything except the manifest and your own text in `AGENTS.md` (outside the `<!-- vmono:begin -->` / `<!-- vmono:end -->` markers) is rebuilt from the manifest. Packages cannot be renamed: harness session history is keyed by path.
