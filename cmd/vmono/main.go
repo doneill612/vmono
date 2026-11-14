@@ -10,12 +10,13 @@ import (
 
 	"github.com/doneill612/vmono/internal/cli"
 	"github.com/doneill612/vmono/internal/harness"
+	"github.com/doneill612/vmono/internal/tui"
 )
 
 // main runs the root command. With no arguments the TUI opens; any
 // subcommand is handled by Cobra.
 func main() {
-	if err := cli.NewRoot(nil).Execute(); err != nil {
+	if err := cli.NewRoot(tui.Run).Execute(); err != nil {
 		var he *harness.ExitError
 		if !errors.As(err, &he) {
 			fmt.Fprintln(os.Stderr, "vmono:", err)

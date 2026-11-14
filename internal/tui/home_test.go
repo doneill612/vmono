@@ -1,0 +1,104 @@
+package tui
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/doneill612/vmono/internal/config"
+	"github.com/doneill612/vmono/internal/core"
+	"github.com/doneill612/vmono/internal/manifest"
+	"github.com/doneill612/vmono/internal/testutil"
+)
+
+// seed creates a package named name with the given sources as active members.
+func seed(t *testing.T, env *testutil.Env, name string, sources ...string) {
+	t.Helper()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := core.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Name: name, Purpose: "Purpose of " + name}
+	for _, s := range sources {
+		m.Members = append(m.Members, manifest.Member{Source: s, Mode: manifest.ModeActive, Role: "role"})
+	}
+	if _, err := c.Create(m, core.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFirstRunSetupWritesConfigAndOpensHome(t *testing.T) {
+	env := testutil.NewEnv(t)
+	cfg, _ := config.Load()
+	c, _ := core.New(cfg) // no config file: Loaded is false
+	d := newDriverFor(t, c, "")
+	d.has("Welcome to vmono", "Source root", "Package root", "Harnesses")
+
+	d.key("enter") // source root -> package root
+	d.key("enter") // save
+	d.eventually(func() bool { _, err := os.Stat(filepath.Join(env.Root, "cfg", "config.toml")); return err == nil }, "config.toml")
+	d.has("packages", "No packages yet")
+	if !c.Cfg.Loaded {
+		t.Error("core config should be marked loaded after setup")
+	}
+
+	// A second app now skips setup.
+	cfg2, _ := config.Load()
+	if !cfg2.Loaded {
+		t.Error("saved config should load")
+	}
+}
+
+func TestHomeListsFiltersAndPreviews(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	seed(t, env, "payments", a)
+	seed(t, env, "auth-rework", b)
+	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "auth-rework", "beta", "wip.txt"), "x")
+
+	d := newDriver(t, env, "")
+	d.has("payments", "auth-rework", "Purpose of")
+	d.has("*") // dirty marker for auth-rework
+
+	d.key("/")
+	d.typeText("pay")
+	d.has("payments")
+	d.lacks("auth-rework")
+	d.key("esc")
+	d.has("auth-rework")
+
+	d.key("j")
+	d.key("k")
+	d.key("?")
+	d.has("launch the package's default harness", "copy the package path")
+}
+
+func TestHomeEnterRequestsLaunch(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	seed(t, env, "go", a)
+	d := newDriver(t, env, "")
+	d.key("enter")
+	if !d.quit || d.app.Launch() == nil || d.app.Launch().Package != "go" {
+		t.Fatalf("enter should request launch: quit=%v launch=%+v", d.quit, d.app.Launch())
+	}
+	if !strings.Contains(d.view(), "go") {
+		t.Error("view should still render")
+	}
+}
+
+func TestHomeMessageAndQuit(t *testing.T) {
+	env := testutil.NewEnv(t)
+	d := newDriver(t, env, "harness exploded")
+	d.has("harness exploded")
+	d.key("q")
+	if !d.quit {
+		t.Error("q should quit")
+	}
+}
