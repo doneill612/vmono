@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/doneill612/vmono/internal/config"
@@ -13,8 +15,9 @@ import (
 )
 
 // driver feeds messages to an App and executes the commands it returns,
-// without a terminal. Commands that take longer than a short timeout (cursor
-// blink ticks) are abandoned so tests never wait on timers.
+// without a terminal. Timer-driven messages (spinner and cursor blink) are dropped so
+// tests never wait on animation; a command that exceeds a generous timeout
+// is abandoned.
 type driver struct {
 	t    *testing.T
 	app  *App
@@ -64,11 +67,16 @@ func (d *driver) run(cmd tea.Cmd) {
 	var msg tea.Msg
 	select {
 	case msg = <-done:
-	case <-time.After(400 * time.Millisecond):
+	case <-time.After(3 * time.Second):
 		return
+	}
+	if strings.HasPrefix(fmt.Sprintf("%T", msg), "cursor.") {
+		return // cursor blink timers; irrelevant to behavior
 	}
 	switch m := msg.(type) {
 	case nil:
+	case spinner.TickMsg:
+		// Timer-driven animation; feeding it back would recurse forever.
 	case tea.QuitMsg:
 		d.quit = true
 	case tea.BatchMsg:

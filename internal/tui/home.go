@@ -224,10 +224,67 @@ func (m *homeModel) updateKeys(k tea.KeyMsg) (screen, tea.Cmd) {
 	return m, nil
 }
 
-// updateActions handles keys that open other screens. It is separate so the
-// screens it opens can be wired in as they exist.
+// updateActions handles keys that open other screens.
 func (m *homeModel) updateActions(key string, sel core.Summary, has bool) (screen, tea.Cmd) {
+	if !has {
+		return m, nil
+	}
+	switch key {
+	case "l":
+		return m, goTo(newLaunchPicker(m.e, sel.Name, "Launch with"))
+	case "s":
+		return m, goTo(newProgress(m.e, m.syncOp(sel.Name)))
+	case "d":
+		return m, m.startDelete(sel.Name)
+	}
 	return m, nil
+}
+
+// home returns a constructor for Home, for screens that return to it.
+func (m *homeModel) home() func() screen {
+	return func() screen { return newHome(m.e, "") }
+}
+
+// syncOp builds the sync operation for a package. Like create and edit it
+// ends by offering to launch a harness.
+func (m *homeModel) syncOp(name string) operation {
+	c := m.e.core
+	return operation{
+		title: "Sync " + name,
+		pkg:   name,
+		run: func(force, reuse bool) error {
+			p, err := c.Load(name)
+			if err != nil {
+				return err
+			}
+			_, err = c.Sync(p, core.SyncOptions{})
+			return err
+		},
+		back: m.home(),
+	}
+}
+
+// startDelete opens the delete confirmation for a package.
+func (m *homeModel) startDelete(name string) tea.Cmd {
+	c := m.e.core
+	p, err := c.Load(name)
+	if err != nil {
+		m.msg = styleErr.Render(err.Error())
+		return nil
+	}
+	rows := c.SafetyCheck(p)
+	return goTo(newConfirm(m.e, "Delete package", name, rows, true,
+		func(force, deleteBranches bool) screen {
+			return newProgress(m.e, operation{
+				title: "Delete " + name,
+				run: func(_, _ bool) error {
+					_, err := c.Delete(p, core.DeleteOptions{Force: force, DeleteBranches: deleteBranches})
+					return err
+				},
+				back: m.home(),
+			})
+		},
+		m.home()))
 }
 
 // fetchAll fetches every member's source of a package and refreshes status.
