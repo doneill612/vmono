@@ -15,6 +15,6 @@ import (
 func main() {
 	if err := cli.NewRoot(nil).Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "vmono:", err)
-		os.Exit(1)
+		os.Exit(cli.ExitCode(err))
 	}
 }
