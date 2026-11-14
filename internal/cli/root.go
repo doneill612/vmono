@@ -41,6 +41,7 @@ func NewRoot(runTUI func() error) *cobra.Command {
 		newAddCmd(),
 		newRmCmd(),
 		newShellInitCmd(),
+		newEditCmd(),
 	)
 	return root
 }

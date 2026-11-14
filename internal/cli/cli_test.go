@@ -289,3 +289,54 @@ func TestShellInit(t *testing.T) {
 		t.Error("unsupported shell must fail")
 	}
 }
+
+func TestEditAppliesEditorChanges(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	out, _, err := run(t, "new", "ed", "--active", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := strings.TrimSpace(out)
+
+	orig := runEditor
+	t.Cleanup(func() { runEditor = orig })
+
+	// The "editor" appends a member and changes the purpose.
+	runEditor = func(file string) error {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		extra := "\n[[member]]\nname = \"beta\"\nsource = \"" + b + "\"\nmode = \"active\"\nrole = \"from editor\"\n"
+		text := strings.Replace(string(data), "purpose", "# touched\npurpose", 1) + extra
+		return os.WriteFile(file, []byte(text), 0o600)
+	}
+	out, stderr, err := run(t, "edit", "ed")
+	if err != nil {
+		t.Fatalf("edit: %v\n%s", err, stderr)
+	}
+	if !strings.Contains(out, "1 added") {
+		t.Errorf("summary = %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "beta", "README.md")); err != nil {
+		t.Error("member added by editing should exist on disk")
+	}
+
+	// A no-op edit says so.
+	runEditor = func(string) error { return nil }
+	if out, _, err = run(t, "edit", "ed"); err != nil || !strings.Contains(out, "no changes") {
+		t.Errorf("no-op edit = %q, %v", out, err)
+	}
+
+	// Invalid edits are rejected and the file is kept for the user.
+	runEditor = func(file string) error { return os.WriteFile(file, []byte("this is = not valid ["), 0o600) }
+	_, _, err = run(t, "edit", "ed")
+	if err == nil || !strings.Contains(err.Error(), "your edits are kept at") {
+		t.Errorf("invalid edit error = %v", err)
+	}
+	if _, _, err := run(t, "show", "ed"); err != nil {
+		t.Errorf("package must survive a rejected edit: %v", err)
+	}
+}
