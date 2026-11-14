@@ -77,13 +77,21 @@ func (c *Core) prepareMembers(m *manifest.Manifest) (map[string]string, error) {
 	return abs, nil
 }
 
-// realPath cleans a path and resolves symlinks where possible, so paths git
-// reports (which are resolved) compare equal to ones vmono built.
+// realPath cleans a path and resolves symlinks so paths git reports (which
+// are resolved, e.g. /private/var on macOS) compare equal to ones vmono
+// built. A path that does not exist yet is resolved through its deepest
+// existing ancestor, so a missing worktree directory still compares equal
+// to the registration git holds for it.
 func realPath(p string) string {
+	p = filepath.Clean(p)
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		return filepath.Clean(r)
 	}
-	return filepath.Clean(p)
+	parent := filepath.Dir(p)
+	if parent == p {
+		return p
+	}
+	return filepath.Join(realPath(parent), filepath.Base(p))
 }
 
 // resolveRef returns the ref to use for a member's base or ref, falling

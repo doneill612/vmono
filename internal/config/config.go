@@ -281,3 +281,35 @@ func SplitCSV(s string) []string {
 	}
 	return out
 }
+
+// UnknownHarnessError reports a harness name that is not configured.
+type UnknownHarnessError struct {
+	Name string
+	Have []string
+}
+
+// Error implements error.
+func (e *UnknownHarnessError) Error() string {
+	return fmt.Sprintf("harness %q is not configured (have: %s)", e.Name, strings.Join(e.Have, ", "))
+}
+
+// ResolveHarness picks the harness to use: the explicit name (a flag), then
+// the package's own, then the global default. An unknown name returns an
+// *UnknownHarnessError.
+func (c Config) ResolveHarness(flag, pkgHarness string) (string, Harness, error) {
+	name := flag
+	if name == "" {
+		name = pkgHarness
+	}
+	if name == "" {
+		name = c.DefaultHarness
+	}
+	if name == "" {
+		return "", Harness{}, errors.New("no harness configured; pass --harness or set default_harness")
+	}
+	h, ok := c.Harness[name]
+	if !ok {
+		return "", Harness{}, &UnknownHarnessError{Name: name, Have: c.HarnessNames()}
+	}
+	return name, h, nil
+}

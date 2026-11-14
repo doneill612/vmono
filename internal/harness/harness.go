@@ -42,21 +42,16 @@ func (e *ExitError) Error() string { return fmt.Sprintf("harness exited with sta
 // Resolve picks the harness to use: the flag, then the package's harness,
 // then the global default.
 func Resolve(cfg config.Config, m *manifest.Manifest, flag string) (string, config.Harness, error) {
-	name := flag
-	if name == "" && m != nil {
-		name = m.Harness
+	pkgHarness := ""
+	if m != nil {
+		pkgHarness = m.Harness
 	}
-	if name == "" {
-		name = cfg.DefaultHarness
+	name, h, err := cfg.ResolveHarness(flag, pkgHarness)
+	var unknown *config.UnknownHarnessError
+	if errors.As(err, &unknown) {
+		return "", config.Harness{}, core.NotFound("%s", unknown.Error())
 	}
-	if name == "" {
-		return "", config.Harness{}, errors.New("no harness configured; pass --harness or set default_harness")
-	}
-	h, ok := cfg.Harness[name]
-	if !ok {
-		return "", config.Harness{}, core.NotFound("harness %q is not configured (have: %s)", name, strings.Join(cfg.HarnessNames(), ", "))
-	}
-	return name, h, nil
+	return name, h, err
 }
 
 // Available reports whether a harness's command can be found on PATH. The
