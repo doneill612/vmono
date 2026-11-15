@@ -226,8 +226,11 @@ func (m *homeModel) updateKeys(k tea.KeyMsg) (screen, tea.Cmd) {
 
 // updateActions handles keys that open other screens.
 func (m *homeModel) updateActions(key string, sel core.Summary, has bool) (screen, tea.Cmd) {
-	if key == "n" {
+	switch key {
+	case "n":
 		return m, goTo(newEditor(m.e, nil))
+	case "c":
+		return m, goTo(newReconfigure(m.e))
 	}
 	if !has {
 		return m, nil
@@ -358,7 +361,7 @@ func (m *homeModel) View() string {
 	if m.showHelp {
 		b.WriteString(m.helpText())
 	} else {
-		b.WriteString(keyHelp("enter", "launch", "n", "new", "e", "edit", "d", "delete", "l", "harness", "s", "sync", "f", "fetch", "?", "help", "q", "quit"))
+		b.WriteString(keyHelp("enter", "launch", "n", "new", "e", "edit", "d", "delete", "l", "harness", "s", "sync", "f", "fetch", "c", "config", "?", "help", "q", "quit"))
 	}
 	return b.String()
 }
@@ -466,6 +469,7 @@ func (m *homeModel) helpText() string {
 		{"s", "sync: rebuild what's missing, regenerate files"},
 		{"f", "fetch all members and refresh status"},
 		{"y", "copy the package path to the clipboard"},
+		{"c", "config: source root, package root, default harness"},
 		{"/", "filter"},
 		{"?", "toggle this help"},
 		{"q", "quit"},

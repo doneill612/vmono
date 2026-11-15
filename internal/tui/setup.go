@@ -13,11 +13,14 @@ import (
 	"github.com/doneill612/vmono/internal/paths"
 )
 
-// setupModel is the first-run screen: it suggests ~/source as a source root
-// when that directory exists, asks for the package root, and reports which
-// known harnesses are installed.
+// setupModel is the setup screen. On first run it suggests ~/source as a
+// source root when that directory exists, asks for the package root, and
+// reports which known harnesses are installed. When reopened from Home
+// (reconfig) it starts from the saved config instead, keeps the configured
+// default harness, and esc returns to Home rather than quitting.
 type setupModel struct {
 	e         *env
+	reconfig  bool
 	src, pkg  textinput.Model
 	focus     int
 	installed map[string]bool
@@ -29,14 +32,25 @@ type setupModel struct {
 // harnessOrder is the preference order when picking a default harness.
 var harnessOrder = []string{"claude", "opencode", "codex", "pi"}
 
-// newSetup builds the setup screen with detected defaults.
-func newSetup(e *env) *setupModel {
-	m := &setupModel{e: e, installed: map[string]bool{}, order: harnessOrder}
+// newSetup builds the first-run setup screen with detected defaults.
+func newSetup(e *env) *setupModel { return buildSetup(e, false) }
+
+// newReconfigure builds the setup screen for a config that already exists.
+// The source root field starts from the saved source roots (joined with the
+// OS path-list separator when there are several) and the default harness
+// stays as configured.
+func newReconfigure(e *env) *setupModel { return buildSetup(e, true) }
+
+// buildSetup is the shared constructor behind newSetup and newReconfigure.
+func buildSetup(e *env, reconfig bool) *setupModel {
+	m := &setupModel{e: e, reconfig: reconfig, installed: map[string]bool{}, order: harnessOrder}
 	m.src = newTextInput()
 	m.src.Placeholder = "~/source (optional)"
 	m.src.Prompt = ""
 	m.src.CharLimit = 512
-	if home, err := os.UserHomeDir(); err == nil {
+	if reconfig {
+		m.src.SetValue(strings.Join(e.core.Cfg.SourceRoots, string(filepath.ListSeparator)))
+	} else if home, err := os.UserHomeDir(); err == nil {
 		if st, err := os.Stat(filepath.Join(home, "source")); err == nil && st.IsDir() {
 			m.src.SetValue("~/source")
 		}
@@ -55,10 +69,12 @@ func newSetup(e *env) *setupModel {
 		}
 		m.installed[name] = harness.Available(h)
 	}
-	for _, name := range m.order {
-		if m.installed[name] {
-			m.def = name
-			break
+	if !reconfig {
+		for _, name := range m.order {
+			if m.installed[name] {
+				m.def = name
+				break
+			}
 		}
 	}
 	return m
@@ -72,6 +88,9 @@ func (m *setupModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	if k, ok := msg.(tea.KeyMsg); ok {
 		switch k.String() {
 		case "esc":
+			if m.reconfig {
+				return m, goTo(newHome(m.e, ""))
+			}
 			return m, tea.Quit
 		case "tab", "shift+tab", "up", "down":
 			m.setFocus(1 - m.focus)
@@ -119,8 +138,10 @@ func (m *setupModel) save() (screen, tea.Cmd) {
 	cfg := m.e.core.Cfg
 	cfg.PackageRoot = pkgRoot
 	cfg.SourceRoots = nil
-	if s := strings.TrimSpace(m.src.Value()); s != "" {
-		cfg.SourceRoots = []string{s}
+	for _, r := range filepath.SplitList(strings.TrimSpace(m.src.Value())) {
+		if r = strings.TrimSpace(r); r != "" {
+			cfg.SourceRoots = append(cfg.SourceRoots, r)
+		}
 	}
 	if _, ok := cfg.Harness[m.def]; ok {
 		cfg.DefaultHarness = m.def
@@ -137,8 +158,12 @@ func (m *setupModel) save() (screen, tea.Cmd) {
 // View implements screen.
 func (m *setupModel) View() string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render("Welcome to vmono") + "\n\n")
-	b.WriteString(wrap("vmono groups several git repos into a package so a coding harness opened there sees all of them. A little setup first.", 70) + "\n\n")
+	if m.reconfig {
+		b.WriteString(styleTitle.Render("vmono") + styleDim.Render("  config") + "\n\n")
+	} else {
+		b.WriteString(styleTitle.Render("Welcome to vmono") + "\n\n")
+		b.WriteString(wrap("vmono groups several git repos into a package so a coding harness opened there sees all of them. A little setup first.", 70) + "\n\n")
+	}
 	b.WriteString(styleLabel.Render("Source root") + styleDim.Render("  scanned to fill the repo picker; optional") + "\n")
 	b.WriteString(m.src.View() + "\n\n")
 	b.WriteString(styleLabel.Render("Package root") + styleDim.Render("  where packages are created") + "\n")
@@ -161,6 +186,10 @@ func (m *setupModel) View() string {
 	if m.err != "" {
 		b.WriteString("\n" + styleErr.Render(m.err) + "\n")
 	}
-	b.WriteString("\n" + keyHelp("tab", "next field", "enter", "continue / save", "esc", "quit"))
+	esc := "quit"
+	if m.reconfig {
+		esc = "cancel"
+	}
+	b.WriteString("\n" + keyHelp("tab", "next field", "enter", "continue / save", "esc", esc))
 	return b.String()
 }

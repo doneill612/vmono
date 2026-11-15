@@ -54,6 +54,43 @@ func TestFirstRunSetupWritesConfigAndOpensHome(t *testing.T) {
 	}
 }
 
+// TestHomeConfigKeyReopensSetup covers re-running setup after first run: the
+// fields start from the saved config, a save persists the change, and esc
+// cancels back to Home without touching the config.
+func TestHomeConfigKeyReopensSetup(t *testing.T) {
+	env := testutil.NewEnv(t)
+	d := newDriver(t, env, "")
+	d.has("packages")
+
+	d.key("c")
+	d.has("config", "Source root", "Package root")
+	d.key("esc")
+	d.has("packages", "No packages yet")
+	if len(d.app.env.core.Cfg.SourceRoots) != 0 {
+		t.Errorf("esc should not change config, got %v", d.app.env.core.Cfg.SourceRoots)
+	}
+
+	d.key("c")
+	d.typeText(env.Root)
+	d.key("enter") // source root -> package root
+	d.key("enter") // save
+	d.has("packages", "config saved")
+	if got := d.app.env.core.Cfg.SourceRoots; len(got) != 1 || got[0] != env.Root {
+		t.Errorf("source roots = %v, want [%s]", got, env.Root)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SourceRoots) != 1 || cfg.SourceRoots[0] != env.Root {
+		t.Errorf("saved source roots = %v, want [%s]", cfg.SourceRoots, env.Root)
+	}
+
+	// Reopening starts from the saved value.
+	d.key("c")
+	d.has(env.Root)
+}
+
 func TestHomeListsFiltersAndPreviews(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
