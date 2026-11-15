@@ -122,7 +122,7 @@ func TestOpenCodeV2Output(t *testing.T) {
 	}
 	var sawAbs bool
 	for _, p := range doc.Permissions {
-		if p.Action == "edit" && strings.HasSuffix(p.Resource, "/_ref/**") && strings.HasPrefix(p.Resource, "/") {
+		if p.Action == "edit" && strings.HasSuffix(p.Resource, "/_ref/**") && filepath.IsAbs(filepath.FromSlash(p.Resource)) {
 			sawAbs = true
 		}
 	}
