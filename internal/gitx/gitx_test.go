@@ -1,8 +1,10 @@
 package gitx
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/doneill612/vmono/internal/testutil"
@@ -131,5 +133,119 @@ func TestCommitAllNoChangesAndIdentityFallback(t *testing.T) {
 	ok, err = CommitAll(dir, "vmono: noop", "")
 	if err != nil || ok {
 		t.Fatalf("second commit should be a no-op, got %v, %v", ok, err)
+	}
+}
+
+// pushBranch publishes a new branch to name's remote from a throwaway
+// clone, so a later fetch in the source has something to bring in.
+func pushBranch(t *testing.T, env *testutil.Env, name, branch string) {
+	t.Helper()
+	remote := filepath.Join(env.Root, "remotes", name+".git")
+	clone := filepath.Join(env.Root, "pusher", name+"-"+branch)
+	testutil.Git(t, env.Root, "clone", "--quiet", remote, clone)
+	testutil.Git(t, clone, "checkout", "--quiet", "-b", branch)
+	testutil.WriteFile(t, filepath.Join(clone, branch+".txt"), branch)
+	testutil.Git(t, clone, "add", "-A")
+	testutil.Git(t, clone, "commit", "--quiet", "-m", branch)
+	testutil.Git(t, clone, "push", "--quiet", "origin", branch)
+}
+
+func TestFetchManyDedupesAndKeepsGoingPastFailures(t *testing.T) {
+	env := testutil.NewEnv(t)
+	alpha := env.NewSource(t, "alpha")
+	beta := env.NewSource(t, "beta")
+	broken := env.NewSource(t, "broken")
+	pushBranch(t, env, "alpha", "feat-a")
+	pushBranch(t, env, "beta", "feat-b")
+	testutil.Git(t, broken, "remote", "set-url", "origin", filepath.Join(env.Root, "remotes", "missing.git"))
+
+	wt := filepath.Join(env.Root, "wt", "alpha")
+	if err := WorktreeAddDetached(alpha, wt, "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+
+	res := FetchMany([]string{alpha, broken, wt, beta}, 2)
+	if len(res) != 3 {
+		t.Fatalf("got %d results, want 3 distinct repos: %+v", len(res), res)
+	}
+	if res[0].Repo != alpha || len(res[0].Paths) != 2 || res[0].Paths[1] != wt {
+		t.Errorf("alpha and its worktree should be one result: %+v", res[0])
+	}
+	if res[1].Repo != broken || res[1].Err == nil {
+		t.Errorf("broken remote should fail: %+v", res[1])
+	}
+	if res[2].Repo != beta || res[2].Err != nil {
+		t.Errorf("beta should succeed: %+v", res[2])
+	}
+	if res[0].Err != nil {
+		t.Errorf("alpha should succeed: %v", res[0].Err)
+	}
+	if !RefExists(alpha, "origin/feat-a") || !RefExists(beta, "origin/feat-b") {
+		t.Error("successful repos should have fetched the new branches despite the failure")
+	}
+}
+
+func TestFetchManyEmptyAndRemotelessRepos(t *testing.T) {
+	env := testutil.NewEnv(t)
+	if res := FetchMany(nil, 0); len(res) != 0 {
+		t.Errorf("no paths should give no results: %+v", res)
+	}
+	solo := filepath.Join(env.Root, "solo")
+	if err := Init(solo, "main"); err != nil {
+		t.Fatal(err)
+	}
+	res := FetchMany([]string{solo}, 0)
+	if len(res) != 1 || res[0].Err != nil {
+		t.Errorf("a repo without remotes is a successful no-op: %+v", res)
+	}
+}
+
+func TestIsAuthError(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   bool
+	}{
+		{"git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.", true},
+		{"fatal: could not read Username for 'https://github.com': terminal prompts disabled", true},
+		{"remote: Invalid username or password.\nfatal: Authentication failed for 'https://x/y.git/'", true},
+		{"Host key verification failed.", true},
+		{"fatal: '/nowhere' does not appear to be a git repository", false},
+	}
+	for _, c := range cases {
+		err := &Error{Args: []string{"fetch"}, Stderr: c.stderr, Err: errors.New("exit status 128")}
+		if got := IsAuthError(err); got != c.want {
+			t.Errorf("IsAuthError(%q) = %v, want %v", c.stderr, got, c.want)
+		}
+	}
+	if IsAuthError(errors.New("Permission denied (publickey)")) {
+		t.Error("a non-git error must not be classified from its text")
+	}
+}
+
+func TestNonInteractiveSSH(t *testing.T) {
+	env := testutil.NewEnv(t)
+	repo := env.NewSource(t, "alpha")
+	t.Setenv("GIT_SSH_COMMAND", "")
+	t.Setenv("GIT_SSH", "")
+
+	got := nonInteractiveSSH(repo)
+	if len(got) != 1 || !strings.Contains(got[0], "BatchMode=yes") {
+		t.Fatalf("default should force batch mode: %v", got)
+	}
+
+	testutil.Git(t, repo, "config", "core.sshCommand", "ssh -i /custom")
+	if got := nonInteractiveSSH(repo); got != nil {
+		t.Errorf("core.sshCommand must be left alone: %v", got)
+	}
+	testutil.Git(t, repo, "config", "--unset", "core.sshCommand")
+
+	t.Setenv("GIT_SSH_COMMAND", "ssh -F /mine")
+	if got := nonInteractiveSSH(repo); got != nil {
+		t.Errorf("GIT_SSH_COMMAND must be left alone: %v", got)
+	}
+	t.Setenv("GIT_SSH_COMMAND", "")
+	t.Setenv("GIT_SSH", "/usr/bin/ssh")
+	if got := nonInteractiveSSH(repo); got != nil {
+		t.Errorf("GIT_SSH must be left alone: %v", got)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Error is returned when a git invocation exits non-zero. It carries the
@@ -38,11 +39,17 @@ func (e *Error) Unwrap() error { return e.Err }
 // returns trimmed-right stdout. LC_ALL=C keeps parsed output stable and
 // GIT_TERMINAL_PROMPT=0 stops background fetches from hanging on a prompt.
 func run(dir string, args ...string) (string, error) {
+	return runEnv(dir, nil, args...)
+}
+
+// runEnv is run with extra KEY=VALUE environment entries appended after the
+// defaults, so they win over any duplicate.
+func runEnv(dir string, extraEnv []string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(append(os.Environ(), "LC_ALL=C", "GIT_TERMINAL_PROMPT=0"), extraEnv...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -123,8 +130,65 @@ func RemoteURL(repo, remote string) string {
 	return out
 }
 
-// Fetch runs `git fetch --prune` for all remotes. A repo without remotes is
-// not an error.
+// AuthHint is the advice shown when a fetch fails for lack of credentials.
+// Fetches never prompt, so the user has to make credentials available
+// before retrying.
+const AuthHint = "authentication needed: fetches never prompt, so load your key into ssh-agent or sign in through your git credential helper, then retry"
+
+// DefaultFetchConcurrency is how many repos FetchMany fetches at once when
+// the caller gives no limit.
+const DefaultFetchConcurrency = 4
+
+// authFailureMarkers are lowercase fragments of git and ssh stderr that
+// mean a remote refused or could not obtain credentials.
+var authFailureMarkers = []string{
+	"permission denied (publickey",
+	"permission denied, please try again",
+	"could not read username",
+	"could not read password",
+	"authentication failed",
+	"terminal prompts disabled",
+	"host key verification failed",
+}
+
+// IsAuthError reports whether err is a git failure caused by missing or
+// rejected credentials, judged from git's stderr. Callers use it to give one
+// actionable message in place of repeated raw git output.
+func IsAuthError(err error) bool {
+	var ge *Error
+	if !errors.As(err, &ge) {
+		return false
+	}
+	msg := strings.ToLower(ge.Stderr)
+	for _, m := range authFailureMarkers {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// nonInteractiveSSH returns the environment that stops ssh from prompting
+// during a fetch: BatchMode makes a missing key or unknown host fail at once
+// instead of asking on the terminal, which would collide with the TUI and
+// with other fetches running in parallel. It returns nil, leaving ssh alone,
+// when the user has chosen their own ssh command through GIT_SSH_COMMAND,
+// GIT_SSH or core.sshCommand.
+func nonInteractiveSSH(repo string) []string {
+	if os.Getenv("GIT_SSH_COMMAND") != "" || os.Getenv("GIT_SSH") != "" {
+		return nil
+	}
+	if cfg, err := run(repo, "config", "--get", "core.sshCommand"); err == nil && strings.TrimSpace(cfg) != "" {
+		return nil
+	}
+	return []string{"GIT_SSH_COMMAND=ssh -o BatchMode=yes"}
+}
+
+// Fetch runs `git fetch --all --prune` for all remotes. A repo without
+// remotes is not an error. It never prompts for credentials: git's terminal
+// prompts are off and ssh runs in batch mode, so a fetch that needs
+// credentials the user has not made available fails with an error that
+// IsAuthError recognizes.
 func Fetch(repo string) error {
 	out, err := run(repo, "remote")
 	if err != nil {
@@ -133,8 +197,65 @@ func Fetch(repo string) error {
 	if strings.TrimSpace(out) == "" {
 		return nil
 	}
-	_, err = run(repo, "fetch", "--all", "--prune")
+	_, err = runEnv(repo, nonInteractiveSSH(repo), "fetch", "--all", "--prune")
 	return err
+}
+
+// FetchResult is the outcome of fetching one distinct repo in FetchMany.
+type FetchResult struct {
+	// Repo is the first of the requested paths that resolved to this repo.
+	Repo string
+	// Paths holds every requested path that resolved to this repo,
+	// including Repo, in request order.
+	Paths []string
+	// Err is nil when the fetch succeeded.
+	Err error
+}
+
+// FetchMany fetches the repos at paths concurrently, running at most limit
+// fetches at a time (DefaultFetchConcurrency when limit is below 1). Paths
+// that share a git common dir, such as a repo and its worktrees, are one
+// repo and are fetched once. It returns one result per distinct repo in the
+// order each first appeared in paths, and always fetches every repo: one
+// failure never stops the others.
+func FetchMany(paths []string, limit int) []FetchResult {
+	if limit < 1 {
+		limit = DefaultFetchConcurrency
+	}
+	var results []*FetchResult
+	byKey := map[string]*FetchResult{}
+	for _, p := range paths {
+		key := p
+		if cd, err := CommonDir(p); err == nil {
+			key = cd
+		}
+		if r, ok := byKey[key]; ok {
+			r.Paths = append(r.Paths, p)
+			continue
+		}
+		r := &FetchResult{Repo: p, Paths: []string{p}}
+		byKey[key] = r
+		results = append(results, r)
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, limit)
+	for _, r := range results {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(r *FetchResult) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			r.Err = Fetch(r.Repo)
+		}(r)
+	}
+	wg.Wait()
+
+	out := make([]FetchResult, len(results))
+	for i, r := range results {
+		out[i] = *r
+	}
+	return out
 }
 
 // RefExists reports whether ref resolves to a commit.
