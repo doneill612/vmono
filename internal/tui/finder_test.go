@@ -8,6 +8,9 @@ import (
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
+// sep is the separator the finder prints after directory names.
+var sep = string(os.PathSeparator)
+
 // initRepo makes dir a git repo with one file.
 func initRepo(t *testing.T, dir string) {
 	t.Helper()
@@ -44,9 +47,9 @@ func TestFinderListsDirectoriesReposAndNestedRepos(t *testing.T) {
 	openFinder(t, d)
 
 	d.typeText("~/work/")
-	d.has("api", "web", "notes/", "org/")
-	d.has("●")                  // repos are marked
-	d.has("org/lib", "(below)") // found by scanning beneath the typed directory
+	d.has("api", "web", "notes"+sep, "org"+sep)
+	d.has("●")                        // repos are marked
+	d.has("org"+sep+"lib", "(below)") // found by scanning beneath the typed directory
 }
 
 func TestFinderNarrowsByPrefixAndFuzzy(t *testing.T) {
@@ -73,7 +76,7 @@ func TestFinderTabStepsIntoDirectoriesAndEnterPicksRepos(t *testing.T) {
 
 	d.typeText("~/work/org")
 	d.key("tab") // org is a plain directory: tab steps into it
-	d.has("~/work/org/", "lib")
+	d.has("~/work/org"+sep, "lib")
 	d.key("enter") // lib is highlighted and is a repo
 	d.has("repos(select)", "added lib", "[x]")
 }
@@ -85,7 +88,7 @@ func TestFinderEnterOnDirectoryDescends(t *testing.T) {
 	openFinder(t, d)
 	d.typeText("~/work/not")
 	d.key("enter")
-	d.has("find repo", "~/work/notes/") // stepped in rather than picking
+	d.has("find repo", "~/work/notes"+sep) // stepped in rather than picking
 }
 
 func TestFinderWorksWithNoSourceRootAndRemembersRepo(t *testing.T) {

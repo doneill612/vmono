@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/harness"
 	"github.com/doneill612/vmono/internal/testutil"
@@ -125,9 +126,11 @@ func TestInitWritesConfig(t *testing.T) {
 	if _, _, err := run(t, "init", "--source-root", root, "--package-root", filepath.Join(env.Root, "pk")); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(env.Root, "cfg", "config.toml"))
-	if err != nil || !strings.Contains(string(data), root) {
-		t.Fatalf("config not written: %v\n%s", err, data)
+	// Compare decoded values: TOML escapes the backslashes in Windows paths,
+	// so the raw file text never contains the path verbatim there.
+	cfg, err := config.LoadFrom(filepath.Join(env.Root, "cfg", "config.toml"))
+	if err != nil || !cfg.Loaded || len(cfg.SourceRoots) != 1 || cfg.SourceRoots[0] != root {
+		t.Fatalf("config not written: %+v, %v", cfg, err)
 	}
 }
 
@@ -309,7 +312,7 @@ func TestEditAppliesEditorChanges(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		extra := "\n[[member]]\nname = \"beta\"\nsource = \"" + b + "\"\nmode = \"active\"\nrole = \"from editor\"\n"
+		extra := "\n[[member]]\nname = \"beta\"\nsource = '" + b + "'\nmode = \"active\"\nrole = \"from editor\"\n"
 		text := strings.Replace(string(data), "purpose", "# touched\npurpose", 1) + extra
 		return os.WriteFile(file, []byte(text), 0o600)
 	}

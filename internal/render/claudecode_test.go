@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -175,7 +176,8 @@ func TestClaudeAdapterSkillsCopiedRenamedAndPruned(t *testing.T) {
 	if err != nil || !strings.Contains(string(skill), "name: api-deploy") || !strings.Contains(string(skill), "description: ship it") {
 		t.Fatalf("copied skill wrong: %v\n%s", err, skill)
 	}
-	if info, err := os.Stat(filepath.Join(dir, ".claude/skills/api-deploy/run.sh")); err != nil || info.Mode().Perm()&0o100 == 0 {
+	// Windows has no executable permission bit; Go reports 0666 for every file.
+	if info, err := os.Stat(filepath.Join(dir, ".claude/skills/api-deploy/run.sh")); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0) {
 		t.Errorf("script must stay executable: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".claude/skills/sdk-lint/SKILL.md")); err != nil {
