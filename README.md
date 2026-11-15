@@ -134,7 +134,7 @@ repos           = ["~/work/one-off-repo"]   # individual repos, from anywhere
 package_root    = "~/.vmono"
 scan_depth      = 2
 branch_prefix   = "vmono/"
-fetch_on_create = true
+fetch_on_create = true      # fetch source repos before adding worktrees; failures only warn
 default_harness = "claude"
 auto_commit     = true      # commit every manifest change to the package's own repo
 return_to_tui   = false     # always true on Windows
@@ -148,6 +148,12 @@ command = "codex"
 ```
 
 Any CLI that takes its working directory as its project can be a harness. Precedence: flags, then `VMONO_*` environment variables, then the file, then defaults. `VMONO_CONFIG_DIR` and `VMONO_STATE_DIR` relocate the config and the index cache.
+
+## Authentication
+
+vmono runs the system `git` for everything and keeps no credentials of its own, so whatever lets `git fetch` work in a source repo works here: an SSH key in your agent, or a credential helper such as the one `gh auth setup-git` installs.
+
+Fetches never prompt. Create, edit, sync and the TUI's fetch fetch each distinct source repo once, several at a time, and a repo that fails only warns and falls back to the refs already on disk. If a fetch fails for lack of credentials, vmono says so once, naming the repos. Load your key (`ssh-add`) or sign in through your credential helper, then retry. SSH runs in batch mode so it cannot prompt; set `GIT_SSH_COMMAND` or `core.sshCommand` if you need your own ssh command, and vmono will leave it alone.
 
 ## Safety
 
