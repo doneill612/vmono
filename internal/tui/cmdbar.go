@@ -175,6 +175,10 @@ func (a *App) runCommand(text string) tea.Cmd {
 			return flashErr("no such package: " + pkg)
 		}
 		return a.navigate(newMembers(a.env, pkg))
+	case "repos":
+		return a.navigate(newRepos(a.env))
+	case "harnesses":
+		return a.navigate(newHarnesses(a.env))
 	case "packages":
 		return a.home()
 	case "quit":
