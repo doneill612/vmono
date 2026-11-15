@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -337,27 +338,66 @@ func (m *packagesModel) startDelete(name string) tea.Cmd {
 		nil))
 }
 
-// fetchAll fetches every member's source of a package and reports with a
-// fetchedMsg.
+// fetchAll fetches every member's source of a package concurrently, once
+// per distinct repo, and reports with a fetchedMsg. A repo that fails does
+// not stop the others; the message says how many members were fetched and
+// which were not.
 func fetchAll(c *core.Core, name string) tea.Cmd {
 	return func() tea.Msg {
 		p, err := c.Load(name)
 		if err != nil {
 			return fetchedMsg{name: name, err: err}
 		}
-		n := 0
+		var srcs []string
+		owners := map[string][]string{}
 		for _, mem := range p.M.Members {
 			src, err := paths.Abs(mem.Source)
 			if err != nil {
-				return fetchedMsg{name: name, n: n, err: err}
+				return fetchedMsg{name: name, err: err}
 			}
-			if err := gitx.Fetch(src); err != nil {
-				return fetchedMsg{name: name, n: n, err: fmt.Errorf("%s: %w", mem.Name, err)}
-			}
-			n++
+			srcs = append(srcs, src)
+			owners[src] = append(owners[src], mem.Name)
 		}
-		return fetchedMsg{name: name, n: n}
+		n, err := summarizeFetch(owners, gitx.FetchMany(srcs, gitx.DefaultFetchConcurrency))
+		return fetchedMsg{name: name, n: n, err: err}
 	}
+}
+
+// summarizeFetch turns fetch results into the number of members whose
+// source was fetched and, when any repo failed, one error naming the members
+// left behind. owners maps each requested source path to the members that
+// use it. Failures from missing credentials are reported with the fix
+// instead of git's raw output.
+func summarizeFetch(owners map[string][]string, results []gitx.FetchResult) (int, error) {
+	n := 0
+	var failed []string
+	var cause error
+	authOnly := true
+	for _, r := range results {
+		var names []string
+		for _, p := range r.Paths {
+			names = append(names, owners[p]...)
+		}
+		if r.Err == nil {
+			n += len(names)
+			continue
+		}
+		failed = append(failed, names...)
+		if cause == nil {
+			cause = r.Err
+		}
+		if !gitx.IsAuthError(r.Err) {
+			authOnly = false
+		}
+	}
+	if len(failed) == 0 {
+		return n, nil
+	}
+	reason := strings.Join(strings.Fields(cause.Error()), " ")
+	if authOnly {
+		reason = gitx.AuthHint
+	}
+	return n, fmt.Errorf("fetched %d member(s); couldn't fetch %s: %s", n, strings.Join(failed, ", "), reason)
 }
 
 // selectedPackage implements packageSelector.
