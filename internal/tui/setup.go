@@ -208,6 +208,21 @@ func (m *setupModel) save() (screen, tea.Cmd) {
 	return m, goHome("config saved")
 }
 
+// writeCands writes the tab-completion candidates (at most five, then a dim
+// "… N more" line) to b. Each candidate is drawn in the cyan accent with a
+// "›" marker so the list reads as something actionable rather than output.
+// View calls it directly beneath the focused input so the list appears next
+// to the field being completed rather than under whichever field comes last.
+func (m *setupModel) writeCands(b *strings.Builder) {
+	for i, c := range m.cands {
+		if i >= 5 {
+			b.WriteString(styleDim.Render(fmt.Sprintf("   … %d more", len(m.cands)-5)) + "\n")
+			return
+		}
+		b.WriteString("  " + styleCyan.Render("› "+c) + "\n")
+	}
+}
+
 // View implements screen.
 func (m *setupModel) View(w, h int) string {
 	m.src.Width, m.pkg.Width = w-8, w-8
@@ -219,15 +234,15 @@ func (m *setupModel) View(w, h int) string {
 		b.WriteString("\n")
 	}
 	b.WriteString(" " + styleLabel.Render("Source root") + styleDim.Render("  scanned to fill the repo picker; optional") + "\n")
-	b.WriteString(" " + m.src.View() + "\n\n")
+	b.WriteString(" " + m.src.View() + "\n")
+	if m.focus == 0 {
+		m.writeCands(&b)
+	}
+	b.WriteString("\n")
 	b.WriteString(" " + styleLabel.Render("Package root") + styleDim.Render("  where packages are created") + "\n")
 	b.WriteString(" " + m.pkg.View() + "\n")
-	for i, c := range m.cands {
-		if i >= 5 {
-			b.WriteString(styleDim.Render(fmt.Sprintf("   … %d more", len(m.cands)-5)) + "\n")
-			break
-		}
-		b.WriteString(styleDim.Render("   "+c) + "\n")
+	if m.focus == 1 {
+		m.writeCands(&b)
 	}
 	b.WriteString("\n")
 	b.WriteString(" " + styleLabel.Render("Harnesses") + "\n")
