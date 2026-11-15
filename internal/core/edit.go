@@ -146,7 +146,7 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 		return added, err
 	}
 
-	steps := c.addMemberSteps(&Package{Name: p.Name, Dir: p.Dir, M: next}, added, src, existing[added.Name])
+	steps := append(c.fetchStep(src), c.addMemberSteps(&Package{Name: p.Name, Dir: p.Dir, M: next}, added, src, existing[added.Name])...)
 	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(steps); err != nil {
 		return added, err
 	}

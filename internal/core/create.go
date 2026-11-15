@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/doneill612/vmono/internal/apply"
@@ -189,7 +190,12 @@ func (c *Core) Create(m *manifest.Manifest, opts CreateOptions) (*Package, error
 	}
 
 	p := &Package{Name: m.Name, Dir: dir, M: m}
-	steps := []apply.Step{{
+	var srcList []string
+	for _, mem := range m.Members {
+		srcList = append(srcList, srcs[mem.Name])
+	}
+	steps := c.fetchStep(srcList...)
+	steps = append(steps, apply.Step{
 		Name: "create package",
 		Run: func(func(string)) error {
 			if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
@@ -204,7 +210,7 @@ func (c *Core) Create(m *manifest.Manifest, opts CreateOptions) (*Package, error
 			return manifest.Save(dir, m)
 		},
 		Undo: func() error { return os.RemoveAll(dir) },
-	}}
+	})
 	for _, mem := range m.Members {
 		steps = append(steps, c.addMemberSteps(p, mem, srcs[mem.Name], existing[mem.Name])...)
 	}
@@ -228,22 +234,54 @@ func (c *Core) Create(m *manifest.Manifest, opts CreateOptions) (*Package, error
 	return p, nil
 }
 
+// fetchSources fetches the distinct repos behind srcs concurrently and
+// reports problems through warn. A failed fetch is never fatal: the caller
+// carries on with the refs already on disk. Failures caused by missing
+// credentials are folded into one message with the fix, since the same
+// advice applies to every repo; any other failure gets its own message.
+func fetchSources(srcs []string, warn func(string)) {
+	var unauthenticated []string
+	for _, r := range gitx.FetchMany(srcs, gitx.DefaultFetchConcurrency) {
+		switch {
+		case r.Err == nil:
+		case gitx.IsAuthError(r.Err):
+			unauthenticated = append(unauthenticated, r.Repo)
+		default:
+			warn(fmt.Sprintf("fetch failed for %s, continuing with local refs: %s", r.Repo, oneLine(r.Err.Error())))
+		}
+	}
+	if len(unauthenticated) > 0 {
+		warn(fmt.Sprintf("couldn't fetch %s, continuing with local refs; %s", strings.Join(unauthenticated, ", "), gitx.AuthHint))
+	}
+}
+
+// oneLine collapses runs of whitespace, newlines included, so git's
+// multi-line stderr fits in a single progress row.
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// fetchStep returns the single package-level step that fetches every repo
+// in srcs at once ahead of the member steps, or nothing when fetch_on_create
+// is off or there is nothing to fetch. Fetching in one step, not one per
+// member, runs the fetches concurrently and fetches a repo shared by
+// several members only once.
+func (c *Core) fetchStep(srcs ...string) []apply.Step {
+	if !c.Cfg.FetchOnCreate || len(srcs) == 0 {
+		return nil
+	}
+	return []apply.Step{{Name: "fetch", Run: func(warn func(string)) error {
+		fetchSources(srcs, warn)
+		return nil
+	}}}
+}
+
 // addMemberSteps returns the apply steps that bring one member's worktree
-// into existence: fetch, worktree add, and copying files. Rollback of the
+// into existence: worktree add and copying files. It does not fetch; callers
+// put fetchStep ahead of the member steps. Rollback of the
 // worktree step removes the worktree and any branch it created.
 func (c *Core) addMemberSteps(p *Package, mem manifest.Member, src string, branchExists bool) []apply.Step {
 	var steps []apply.Step
 	dst := p.MemberDir(mem)
 	branch := p.M.Branch
-
-	if c.Cfg.FetchOnCreate {
-		steps = append(steps, apply.Step{Member: mem.Name, Name: "fetch", Run: func(warn func(string)) error {
-			if err := gitx.Fetch(src); err != nil {
-				warn("fetch failed, continuing with local refs: " + err.Error())
-			}
-			return nil
-		}})
-	}
 
 	switch mem.Mode {
 	case manifest.ModeActive:

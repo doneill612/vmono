@@ -82,6 +82,9 @@ func (c *Core) Sync(p *Package, opts SyncOptions) (SyncResult, error) {
 	res := SyncResult{Recreated: []string{}, Unlisted: []string{}, RefsMoved: []string{}, Skipped: []string{}}
 	var errs []error
 
+	if err := c.prefetchForSync(p, opts); err != nil {
+		return res, err
+	}
 	for _, mem := range p.M.Members {
 		src, err := paths.Abs(mem.Source)
 		if err != nil {
@@ -138,6 +141,39 @@ func (c *Core) Sync(p *Package, opts SyncOptions) (SyncResult, error) {
 	return res, errors.Join(errs...)
 }
 
+// prefetchForSync fetches, concurrently and once per repo, every source Sync
+// is about to rely on: the sources of members whose worktree is missing
+// (when fetch_on_create is set) and, with opts.Refs, of reference members
+// whose worktree is intact. A source that is missing on disk is skipped
+// here and reported by the main loop. Fetch failures only warn, so the sync
+// continues with the refs already on disk.
+func (c *Core) prefetchForSync(p *Package, opts SyncOptions) error {
+	var srcs []string
+	for _, mem := range p.M.Members {
+		src, err := paths.Abs(mem.Source)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		switch worktreeOf(src, p.MemberDir(mem)) {
+		case wtMissing:
+			if c.Cfg.FetchOnCreate {
+				srcs = append(srcs, src)
+			}
+		case wtOK:
+			if opts.Refs && mem.Mode == manifest.ModeReference {
+				srcs = append(srcs, src)
+			}
+		}
+	}
+	if len(srcs) > 0 {
+		fetchSources(srcs, func(msg string) { c.warnEvent("", "fetch", msg) })
+	}
+	return nil
+}
+
 // recreateMember rebuilds one member's missing worktree. Stale
 // registrations are pruned first, and an existing package branch is checked
 // out rather than recreated, since branches are kept when worktrees go.
@@ -157,8 +193,9 @@ func (c *Core) recreateMember(p *Package, mem manifest.Member, src string) error
 	return (&apply.Runner{Events: c.Events}).Run(c.addMemberSteps(p, mem, src, exists))
 }
 
-// moveRef moves a clean reference member to its latest fetched ref. It
-// returns whether it moved and, if it declined, why.
+// moveRef moves a clean reference member to its latest fetched ref, using
+// the refs prefetchForSync already brought in. It returns whether it moved
+// and, if it declined, why.
 func (c *Core) moveRef(p *Package, mem manifest.Member, src string) (moved bool, skip string) {
 	dir := p.MemberDir(mem)
 	st, err := gitx.StatusOf(dir)
@@ -167,9 +204,6 @@ func (c *Core) moveRef(p *Package, mem manifest.Member, src string) (moved bool,
 	}
 	if st.Dirty > 0 || st.Untracked > 0 {
 		return false, "reference member has local changes; left alone"
-	}
-	if err := gitx.Fetch(src); err != nil {
-		c.warnEvent(mem.Name, "sync refs", "fetch failed: "+err.Error())
 	}
 	ref, err := resolveRef(src, mem.Ref, nil)
 	if err != nil {

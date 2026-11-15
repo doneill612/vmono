@@ -117,15 +117,22 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 			first = append(first, mem)
 		}
 	}
-	addSteps := func(list []manifest.Member) []apply.Step {
+	var addSrcs []string
+	for _, mem := range adds {
+		addSrcs = append(addSrcs, ep.Srcs[mem.Name])
+	}
+	addSteps := func(list []manifest.Member, fetch bool) []apply.Step {
 		var steps []apply.Step
+		if fetch {
+			steps = c.fetchStep(addSrcs...)
+		}
 		for _, mem := range list {
 			steps = append(steps, c.addMemberSteps(nextPkg, mem, ep.Srcs[mem.Name], existing[mem.Name])...)
 		}
 		return steps
 	}
 
-	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(addSteps(first)); err != nil {
+	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(addSteps(first, true)); err != nil {
 		return plan, err
 	}
 	var rmSteps []apply.Step
@@ -140,7 +147,7 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	if err := (&apply.Runner{Events: c.Events}).Run(rmSteps); err != nil {
 		return plan, err
 	}
-	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(addSteps(last)); err != nil {
+	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(addSteps(last, false)); err != nil {
 		return plan, err
 	}
 
