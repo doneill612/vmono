@@ -183,3 +183,41 @@ func TestInspect(t *testing.T) {
 		t.Errorf("launch env = %v", r.LaunchEnv)
 	}
 }
+
+func TestDoctorPrunesStaleEntriesOfAHandDeletedPackage(t *testing.T) {
+	c, env := newCore(t)
+	p, a := newPackage(t, c, env, "gone")
+	c.Cfg.SourceRoots = []string{filepath.Dir(a)}
+
+	// Deleting the package directory by hand takes the manifest with it, so
+	// no package refers to the source repo any more, but the repo still
+	// lists the worktree.
+	if err := os.RemoveAll(p.Dir); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := c.Doctor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(kinds(res), ","); !strings.Contains(got, KindStaleWorktree) || res.Remaining() != 1 {
+		t.Fatalf("report-only findings = %v", res.Findings)
+	}
+	if list, _ := gitx.WorktreeList(a); len(list) != 2 {
+		t.Fatalf("doctor without --fix must not change anything: %+v", list)
+	}
+
+	res, err = c.Doctor(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Remaining() != 0 {
+		t.Errorf("fix left findings: %+v", res.Findings)
+	}
+	if list, _ := gitx.WorktreeList(a); len(list) != 1 {
+		t.Errorf("stale entry should be pruned: %+v", list)
+	}
+	if again, _ := c.Doctor(false); again.Remaining() != 0 {
+		t.Errorf("not clean after fix: %+v", again.Findings)
+	}
+}

@@ -56,7 +56,11 @@ func (r DoctorResult) Remaining() int {
 
 // Doctor looks for drift between manifests, worktrees and source repos:
 // invalid manifests, directories with no manifest, missing worktrees,
-// sources that moved, stale worktree entries and unclaimed worktrees. It
+// sources that moved, stale worktree entries and unclaimed worktrees. The
+// worktree lists of every known source repo are checked, not only those of
+// repos a surviving package uses, because a package directory deleted by
+// hand takes its manifest with it and leaves its worktree entries behind in
+// the source repos with nothing else pointing at them. It
 // always rebuilds the index cache from the package root. With fix it
 // repairs what is safe to repair: recreating missing worktrees, relocating a
 // moved source by matching its remote, and pruning stale entries.
@@ -107,6 +111,9 @@ func (c *Core) Doctor(fix bool) (DoctorResult, error) {
 		c.checkPackage(p, known, fix, sources, claimed, add)
 	}
 
+	for _, r := range known {
+		sources[realPath(r.Path)] = true
+	}
 	c.checkSources(root, sources, claimed, fix, add)
 
 	rebuilt := c.rebuildIndex(found)
