@@ -39,23 +39,29 @@ func TestOverlayCompositesOverBackground(t *testing.T) {
 	}
 }
 
-func TestHeaderDropsLogoWhenNarrow(t *testing.T) {
+func TestHeaderHasPlainTitleContextAndHints(t *testing.T) {
 	ctx := []kv{{"Package root", "~/.vmono"}, {"Harness", "claude"}}
 	hints := []hint{{"o", "Open"}, {"l", "Launch"}, {"d", "Describe"}, {"e", "Edit"}, {"s", "Sync"}}
-	wide := renderHeader(120, ctx, hints)
-	if !strings.Contains(wide, "worktree packages") || !strings.Contains(wide, "<o>") {
-		t.Errorf("wide header should have logo and hints:\n%s", wide)
-	}
-	narrow := renderHeader(60, ctx, hints)
-	if strings.Contains(narrow, "worktree packages") {
-		t.Errorf("narrow header should drop the logo:\n%s", narrow)
-	}
-	for _, h := range []string{wide, narrow} {
-		for i, l := range strings.Split(h, "\n") {
-			if lipgloss.Width(l) > 120 {
-				t.Errorf("line %d too wide", i)
+	for _, w := range []int{120, 60} {
+		h := renderHeader(w, ctx, hints)
+		lines := strings.Split(h, "\n")
+		if len(lines) != headerHeight {
+			t.Fatalf("w=%d: header has %d lines, want %d", w, len(lines), headerHeight)
+		}
+		if !strings.Contains(lines[0], "vmono") || !strings.Contains(h, "Package root:") {
+			t.Errorf("w=%d: title and context missing:\n%s", w, h)
+		}
+		if strings.ContainsAny(h, "█▀▄") {
+			t.Errorf("w=%d: no block-art wordmark expected:\n%s", w, h)
+		}
+		for i, l := range lines {
+			if lipgloss.Width(l) > w {
+				t.Errorf("w=%d: line %d too wide", w, i)
 			}
 		}
+	}
+	if !strings.Contains(renderHeader(120, ctx, hints), "<o>") {
+		t.Error("wide header should list the key hints")
 	}
 }
 

@@ -13,18 +13,9 @@ type hint struct{ key, label string }
 // kv is one labelled line of header context.
 type kv struct{ k, v string }
 
-// logoLines is the wordmark drawn at the right of the header.
-var logoLines = []string{
-	"█ █ █▀▄▀█ █▀█ █▄ █ █▀█",
-	"▀▄▀ █ ▀ █ ▀▀▀ █ ▀█ ▀▀▀",
-	"  worktree packages   ",
-}
-
-// logoWidth is the cell width of the wordmark.
-const logoWidth = 22
-
-// headerHeight is the number of lines the full header takes.
-const headerHeight = 4
+// headerHeight is the number of lines the full header takes: the title,
+// then one line per context value.
+const headerHeight = 5
 
 // clip truncates s to w cells and pads it to exactly w, keeping ANSI
 // styling intact.
@@ -106,27 +97,23 @@ func overlay(bg, fg string, x, y int) string {
 	return strings.Join(bgLines, "\n")
 }
 
-// renderHeader draws the four-line header: context at the left, key hints
-// in columns in the middle, the wordmark at the right. Hint columns that do
-// not fit are dropped, and the wordmark goes first on narrow terminals.
+// renderHeader draws the five-line header: the title and the context
+// values at the left, the current view's key hints in columns to their
+// right. Hint columns that do not fit are dropped.
 func renderHeader(w int, ctx []kv, hints []hint) string {
 	leftW := 0
 	for _, c := range ctx {
-		if n := len(c.k) + 2 + lipgloss.Width(c.v); n > leftW {
+		if n := 1 + 14 + lipgloss.Width(c.v); n > leftW {
 			leftW = n
 		}
 	}
 	leftW += 2
-	if leftW > w/3 {
-		leftW = w / 3
+	if leftW > w/2 {
+		leftW = w / 2
 	}
-	showLogo := w >= leftW+logoWidth+30
 	room := w - leftW - 2
-	if showLogo {
-		room -= logoWidth + 1
-	}
 
-	// Hint columns, four to a column.
+	// Hint columns, one header's height to a column.
 	var cols []string
 	if room > 0 {
 		for start := 0; start < len(hints); start += headerHeight {
@@ -172,22 +159,15 @@ func renderHeader(w int, ctx []kv, hints []hint) string {
 	var b strings.Builder
 	for i := 0; i < headerHeight; i++ {
 		left := ""
-		if i < len(ctx) {
-			left = " " + styleAmber.Render(fit(ctx[i].k+":", 14, false)) + ctx[i].v
+		switch {
+		case i == 0:
+			left = " " + styleTitle.Render("vmono")
+		case i-1 < len(ctx):
+			left = " " + styleAmber.Render(fit(ctx[i-1].k+":", 14, false)) + ctx[i-1].v
 		}
 		line := clip(left, leftW-2) + "  "
 		for _, c := range colLines {
 			line += c[i]
-		}
-		if showLogo {
-			line = clip(line, w-logoWidth-1)
-			if i < len(logoLines) {
-				style := styleAmber
-				if i == 2 {
-					style = styleDim
-				}
-				line += style.Render(logoLines[i])
-			}
 		}
 		if i > 0 {
 			b.WriteString("\n")
