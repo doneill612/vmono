@@ -160,6 +160,7 @@ Fetches never prompt. Create, edit, sync and the TUI's fetch fetch each distinct
 - A source repo's working tree and checked-out branch are never touched.
 - A dirty worktree is never removed without `--force` (or typing the package name in the TUI).
 - A branch with unmerged commits is never deleted, even with `--force`.
+- Deleting a package directory by hand leaves its worktrees registered in the source repos. `vmono doctor --fix` prunes those records, and create, add and edit release any whose directory is gone before adding a worktree, warning about each. Branches are still kept, so recreating a package of the same name asks to reuse its branch. Prefer `vmono delete`, which removes the worktrees properly.
 - Symlinks are never followed or created.
 - Committing from a worktree writes into the source repo's git directory, outside the package. `vmono inspect --json` lists each `git_common_dir` so sandboxing wrappers can allow it.
 
