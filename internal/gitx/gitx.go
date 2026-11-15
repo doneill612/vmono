@@ -358,14 +358,16 @@ func WorktreeList(repo string) ([]Worktree, error) {
 
 // BranchCheckedOutAt returns the path of the worktree that has branch
 // checked out, or "" when none does. Git allows a branch in only one
-// worktree at a time.
+// worktree at a time. A worktree whose directory is gone (prunable, for
+// example after a package was deleted by hand) holds nothing and is
+// ignored, since the next prune would release the branch anyway.
 func BranchCheckedOutAt(repo, branch string) (string, error) {
 	list, err := WorktreeList(repo)
 	if err != nil {
 		return "", err
 	}
 	for _, w := range list {
-		if w.Branch == branch {
+		if w.Branch == branch && !w.Prunable {
 			return w.Path, nil
 		}
 	}
@@ -406,6 +408,30 @@ func WorktreeRemove(repo, path string, force bool) error {
 func WorktreePrune(repo string) error {
 	_, err := run(repo, "worktree", "prune")
 	return err
+}
+
+// PruneStale drops repo's stale worktree entries, the ones whose directory
+// no longer exists, and returns the paths it released. It does nothing, and
+// returns nothing, when every registered worktree is intact. Git leaves
+// locked worktrees alone.
+func PruneStale(repo string) ([]string, error) {
+	list, err := WorktreeList(repo)
+	if err != nil {
+		return nil, err
+	}
+	var stale []string
+	for _, w := range list {
+		if w.Prunable {
+			stale = append(stale, w.Path)
+		}
+	}
+	if len(stale) == 0 {
+		return nil, nil
+	}
+	if err := WorktreePrune(repo); err != nil {
+		return nil, err
+	}
+	return stale, nil
 }
 
 // Checkout detaches the worktree at path onto ref (used to move reference

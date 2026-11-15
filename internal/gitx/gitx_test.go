@@ -249,3 +249,40 @@ func TestNonInteractiveSSH(t *testing.T) {
 		t.Errorf("GIT_SSH must be left alone: %v", got)
 	}
 }
+
+func TestStaleWorktreesDoNotHoldBranchesAndPruneStaleReportsThem(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "alpha")
+	wt := filepath.Join(env.Root, "wt", "alpha")
+	if err := WorktreeAddBranch(src, wt, "vmono/x", "origin/HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if gone, err := PruneStale(src); err != nil || len(gone) != 0 {
+		t.Fatalf("a live worktree is not stale: %v, %v", gone, err)
+	}
+	if at, _ := BranchCheckedOutAt(src, "vmono/x"); at == "" {
+		t.Fatal("a live worktree holds its branch")
+	}
+
+	if err := os.RemoveAll(wt); err != nil {
+		t.Fatal(err)
+	}
+	if at, err := BranchCheckedOutAt(src, "vmono/x"); err != nil || at != "" {
+		t.Errorf("a worktree whose directory is gone holds nothing: %q, %v", at, err)
+	}
+	gone, err := PruneStale(src)
+	if err != nil || len(gone) != 1 || !samePath(gone[0], wt) {
+		t.Fatalf("PruneStale = %v, %v", gone, err)
+	}
+	if list, _ := WorktreeList(src); len(list) != 1 {
+		t.Errorf("record should be gone: %+v", list)
+	}
+}
+
+// samePath compares paths after resolving symlinks, since temp dirs may sit
+// behind one.
+func samePath(a, b string) bool {
+	ra, errA := filepath.EvalSymlinks(filepath.Dir(a))
+	rb, errB := filepath.EvalSymlinks(filepath.Dir(b))
+	return errA == nil && errB == nil && filepath.Join(ra, filepath.Base(a)) == filepath.Join(rb, filepath.Base(b))
+}

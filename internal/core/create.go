@@ -259,6 +259,23 @@ func fetchSources(srcs []string, warn func(string)) {
 // multi-line stderr fits in a single progress row.
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
+// releaseStaleWorktrees prunes repo's worktree records whose directory is
+// gone and warns about each. Git refuses to add a worktree at a path, or on
+// a branch, that a missing worktree still holds, which is the state a
+// package deleted by hand leaves behind in its source repos. Only records
+// for directories that no longer exist are dropped, so nothing live is
+// touched.
+func releaseStaleWorktrees(src string, warn func(string)) error {
+	gone, err := gitx.PruneStale(src)
+	if err != nil {
+		return err
+	}
+	for _, p := range gone {
+		warn("pruned stale worktree record for " + p)
+	}
+	return nil
+}
+
 // fetchStep returns the single package-level step that fetches every repo
 // in srcs at once ahead of the member steps, or nothing when fetch_on_create
 // is off or there is nothing to fetch. Fetching in one step, not one per
@@ -287,6 +304,9 @@ func (c *Core) addMemberSteps(p *Package, mem manifest.Member, src string, branc
 	case manifest.ModeActive:
 		createdBranch := false
 		steps = append(steps, apply.Step{Member: mem.Name, Name: "worktree add", Run: func(warn func(string)) error {
+			if err := releaseStaleWorktrees(src, warn); err != nil {
+				return err
+			}
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				return err
 			}
@@ -307,6 +327,9 @@ func (c *Core) addMemberSteps(p *Package, mem manifest.Member, src string, branc
 		}})
 	case manifest.ModeReference:
 		steps = append(steps, apply.Step{Member: mem.Name, Name: "worktree add", Run: func(warn func(string)) error {
+			if err := releaseStaleWorktrees(src, warn); err != nil {
+				return err
+			}
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				return err
 			}
