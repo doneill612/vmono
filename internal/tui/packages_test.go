@@ -116,12 +116,12 @@ func TestHomeListsFiltersAndPreviews(t *testing.T) {
 	d.has("Copy path", "Command bar")
 }
 
-func TestHomeEnterRequestsLaunch(t *testing.T) {
+func TestOpenKeyRequestsLaunch(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
 	seed(t, env, "go", a)
 	d := newDriver(t, env, "")
-	d.key("enter")
+	d.key("o")
 	if !d.quit || d.app.Launch() == nil || d.app.Launch().Package != "go" {
 		t.Fatalf("enter should request launch: quit=%v launch=%+v", d.quit, d.app.Launch())
 	}

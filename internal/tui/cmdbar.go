@@ -159,7 +159,22 @@ func (a *App) runCommand(text string) tea.Cmd {
 	if full, ok := commandAliases[name]; ok {
 		name = full
 	}
+	args := fields[1:]
 	switch name {
+	case "members":
+		pkg := ""
+		if len(args) > 0 {
+			pkg = args[0]
+		} else if sel, ok := a.top().(packageSelector); ok {
+			pkg = sel.selectedPackage()
+		}
+		if pkg == "" {
+			return flashErr("usage: members <package>")
+		}
+		if a.env.pkgKnown && !contains(a.env.pkgNames, pkg) {
+			return flashErr("no such package: " + pkg)
+		}
+		return a.navigate(newMembers(a.env, pkg))
 	case "packages":
 		return a.home()
 	case "quit":
@@ -172,4 +187,14 @@ func (a *App) runCommand(text string) tea.Cmd {
 		return push(newHelp(a.top().Hints()))
 	}
 	return flashErr(fmt.Sprintf("unknown command: %s", fields[0]))
+}
+
+// contains reports whether list has s.
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

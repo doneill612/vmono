@@ -100,9 +100,9 @@ func (m *packagesModel) Crumb() string {
 // Hints implements screen.
 func (m *packagesModel) Hints() []hint {
 	return []hint{
-		{"enter", "Open"}, {"o", "Open"}, {"l", "Launch…"}, {"y", "Copy path"},
+		{"enter", "Members"}, {"o", "Open"}, {"l", "Launch…"}, {"d", "Describe"},
 		{"n", "New"}, {"e", "Edit"}, {"ctrl+d", "Delete"}, {"s", "Sync"},
-		{"f", "Fetch"}, {"c", "Config"},
+		{"f", "Fetch"}, {"y", "Copy path"}, {"c", "Config"},
 		{"N", "Sort name"}, {"M", "Sort members"}, {"O", "Sort opened"}, {"S", "Sort state"},
 	}
 }
@@ -266,8 +266,12 @@ func (m *packagesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		return m, nil
 	}
 	switch k.String() {
-	case "enter", "o":
+	case "enter":
+		return m, push(newMembers(m.e, sel.Name))
+	case "o":
 		return m, func() tea.Msg { return launchMsg{LaunchRequest{Package: sel.Name}} }
+	case "d":
+		return m, push(newDescribe(m.e, sel.Name, ""))
 	case "l":
 		return m, push(newLaunchPicker(m.e, sel.Name, "Launch with"))
 	case "y":
@@ -276,7 +280,7 @@ func (m *packagesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		}
 		return m, flash("copied " + paths.Contract(sel.Path))
 	case "f":
-		return m, tea.Batch(flash("fetching "+sel.Name+"…"), m.fetchAll(sel.Name))
+		return m, tea.Batch(flash("fetching "+sel.Name+"…"), fetchAll(m.e.core, sel.Name))
 	case "e":
 		p, err := m.e.core.Load(sel.Name)
 		if err != nil {
@@ -284,7 +288,7 @@ func (m *packagesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		}
 		return m, push(newEditor(m.e, p))
 	case "s":
-		return m, push(newProgress(m.e, m.syncOp(sel.Name)))
+		return m, push(newProgress(m.e, syncOp(m.e.core, sel.Name)))
 	case "ctrl+d":
 		return m, m.startDelete(sel.Name)
 	}
@@ -293,8 +297,7 @@ func (m *packagesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 
 // syncOp builds the sync operation for a package. Like create and edit it
 // ends by offering to launch a harness.
-func (m *packagesModel) syncOp(name string) operation {
-	c := m.e.core
+func syncOp(c *core.Core, name string) operation {
 	return operation{
 		title: "Sync " + name,
 		pkg:   name,
@@ -330,9 +333,9 @@ func (m *packagesModel) startDelete(name string) tea.Cmd {
 		nil))
 }
 
-// fetchAll fetches every member's source of a package and refreshes status.
-func (m *packagesModel) fetchAll(name string) tea.Cmd {
-	c := m.e.core
+// fetchAll fetches every member's source of a package and reports with a
+// fetchedMsg.
+func fetchAll(c *core.Core, name string) tea.Cmd {
 	return func() tea.Msg {
 		p, err := c.Load(name)
 		if err != nil {
@@ -351,6 +354,12 @@ func (m *packagesModel) fetchAll(name string) tea.Cmd {
 		}
 		return fetchedMsg{name: name, n: n}
 	}
+}
+
+// selectedPackage implements packageSelector.
+func (m *packagesModel) selectedPackage() string {
+	s, _ := m.selected()
+	return s.Name
 }
 
 // View implements screen.
