@@ -100,12 +100,25 @@ func overlay(bg, fg string, x, y int) string {
 // renderHeader draws the five-line header: the title and the context
 // values at the left, a vertical rule, then the current view's key hints in
 // columns. Hint columns that do not fit are dropped.
-func renderHeader(w int, ctx []kv, hints []hint) string {
+func renderHeader(w int, ctx []kv, ctxHints, hints []hint) string {
+	// ctxHints act on the context values, so they sit on the title line
+	// above them, at the right edge of that block, rather than among the
+	// hints.
+	var ctxHint string
+	for i, h := range ctxHints {
+		if i > 0 {
+			ctxHint += "  "
+		}
+		ctxHint += styleKey.Render("<"+h.key+">") + " " + styleDim.Render(h.label)
+	}
 	leftW := 0
 	for _, c := range ctx {
 		if n := 1 + 14 + lipgloss.Width(c.v); n > leftW {
 			leftW = n
 		}
+	}
+	if n := 1 + lipgloss.Width("vmono") + 3 + lipgloss.Width(ctxHint); ctxHint != "" && n > leftW {
+		leftW = n
 	}
 	leftW += 2
 	if leftW > w/2 {
@@ -159,17 +172,24 @@ func renderHeader(w int, ctx []kv, hints []hint) string {
 	var b strings.Builder
 	for i := 0; i < headerHeight; i++ {
 		left := ""
+		textW := leftW - 2
+		if len(colLines) > 0 {
+			textW = leftW - 3
+		}
 		switch {
 		case i == 0:
 			left = " " + styleTitle.Render("vmono")
+			if gap := textW - lipgloss.Width(left) - lipgloss.Width(ctxHint); ctxHint != "" && gap >= 2 {
+				left += strings.Repeat(" ", gap) + ctxHint
+			}
 		case i-1 < len(ctx):
 			left = " " + styleAmber.Render(fit(ctx[i-1].k+":", 14, false)) + ctx[i-1].v
 		}
-		line := clip(left, leftW-2) + "  "
+		line := clip(left, textW) + "  "
 		if len(colLines) > 0 {
 			// A rule keeps the context values from reading as the labels
 			// of the hints beside them.
-			line = clip(left, leftW-3) + " " + styleFrame.Render("│") + " "
+			line = clip(left, textW) + " " + styleFrame.Render("│") + " "
 		}
 		for _, c := range colLines {
 			line += c[i]

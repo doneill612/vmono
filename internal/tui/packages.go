@@ -102,10 +102,14 @@ func (m *packagesModel) Hints() []hint {
 	return []hint{
 		{"enter", "Members"}, {"o", "Open"}, {"l", "Launch…"}, {"d", "Describe"},
 		{"n", "New"}, {"e", "Edit"}, {"ctrl+d", "Delete"}, {"s", "Sync"},
-		{"f", "Fetch"}, {"y", "Copy path"}, {"c", "Config"},
+		{"f", "Fetch"}, {"y", "Copy path"}, {"c", "Edit config"},
 		{"N", "Sort name"}, {"M", "Sort members"}, {"O", "Sort opened"}, {"S", "Sort state"},
 	}
 }
+
+// contextHints implements contextHinter: "c" edits the package root, source
+// roots and default harness shown in the header.
+func (m *packagesModel) contextHints() []hint { return []hint{{"c", "Edit config"}} }
 
 // frameTitle formats a table's frame title as name(scope)(/filter)[count].
 func frameTitle(name, scope, filter string, n int) string {

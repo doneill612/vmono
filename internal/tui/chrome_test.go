@@ -43,7 +43,7 @@ func TestHeaderHasPlainTitleContextAndHints(t *testing.T) {
 	ctx := []kv{{"Package root", "~/.vmono"}, {"Harness", "claude"}}
 	hints := []hint{{"o", "Open"}, {"l", "Launch"}, {"d", "Describe"}, {"e", "Edit"}, {"s", "Sync"}}
 	for _, w := range []int{120, 60} {
-		h := renderHeader(w, ctx, hints)
+		h := renderHeader(w, ctx, nil, hints)
 		lines := strings.Split(h, "\n")
 		if len(lines) != headerHeight {
 			t.Fatalf("w=%d: header has %d lines, want %d", w, len(lines), headerHeight)
@@ -60,7 +60,7 @@ func TestHeaderHasPlainTitleContextAndHints(t *testing.T) {
 			}
 		}
 	}
-	wide := renderHeader(120, ctx, hints)
+	wide := renderHeader(120, ctx, nil, hints)
 	if !strings.Contains(wide, "<o>") {
 		t.Error("wide header should list the key hints")
 	}
@@ -75,5 +75,24 @@ func TestStatusShowsCrumbsAndFlash(t *testing.T) {
 	s := renderStatus(60, []string{"packages", "members"}, "fetched 2", false)
 	if lipgloss.Width(s) != 60 || !strings.Contains(s, "<packages>") || !strings.Contains(s, "fetched 2") {
 		t.Errorf("status = %q", s)
+	}
+}
+
+func TestHeaderPutsContextKeysAboveTheContextValues(t *testing.T) {
+	ctx := []kv{{"Package root", "~/.vmono"}, {"Harness", "claude"}}
+	hints := []hint{{"o", "Open"}, {"l", "Launch"}}
+	h := renderHeader(120, ctx, []hint{{"c", "Edit config"}}, hints)
+	lines := strings.Split(h, "\n")
+	rule := strings.Index(lines[0], "│")
+	if !strings.Contains(lines[0], "<c> Edit config") || strings.Index(lines[0], "<c>") > rule {
+		t.Errorf("the context key should sit on the title line, left of the rule:\n%s", h)
+	}
+	if strings.Count(h, "<c>") != 1 {
+		t.Errorf("the context key should appear once:\n%s", h)
+	}
+	for i, l := range lines {
+		if lipgloss.Width(l) > 120 {
+			t.Errorf("line %d too wide", i)
+		}
 	}
 }

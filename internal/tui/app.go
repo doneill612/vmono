@@ -47,6 +47,12 @@ type capturing interface{ capturing() bool }
 // modalScreen marks a screen drawn as a dialog over the screen beneath it.
 type modalScreen interface{ modal() }
 
+// contextHinter is implemented by screens with keys that act on the header's
+// context values (the config) rather than on the table. The header shows
+// them above those values and leaves them out of the hint columns; the help
+// dialog still lists them with the rest.
+type contextHinter interface{ contextHints() []hint }
+
 // filterable is implemented by screens that can be narrowed with "/".
 type filterable interface {
 	setFilter(q string)
@@ -296,14 +302,14 @@ func (a *App) View() string {
 	scr := a.stack[base]
 
 	compact := h < 20 || w < 60
-	hints := a.hints()
+	ctxHints, hints := a.contextHints(), a.hints()
 	var header string
 	hh := headerHeight
 	if compact {
 		hh = 1
 		header = renderHeaderCompact(w, a.context())
 	} else {
-		header = renderHeader(w, a.context(), hints)
+		header = renderHeader(w, a.context(), ctxHints, hints)
 	}
 	barH := 0
 	if a.bar.active {
@@ -345,16 +351,40 @@ func (a *App) View() string {
 // firstLine returns the first line of s.
 func firstLine(s string) string { return strings.SplitN(s, "\n", 2)[0] }
 
-// hints returns the header hints: the top screen's own, or the screen
-// beneath a dialog. The global ":" and "?" live in the status bar.
-func (a *App) hints() []hint {
-	var hs []hint
+// hintScreen returns the screen whose keys the header shows: the top one,
+// or the screen beneath a dialog, which has none of its own.
+func (a *App) hintScreen() screen {
 	for i := len(a.stack) - 1; i >= 0; i-- {
-		if hs = a.stack[i].Hints(); len(hs) > 0 {
-			break
+		if len(a.stack[i].Hints()) > 0 {
+			return a.stack[i]
 		}
 	}
-	return hs
+	return a.top()
+}
+
+// contextHints returns the hint-screen's keys that act on the header's
+// context values.
+func (a *App) contextHints() []hint {
+	if c, ok := a.hintScreen().(contextHinter); ok {
+		return c.contextHints()
+	}
+	return nil
+}
+
+// hints returns the hint columns: the hint-screen's keys minus the ones
+// shown with the context. The global ":" and "?" live in the status bar.
+func (a *App) hints() []hint {
+	skip := map[string]bool{}
+	for _, h := range a.contextHints() {
+		skip[h.key] = true
+	}
+	var out []hint
+	for _, h := range a.hintScreen().Hints() {
+		if !skip[h.key] {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // context returns the labelled lines at the left of the header.

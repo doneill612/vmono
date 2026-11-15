@@ -142,3 +142,20 @@ func TestEveryScreenFitsTheTerminal(t *testing.T) {
 		d.key("esc", "esc")
 	}
 }
+
+// TestConfigKeyIsShownWithTheConfigValues checks that "c" sits above the
+// header's context values, not among the table's hints, and that help still
+// lists it.
+func TestConfigKeyIsShownWithTheConfigValues(t *testing.T) {
+	env := testutil.NewEnv(t)
+	d := newDriver(t, env, "")
+	lines := strings.Split(d.view(), "\n")
+	if !strings.Contains(lines[0], "vmono") || !strings.Contains(lines[0], "<c> Edit config") {
+		t.Errorf("title line should carry the config key:\n%s", strings.Join(lines[:headerHeight], "\n"))
+	}
+	if n := strings.Count(strings.Join(lines[:headerHeight], "\n"), "<c>"); n != 1 {
+		t.Errorf("<c> appears %d times in the header", n)
+	}
+	d.key("?")
+	d.has("Edit config")
+}
