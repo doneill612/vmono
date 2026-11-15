@@ -511,19 +511,26 @@ func (m *editorModel) saveEdit() (screen, tea.Cmd) {
 	return m, goTo(apply(false))
 }
 
-// areaHeight is the text area height for a body of h lines: what is left
-// after the fixed rows is split between purpose and context.
-func (m *editorModel) areaHeight(h int) int {
-	rows := len(m.members)
-	if rows < 3 {
-		rows = 3
-	}
-	if rows > 6 {
-		rows = 6
-	}
-	n := (h-9-rows)/2 - 2
+// memberRows is how many member lines the editor shows: all of them up to
+// six, never fewer than two.
+func (m *editorModel) memberRows() int {
+	n := len(m.members)
 	if n < 2 {
 		n = 2
+	}
+	if n > 6 {
+		n = 6
+	}
+	return n
+}
+
+// areaHeight is the text area height for a body of h lines. The fixed rows
+// (name, three labels, two boxes' borders, harness, members) are taken out
+// and the rest is split between purpose and context.
+func (m *editorModel) areaHeight(h int) int {
+	n := (h - 9 - m.memberRows()) / 2
+	if n < 1 {
+		n = 1
 	}
 	if n > 8 {
 		n = 8
@@ -531,7 +538,9 @@ func (m *editorModel) areaHeight(h int) int {
 	return n
 }
 
-// View implements screen.
+// View implements screen. Spare height, when there is any, becomes blank
+// lines between sections; on a short terminal everything tightens up so the
+// member list stays on screen.
 func (m *editorModel) View(w, h int) string {
 	boxW := w - 4
 	if boxW > 110 {
@@ -545,16 +554,25 @@ func (m *editorModel) View(w, h int) string {
 		a.SetWidth(boxW - 4)
 		a.SetHeight(ah)
 	}
+	m.name.Width = boxW - 20
+	m.role.Width = boxW - 10
+	rows := m.memberRows()
+	if m.roleEdit {
+		rows--
+	}
+	airy := h-(9+2*ah+rows) >= 2
 
 	var b strings.Builder
-	b.WriteString("\n")
 	b.WriteString(m.label("Name", fieldName) + "  ")
 	if m.pkg != nil {
 		b.WriteString(styleDim.Render(m.pkg.Name + "  (read-only: session history is keyed by path)"))
 	} else {
 		b.WriteString(m.name.View())
 	}
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	if airy {
+		b.WriteString("\n")
+	}
 	b.WriteString(m.label("Purpose", fieldPurpose) + styleDim.Render("  ctrl+e opens $EDITOR") + "\n" + m.box(m.purpose.View(), fieldPurpose, boxW) + "\n")
 	b.WriteString(m.label("Context", fieldContext) + styleDim.Render("  tickets, links, decisions") + "\n" + m.box(m.context.View(), fieldContext, boxW) + "\n")
 
@@ -562,13 +580,21 @@ func (m *editorModel) View(w, h int) string {
 	if hn == "" {
 		hn = "(default: " + m.e.core.Cfg.DefaultHarness + ")"
 	}
-	b.WriteString(m.label("Harness", fieldHarness) + "  ◂ " + hn + " ▸\n\n")
+	b.WriteString(m.label("Harness", fieldHarness) + "  ◂ " + hn + " ▸\n")
+	if airy {
+		b.WriteString("\n")
+	}
 
 	b.WriteString(m.label("Members", fieldMembers) + "\n")
 	if len(m.members) == 0 {
 		b.WriteString(styleDim.Render("   none yet — press a to choose repos") + "\n")
 	}
-	for i, mem := range m.members {
+	start := 0
+	if m.cursor >= rows {
+		start = m.cursor - rows + 1
+	}
+	for i := start; i < len(m.members) && i-start < rows; i++ {
+		mem := m.members[i]
 		cursor := "   "
 		if m.focus == fieldMembers && i == m.cursor {
 			cursor = " " + styleSelected.Render("▸ ")
@@ -584,7 +610,7 @@ func (m *editorModel) View(w, h int) string {
 		b.WriteString(fmt.Sprintf("%s%-16s %s  %s\n", cursor, truncate(mem.Name, 16), styleDim.Render(mode), truncate(role, boxW-30)))
 	}
 	if m.roleEdit {
-		b.WriteString("\n " + m.role.View() + "\n")
+		b.WriteString(" " + m.role.View() + "\n")
 	}
 	return b.String()
 }

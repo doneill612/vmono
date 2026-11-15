@@ -68,6 +68,9 @@ type table struct {
 	filter   string
 	// empty is shown in place of rows when there are none.
 	empty string
+	// static draws no selection bar; the cursor still scrolls the view, so
+	// a log-like table follows its last row.
+	static bool
 }
 
 // newTable builds an empty table with no sort applied.
@@ -341,7 +344,7 @@ func (t *table) view(w, h int) string {
 	for i := t.offset; i < len(t.rows) && i-t.offset < visible; i++ {
 		r := t.rows[i]
 		b.WriteString("\n")
-		if i == t.cursor {
+		if i == t.cursor && !t.static {
 			parts := make([]string, len(t.cols))
 			for c := range t.cols {
 				text := ""

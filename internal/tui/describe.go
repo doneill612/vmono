@@ -75,10 +75,14 @@ func (m *describeModel) load() tea.Cmd {
 
 // Title implements screen.
 func (m *describeModel) Title() string {
+	t := "describe(" + m.name + ")"
 	if m.member != "" {
-		return "describe(" + m.name + "/" + m.member + ")"
+		t = "describe(" + m.name + "/" + m.member + ")"
 	}
-	return "describe(" + m.name + ")"
+	if m.build != nil && !(m.vp.AtTop() && m.vp.AtBottom()) {
+		t += fmt.Sprintf("[%d%%]", int(m.vp.ScrollPercent()*100))
+	}
+	return t
 }
 
 // Crumb implements screen.

@@ -223,49 +223,55 @@ func (m *progressModel) leave() (screen, tea.Cmd) {
 	return m, goHome("")
 }
 
-// View implements screen.
+// View implements screen: a table of steps that follows the latest one,
+// then a status block for the state the operation is in.
 func (m *progressModel) View(w, h int) string {
-	var b strings.Builder
-	last := ""
-	for _, r := range m.rows {
+	tb := newTable([]column{{title: "member", max: 24}, {title: "step", max: 24}, {title: "status"}, {title: "message", flex: true}})
+	tb.static = true
+	var rows []row
+	for i, r := range m.rows {
 		who := r.member
 		if who == "" {
 			who = "package"
 		}
-		if who != last {
-			b.WriteString(" " + styleLabel.Render(who) + "\n")
-			last = who
-		}
-		b.WriteString(fmt.Sprintf("   %s %-16s %s\n", m.glyph(r.status), r.step, styleDim.Render(r.msg)))
+		rows = append(rows, row{id: fmt.Sprint(i), cells: []cell{
+			plain(who), plain(r.step), m.statusCell(r.status), styled(r.msg, styleDim),
+		}})
 	}
-	b.WriteString("\n")
+	tb.setRows(rows)
+	tb.cursor = len(rows) - 1
+	tb.clamp()
+
+	var foot []string
 	switch m.state {
 	case progRunning:
-		b.WriteString(" " + m.spin.View() + styleDim.Render(" working…"))
+		foot = []string{" " + m.spin.View() + styleDim.Render(" working…")}
 	case progDone:
-		b.WriteString(" " + styleOK.Render("done") + "  " + keyHelp("enter", "back to packages"))
+		foot = []string{" " + styleOK.Render("done") + "  " + keyHelp("enter", "back to packages")}
 	case progFailed:
-		b.WriteString(" " + styleErr.Render(m.fail.Error()) + "\n\n " + keyHelp("enter", "go back"))
+		foot = []string{" " + styleErr.Render(m.fail.Error()), " " + keyHelp("enter", "go back")}
 	case progAskReuse:
 		var be *core.BranchExistsError
 		errors.As(m.fail, &be)
-		b.WriteString(" " + styleWarn.Render(fmt.Sprintf("Branch %q already exists in %s.", be.Branch, be.Member)) +
-			"\n Check it out instead of creating it?  " + keyHelp("y", "reuse", "n", "cancel"))
+		foot = []string{
+			" " + styleWarn.Render(fmt.Sprintf("Branch %q already exists in %s.", be.Branch, be.Member)),
+			" Check it out instead of creating it?  " + keyHelp("y", "reuse", "n", "cancel"),
+		}
 	}
-	return b.String()
+	return tb.view(w, h-len(foot)-1) + "\n\n" + strings.Join(foot, "\n")
 }
 
-// glyph renders a step status.
-func (m *progressModel) glyph(s apply.Status) string {
+// statusCell renders a step's status as a glyph and a word.
+func (m *progressModel) statusCell(s apply.Status) cell {
 	switch s {
 	case apply.StatusDone:
-		return styleOK.Render("✓")
+		return styled("✓ done", styleOK)
 	case apply.StatusFailed:
-		return styleErr.Render("✗")
+		return styled("✗ failed", styleErr)
 	case apply.StatusUndone:
-		return styleWarn.Render("↩")
+		return styled("↩ undone", styleWarn)
 	case apply.StatusRunning:
-		return styleDim.Render("…")
+		return styled("… running", styleDim)
 	}
-	return " "
+	return plain("")
 }

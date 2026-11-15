@@ -124,5 +124,21 @@ func TestEveryScreenFitsTheTerminal(t *testing.T) {
 		d.key("esc")
 		d.key("ctrl+d")
 		check("delete")
+		d.key("esc")
+		d.key("enter")
+		check("members")
+		d.key("d")
+		check("member describe")
+		d.key("esc", "esc")
+		d.key("d")
+		check("package describe")
+		d.key("esc")
+		for _, v := range []string{"repos", "harnesses"} {
+			goToView(d, v)
+			check(v)
+		}
+		d.key("a")
+		check("finder")
+		d.key("esc", "esc")
 	}
 }

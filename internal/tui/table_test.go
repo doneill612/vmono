@@ -93,3 +93,14 @@ func ids(rows []row) []string {
 	}
 	return out
 }
+
+func TestStaticTableFollowsLastRowWithoutSelectionBar(t *testing.T) {
+	tb := newTable([]column{{title: "step"}})
+	tb.static = true
+	tb.setRows(testRows("one", "two", "three", "four", "five"))
+	tb.bottom()
+	v := tb.view(20, 3) // header + 2 rows
+	if !strings.Contains(v, "five") || strings.Contains(v, "one") {
+		t.Errorf("static table should scroll to the last row:\n%s", v)
+	}
+}

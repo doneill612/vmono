@@ -210,6 +210,7 @@ func (m *setupModel) save() (screen, tea.Cmd) {
 
 // View implements screen.
 func (m *setupModel) View(w, h int) string {
+	m.src.Width, m.pkg.Width = w-8, w-8
 	var b strings.Builder
 	if !m.reconfig {
 		b.WriteString("\n " + styleTitle.Render("Welcome to vmono") + "\n")
