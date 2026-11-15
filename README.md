@@ -44,6 +44,33 @@ cd "$(vmono path project)" && claude    # same thing, by hand
 
 Add `eval "$(vmono shell-init zsh)"` (or `bash`, `fish`, `pwsh`) to your shell rc for a `vcd <pkg>` function.
 
+## The TUI
+
+`vmono` with no arguments opens a full-screen console in the spirit of k9s: a header with your config and the keys for the current view, a framed table with its title in the border, breadcrumbs and notices along the bottom.
+
+| View | Opened by | Shows |
+| --- | --- | --- |
+| packages | start, `:packages` | Every package: members (`2A 1R` = two active, one reference), branch, harness, clean or dirty, last opened |
+| members | `enter` on a package, `:members [pkg]` | Per member: mode, branch or ref, HEAD, upstream, ahead/behind, dirty and untracked counts, role |
+| describe | `d` | Purpose, context, notes and paths for a package; location and git state for a member |
+| repos | `:repos` | Every known repo and how many packages use it; `enter` lists those packages |
+| harnesses | `:harnesses` | Configured harnesses, whether each is on `PATH`, and the default |
+
+Navigation is by drilling down: `enter` goes in, `esc` goes back. `:` opens a command bar with tab completion (`:members pay<tab>`, `:repos`, `:harnesses`, `:config`, `:new`, `:quit`), `/` filters the current table, and `?` lists the keys for the view you are on. Nothing refreshes by itself: `ctrl+r` reloads the current view, and a view reloads when you come back to it.
+
+| Key (packages) | Does |
+| --- | --- |
+| `enter` | Drill into the members |
+| `o` / `l` | Open with the default harness / pick a harness |
+| `d` | Describe |
+| `n` / `e` | New package / edit the selected one |
+| `s` / `f` | Sync / fetch every member's source |
+| `ctrl+d` | Delete (asks first; typed confirmation if work would be lost) |
+| `y` | Copy the package path |
+| `N` `M` `O` `S` | Sort by name, members, opened, state; press again to reverse |
+
+Repos that are not under a source root, or every repo when no source root is set, are found with the repo finder (`p` while choosing members, `a` in the repos view). Type a path and it lists the directories there, marks the git repos (`●`), and scans below a typed directory for repos nested deeper. `tab` completes, `enter` picks a repo or steps into a directory; picked repos are remembered.
+
 ## Concepts
 
 | Term | Meaning |
