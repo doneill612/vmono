@@ -100,9 +100,9 @@ func (m *pickerModel) fill() {
 		mark, mode := styled("[ ]", styleDim), plain("")
 		if md, ok := m.chosen[r.Path]; ok {
 			mark = styled("[x]", styleOK)
-			mode = plain("active")
+			mode = styled("active", styleOK)
 			if md == manifest.ModeReference {
-				mode = plain("ref")
+				mode = styled("ref", styleOK)
 			}
 		}
 		rows = append(rows, row{
