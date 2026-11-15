@@ -60,8 +60,14 @@ func TestHeaderHasPlainTitleContextAndHints(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(renderHeader(120, ctx, hints), "<o>") {
+	wide := renderHeader(120, ctx, hints)
+	if !strings.Contains(wide, "<o>") {
 		t.Error("wide header should list the key hints")
+	}
+	for i, l := range strings.Split(wide, "\n") {
+		if !strings.Contains(l, "│") {
+			t.Errorf("line %d: a rule should separate context from hints: %q", i, l)
+		}
 	}
 }
 

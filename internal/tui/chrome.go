@@ -98,8 +98,8 @@ func overlay(bg, fg string, x, y int) string {
 }
 
 // renderHeader draws the five-line header: the title and the context
-// values at the left, the current view's key hints in columns to their
-// right. Hint columns that do not fit are dropped.
+// values at the left, a vertical rule, then the current view's key hints in
+// columns. Hint columns that do not fit are dropped.
 func renderHeader(w int, ctx []kv, hints []hint) string {
 	leftW := 0
 	for _, c := range ctx {
@@ -166,6 +166,11 @@ func renderHeader(w int, ctx []kv, hints []hint) string {
 			left = " " + styleAmber.Render(fit(ctx[i-1].k+":", 14, false)) + ctx[i-1].v
 		}
 		line := clip(left, leftW-2) + "  "
+		if len(colLines) > 0 {
+			// A rule keeps the context values from reading as the labels
+			// of the hints beside them.
+			line = clip(left, leftW-3) + " " + styleFrame.Render("│") + " "
+		}
 		for _, c := range colLines {
 			line += c[i]
 		}
