@@ -180,6 +180,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case homeMsg:
 		a.notice, a.noticeEr = m.text, false
 		return a, a.home()
+	case repoAddedMsg:
+		if _, ok := a.top().(*finderModel); ok {
+			a.stack = a.stack[:len(a.stack)-1]
+		}
+		return a, a.broadcast(m)
 	case launchMsg:
 		req := m.req
 		a.env.launch = &req

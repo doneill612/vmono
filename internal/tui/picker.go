@@ -2,12 +2,9 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/doneill612/vmono/internal/discover"
@@ -38,10 +35,6 @@ type pickerModel struct {
 	tb     *table
 	filter string
 
-	adding    bool
-	pathInput textinput.Model
-	cands     []string
-
 	done   func([]pickSel) screen
 	cancel func() screen
 }
@@ -51,10 +44,7 @@ type pickerModel struct {
 // current member from outside any source root).
 func newPicker(e *env, initial map[string]string, extra []discover.Repo,
 	done func([]pickSel) screen, cancel func() screen) *pickerModel {
-	pi := newTextInput()
-	pi.Prompt = "path: "
-	pi.CharLimit = 1024
-	m := &pickerModel{e: e, chosen: map[string]string{}, pathInput: pi, done: done, cancel: cancel,
+	m := &pickerModel{e: e, chosen: map[string]string{}, done: done, cancel: cancel,
 		tb: newTable([]column{{title: " ", max: 3}, {title: "name", max: 28}, {title: "mode", max: 5}, {title: "branch", max: 24}, {title: "path", flex: true}})}
 	for k, v := range initial {
 		m.chosen[k] = v
@@ -88,13 +78,10 @@ func (m *pickerModel) Crumb() string { return "repos" }
 // Hints implements screen.
 func (m *pickerModel) Hints() []hint {
 	return []hint{
-		{"space", "Toggle"}, {"a", "Active"}, {"r", "Reference"}, {"p", "Add by path"},
+		{"space", "Toggle"}, {"a", "Active"}, {"r", "Reference"}, {"p", "Find by path"},
 		{"/", "Filter"}, {"enter", "Done"}, {"esc", "Cancel"},
 	}
 }
-
-// capturing implements capturing: the path prompt owns the keyboard.
-func (m *pickerModel) capturing() bool { return m.adding }
 
 // setFilter implements filterable.
 func (m *pickerModel) setFilter(q string) {
@@ -128,9 +115,9 @@ func (m *pickerModel) fill() {
 	case !m.loaded:
 		m.tb.empty = "scanning…"
 	case len(m.items) == 0 && len(m.e.core.Cfg.SourceRoots) == 0:
-		m.tb.empty = "No repos found, and no source root is configured. Press p to add a repo by path."
+		m.tb.empty = "No repos found, and no source root is configured. Press p to find a repo by path."
 	case len(m.items) == 0:
-		m.tb.empty = "No repos found. Press p to add one by path."
+		m.tb.empty = "No repos found. Press p to find one by path."
 	default:
 		m.tb.empty = "No match."
 	}
@@ -161,49 +148,19 @@ func (m *pickerModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		}
 		m.fill()
 		return m, nil
-	case tea.KeyMsg:
-		if m.adding {
-			return m.updateAdding(t)
+	case repoAddedMsg:
+		if t.owner != screen(m) {
+			return m, nil
 		}
+		m.addItem(t.repo)
+		m.chosen[t.repo.Path] = manifest.ModeActive
+		m.fill()
+		m.tb.restore(t.repo.Path)
+		return m, flash("added " + t.repo.Name)
+	case tea.KeyMsg:
 		return m.updateKeys(t)
 	}
 	return m, nil
-}
-
-// updateAdding handles keys in the add-by-path prompt, including tab
-// completion of directories.
-func (m *pickerModel) updateAdding(k tea.KeyMsg) (screen, tea.Cmd) {
-	switch k.String() {
-	case "esc":
-		m.adding, m.cands = false, nil
-		m.pathInput.Blur()
-		return m, nil
-	case "tab":
-		completed, cands := completePath(m.pathInput.Value())
-		if completed != "" {
-			m.pathInput.SetValue(completed)
-			m.pathInput.CursorEnd()
-		}
-		m.cands = cands
-		return m, nil
-	case "enter":
-		repo, err := m.e.core.ResolveRepo(strings.TrimSpace(m.pathInput.Value()))
-		if err != nil {
-			return m, flashErr(err.Error())
-		}
-		m.addItem(repo)
-		m.chosen[repo.Path] = manifest.ModeActive
-		m.adding, m.cands = false, nil
-		m.pathInput.Blur()
-		m.pathInput.SetValue("")
-		m.fill()
-		m.tb.restore(repo.Path)
-		return m, flash("added " + repo.Name)
-	}
-	var cmd tea.Cmd
-	m.pathInput, cmd = m.pathInput.Update(k)
-	m.cands = nil
-	return m, cmd
 }
 
 // updateKeys handles the main key map.
@@ -222,8 +179,7 @@ func (m *pickerModel) updateKeys(k tea.KeyMsg) (screen, tea.Cmd) {
 	case "enter":
 		return m, goTo(m.done(m.selection()))
 	case "p":
-		m.adding = true
-		return m, m.pathInput.Focus()
+		return m, push(newFinder(m.e, m))
 	case " ", "space":
 		if has {
 			if _, on := m.chosen[cur.id]; on {
@@ -259,22 +215,7 @@ func (m *pickerModel) selection() []pickSel {
 }
 
 // View implements screen.
-func (m *pickerModel) View(w, h int) string {
-	if !m.adding {
-		return m.tb.view(w, h)
-	}
-	var extra []string
-	extra = append(extra, " "+m.pathInput.View())
-	for i, c := range m.cands {
-		if i >= 6 {
-			extra = append(extra, styleDim.Render(fmt.Sprintf("   … %d more", len(m.cands)-6)))
-			break
-		}
-		extra = append(extra, styleDim.Render("   "+c))
-	}
-	extra = append(extra, " "+keyHelp("tab", "complete", "enter", "add", "esc", "cancel"))
-	return m.tb.view(w, h-len(extra)-1) + "\n\n" + strings.Join(extra, "\n")
-}
+func (m *pickerModel) View(w, h int) string { return m.tb.view(w, h) }
 
 // samePath compares two paths after resolving symlinks.
 func samePath(a, b string) bool {
@@ -284,71 +225,4 @@ func samePath(a, b string) bool {
 		return filepath.Clean(a) == filepath.Clean(b)
 	}
 	return ra == rb
-}
-
-// completePath completes input against directories on disk. It returns the
-// longest common extension of the matches (or input unchanged) and the
-// candidate directories, each with a trailing separator. A leading "~" is
-// expanded for lookup and kept in the result.
-func completePath(input string) (string, []string) {
-	if input == "" {
-		return "", nil
-	}
-	home, _ := os.UserHomeDir()
-	sep := string(os.PathSeparator)
-	real := input
-	tilde := false
-	switch {
-	case input == "~":
-		real, tilde = home+sep, true
-	case strings.HasPrefix(input, "~/") || strings.HasPrefix(input, `~\`):
-		real, tilde = home+sep+input[2:], true
-	}
-	dir, prefix := filepath.Split(real)
-	if dir == "" {
-		dir = "." + sep
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return input, nil
-	}
-	var cands []string
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, prefix) {
-			continue
-		}
-		if strings.HasPrefix(name, ".") && !strings.HasPrefix(prefix, ".") {
-			continue
-		}
-		info, err := os.Stat(filepath.Join(dir, name))
-		if err != nil || !info.IsDir() {
-			continue
-		}
-		full := filepath.Join(dir, name) + sep
-		if dir == "."+sep && !strings.HasPrefix(input, "."+sep) {
-			full = name + sep
-		}
-		if tilde && home != "" && strings.HasPrefix(full, home) {
-			full = "~" + strings.TrimPrefix(full, home)
-		}
-		cands = append(cands, full)
-	}
-	sort.Strings(cands)
-	switch len(cands) {
-	case 0:
-		return input, nil
-	case 1:
-		return cands[0], cands
-	}
-	common := cands[0]
-	for _, c := range cands[1:] {
-		for !strings.HasPrefix(c, common) {
-			common = common[:len(common)-1]
-		}
-	}
-	if len(common) < len(input) {
-		common = input
-	}
-	return common, cands
 }

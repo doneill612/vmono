@@ -139,3 +139,21 @@ func TestHomeMessageAndQuit(t *testing.T) {
 		t.Error("q should quit")
 	}
 }
+
+// TestSetupTabCompletesSourceRoot covers directory completion in the
+// source-root field, which lists candidates under the fields.
+func TestSetupTabCompletesSourceRoot(t *testing.T) {
+	env := testutil.NewEnv(t)
+	env.NewSource(t, "alpha") // creates <root>/source and <root>/remotes
+	d := newDriver(t, env, "")
+	d.key("c")
+	d.typeText(env.Root + string(os.PathSeparator) + "sou")
+	d.key("tab")
+	d.has(env.Root + string(os.PathSeparator) + "source" + string(os.PathSeparator))
+	d.key("enter", "enter")
+	d.has("config saved")
+	got := d.app.env.core.Cfg.SourceRoots
+	if len(got) != 1 || filepath.Base(got[0]) != "source" {
+		t.Errorf("source roots = %v", got)
+	}
+}

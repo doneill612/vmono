@@ -27,6 +27,8 @@ type setupModel struct {
 	order     []string
 	def       string
 	err       string
+	// cands are the directories tab completion found for the focused field.
+	cands []string
 }
 
 // harnessOrder is the preference order when picking a default harness.
@@ -103,7 +105,7 @@ func (m *setupModel) Hints() []hint {
 	if m.reconfig {
 		esc = "Cancel"
 	}
-	return []hint{{"tab", "Next field"}, {"enter", "Continue / save"}, {"esc", esc}}
+	return []hint{{"tab", "Complete path"}, {"↑/↓", "Switch field"}, {"enter", "Continue / save"}, {"esc", esc}}
 }
 
 // Update implements screen.
@@ -115,8 +117,12 @@ func (m *setupModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 				return m, pop()
 			}
 			return m, tea.Quit
-		case "tab", "shift+tab", "up", "down":
+		case "shift+tab", "up", "down":
 			m.setFocus(1 - m.focus)
+			m.cands = nil
+			return m, nil
+		case "tab":
+			m.complete()
 			return m, nil
 		case "enter":
 			if m.focus == 0 {
@@ -126,6 +132,9 @@ func (m *setupModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 			return m.save()
 		}
 	}
+	if _, isKey := msg.(tea.KeyMsg); isKey {
+		m.cands = nil
+	}
 	var cmd tea.Cmd
 	if m.focus == 0 {
 		m.src, cmd = m.src.Update(msg)
@@ -133,6 +142,27 @@ func (m *setupModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		m.pkg, cmd = m.pkg.Update(msg)
 	}
 	return m, cmd
+}
+
+// complete tab-completes the directory being typed in the focused field.
+// With several source roots (joined by the path-list separator) only the
+// last one is completed. Candidates are listed under the fields.
+func (m *setupModel) complete() {
+	in := &m.src
+	if m.focus == 1 {
+		in = &m.pkg
+	}
+	val := in.Value()
+	head, seg := "", val
+	if i := strings.LastIndex(val, string(filepath.ListSeparator)); i >= 0 {
+		head, seg = val[:i+1], val[i+1:]
+	}
+	completed, cands := completePath(strings.TrimSpace(seg))
+	if completed != "" {
+		in.SetValue(head + completed)
+		in.CursorEnd()
+	}
+	m.cands = cands
 }
 
 // setFocus moves focus between the two inputs.
@@ -190,7 +220,15 @@ func (m *setupModel) View(w, h int) string {
 	b.WriteString(" " + styleLabel.Render("Source root") + styleDim.Render("  scanned to fill the repo picker; optional") + "\n")
 	b.WriteString(" " + m.src.View() + "\n\n")
 	b.WriteString(" " + styleLabel.Render("Package root") + styleDim.Render("  where packages are created") + "\n")
-	b.WriteString(" " + m.pkg.View() + "\n\n")
+	b.WriteString(" " + m.pkg.View() + "\n")
+	for i, c := range m.cands {
+		if i >= 5 {
+			b.WriteString(styleDim.Render(fmt.Sprintf("   … %d more", len(m.cands)-5)) + "\n")
+			break
+		}
+		b.WriteString(styleDim.Render("   "+c) + "\n")
+	}
+	b.WriteString("\n")
 	b.WriteString(" " + styleLabel.Render("Harnesses") + "\n")
 	for _, name := range m.order {
 		if _, ok := m.e.core.Cfg.Harness[name]; !ok {

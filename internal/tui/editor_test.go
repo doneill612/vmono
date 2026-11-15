@@ -195,10 +195,12 @@ func TestPickerAddByPathWithCompletion(t *testing.T) {
 	d.key("ctrl+s")
 	d.has("repos(select)", "No repos found")
 	d.key("p")
+	d.has("find repo")
+	d.key("ctrl+u") // the finder starts at ~/; type a path from scratch
 	parent := filepath.Dir(a)
 	d.typeText(parent + string(os.PathSeparator) + "else")
-	d.key("tab")
 	d.has("elsewhere")
+	d.key("tab") // completes the highlighted repo
 	d.key("enter")
 	d.has("added elsewhere", "[x]")
 	d.key("enter", "ctrl+s")
@@ -220,7 +222,8 @@ func TestPickerRejectsNonRepoPath(t *testing.T) {
 	d.key("n")
 	d.typeText("x")
 	d.key("ctrl+s", "p")
-	d.typeText(env.Root)
+	d.key("ctrl+u")
+	d.typeText(filepath.Join(env.Root, "does-not-exist"))
 	d.key("enter")
 	d.has("repo not found")
 }
