@@ -80,8 +80,31 @@ func buildSetup(e *env, reconfig bool) *setupModel {
 	return m
 }
 
+// capturing implements capturing: both inputs take every key.
+func (m *setupModel) capturing() bool { return true }
+
 // Init implements screen.
 func (m *setupModel) Init() tea.Cmd { return textinput.Blink }
+
+// Title implements screen.
+func (m *setupModel) Title() string {
+	if m.reconfig {
+		return "config"
+	}
+	return "setup"
+}
+
+// Crumb implements screen.
+func (m *setupModel) Crumb() string { return m.Title() }
+
+// Hints implements screen.
+func (m *setupModel) Hints() []hint {
+	esc := "Quit"
+	if m.reconfig {
+		esc = "Cancel"
+	}
+	return []hint{{"tab", "Next field"}, {"enter", "Continue / save"}, {"esc", esc}}
+}
 
 // Update implements screen.
 func (m *setupModel) Update(msg tea.Msg) (screen, tea.Cmd) {
@@ -89,7 +112,7 @@ func (m *setupModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		switch k.String() {
 		case "esc":
 			if m.reconfig {
-				return m, goTo(newHome(m.e, ""))
+				return m, pop()
 			}
 			return m, tea.Quit
 		case "tab", "shift+tab", "up", "down":
@@ -152,23 +175,23 @@ func (m *setupModel) save() (screen, tea.Cmd) {
 	}
 	cfg.Loaded = true
 	m.e.core.Cfg = cfg
-	return m, goTo(newHome(m.e, "config saved"))
+	return m, goHome("config saved")
 }
 
 // View implements screen.
-func (m *setupModel) View() string {
+func (m *setupModel) View(w, h int) string {
 	var b strings.Builder
-	if m.reconfig {
-		b.WriteString(styleTitle.Render("vmono") + styleDim.Render("  config") + "\n\n")
+	if !m.reconfig {
+		b.WriteString("\n " + styleTitle.Render("Welcome to vmono") + "\n")
+		b.WriteString(" " + strings.ReplaceAll(wrap("vmono groups several git repos into a package so a coding harness opened there sees all of them. A little setup first.", 70), "\n", "\n ") + "\n\n")
 	} else {
-		b.WriteString(styleTitle.Render("Welcome to vmono") + "\n\n")
-		b.WriteString(wrap("vmono groups several git repos into a package so a coding harness opened there sees all of them. A little setup first.", 70) + "\n\n")
+		b.WriteString("\n")
 	}
-	b.WriteString(styleLabel.Render("Source root") + styleDim.Render("  scanned to fill the repo picker; optional") + "\n")
-	b.WriteString(m.src.View() + "\n\n")
-	b.WriteString(styleLabel.Render("Package root") + styleDim.Render("  where packages are created") + "\n")
-	b.WriteString(m.pkg.View() + "\n\n")
-	b.WriteString(styleLabel.Render("Harnesses") + "\n")
+	b.WriteString(" " + styleLabel.Render("Source root") + styleDim.Render("  scanned to fill the repo picker; optional") + "\n")
+	b.WriteString(" " + m.src.View() + "\n\n")
+	b.WriteString(" " + styleLabel.Render("Package root") + styleDim.Render("  where packages are created") + "\n")
+	b.WriteString(" " + m.pkg.View() + "\n\n")
+	b.WriteString(" " + styleLabel.Render("Harnesses") + "\n")
 	for _, name := range m.order {
 		if _, ok := m.e.core.Cfg.Harness[name]; !ok {
 			continue
@@ -181,15 +204,10 @@ func (m *setupModel) View() string {
 		if name == m.def {
 			def = styleSelected.Render("  (default)")
 		}
-		b.WriteString(fmt.Sprintf("  %-10s %s%s\n", name, st.Render(mark), def))
+		b.WriteString(fmt.Sprintf("   %-10s %s%s\n", name, st.Render(mark), def))
 	}
 	if m.err != "" {
-		b.WriteString("\n" + styleErr.Render(m.err) + "\n")
+		b.WriteString("\n " + styleErr.Render(m.err) + "\n")
 	}
-	esc := "quit"
-	if m.reconfig {
-		esc = "cancel"
-	}
-	b.WriteString("\n" + keyHelp("tab", "next field", "enter", "continue / save", "esc", esc))
 	return b.String()
 }

@@ -109,6 +109,25 @@ func (m *progressModel) wait() tea.Cmd {
 	}
 }
 
+// Title implements screen.
+func (m *progressModel) Title() string { return m.op.title }
+
+// Crumb implements screen.
+func (m *progressModel) Crumb() string {
+	return strings.ToLower(strings.Fields(m.op.title + " ")[0])
+}
+
+// Hints implements screen.
+func (m *progressModel) Hints() []hint {
+	switch m.state {
+	case progAskReuse:
+		return []hint{{"y", "Reuse branch"}, {"n", "Cancel"}}
+	case progDone, progFailed:
+		return []hint{{"enter", "Back"}}
+	}
+	return nil
+}
+
 // Update implements screen.
 func (m *progressModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch t := msg.(type) {
@@ -190,7 +209,7 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	case progDone:
 		switch k.String() {
 		case "enter", "esc", "q":
-			return m, goTo(newHome(m.e, m.op.title+" done"))
+			return m, goHome(m.op.title + " done")
 		}
 	}
 	return m, nil
@@ -201,13 +220,12 @@ func (m *progressModel) leave() (screen, tea.Cmd) {
 	if m.op.back != nil {
 		return m, goTo(m.op.back())
 	}
-	return m, goTo(newHome(m.e, ""))
+	return m, goHome("")
 }
 
 // View implements screen.
-func (m *progressModel) View() string {
+func (m *progressModel) View(w, h int) string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render(m.op.title) + "\n\n")
 	last := ""
 	for _, r := range m.rows {
 		who := r.member
@@ -215,24 +233,24 @@ func (m *progressModel) View() string {
 			who = "package"
 		}
 		if who != last {
-			b.WriteString(styleLabel.Render(who) + "\n")
+			b.WriteString(" " + styleLabel.Render(who) + "\n")
 			last = who
 		}
-		b.WriteString(fmt.Sprintf("  %s %-16s %s\n", m.glyph(r.status), r.step, styleDim.Render(r.msg)))
+		b.WriteString(fmt.Sprintf("   %s %-16s %s\n", m.glyph(r.status), r.step, styleDim.Render(r.msg)))
 	}
 	b.WriteString("\n")
 	switch m.state {
 	case progRunning:
-		b.WriteString(m.spin.View() + styleDim.Render(" working…"))
+		b.WriteString(" " + m.spin.View() + styleDim.Render(" working…"))
 	case progDone:
-		b.WriteString(styleOK.Render("done") + "  " + keyHelp("enter", "back to packages"))
+		b.WriteString(" " + styleOK.Render("done") + "  " + keyHelp("enter", "back to packages"))
 	case progFailed:
-		b.WriteString(styleErr.Render(m.fail.Error()) + "\n\n" + keyHelp("enter", "go back"))
+		b.WriteString(" " + styleErr.Render(m.fail.Error()) + "\n\n " + keyHelp("enter", "go back"))
 	case progAskReuse:
 		var be *core.BranchExistsError
 		errors.As(m.fail, &be)
-		b.WriteString(styleWarn.Render(fmt.Sprintf("Branch %q already exists in %s.", be.Branch, be.Member)) +
-			"\nCheck it out instead of creating it?  " + keyHelp("y", "reuse", "n", "cancel"))
+		b.WriteString(" " + styleWarn.Render(fmt.Sprintf("Branch %q already exists in %s.", be.Branch, be.Member)) +
+			"\n Check it out instead of creating it?  " + keyHelp("y", "reuse", "n", "cancel"))
 	}
 	return b.String()
 }

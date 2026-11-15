@@ -42,8 +42,20 @@ func newLaunchPicker(e *env, pkg, title string) *harnessPicker {
 	return p
 }
 
+// modal implements modalScreen.
+func (p *harnessPicker) modal() {}
+
 // Init implements screen.
 func (p *harnessPicker) Init() tea.Cmd { return nil }
+
+// Title implements screen.
+func (p *harnessPicker) Title() string { return "launch" }
+
+// Crumb implements screen. The dialog adds no breadcrumb.
+func (p *harnessPicker) Crumb() string { return "" }
+
+// Hints implements screen.
+func (p *harnessPicker) Hints() []hint { return nil }
 
 // Update implements screen.
 func (p *harnessPicker) Update(msg tea.Msg) (screen, tea.Cmd) {
@@ -53,7 +65,7 @@ func (p *harnessPicker) Update(msg tea.Msg) (screen, tea.Cmd) {
 	}
 	switch k.String() {
 	case "esc", "q", "n":
-		return p, goTo(newHome(p.e, ""))
+		return p, pop()
 	case "up", "k":
 		if p.cursor > 0 {
 			p.cursor--
@@ -78,9 +90,9 @@ func (p *harnessPicker) Update(msg tea.Msg) (screen, tea.Cmd) {
 }
 
 // View implements screen.
-func (p *harnessPicker) View() string {
+func (p *harnessPicker) View(w, h int) string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render(p.title) + styleDim.Render("  "+p.pkg) + "\n\n")
+	b.WriteString(" " + styleTitle.Render(p.title) + styleDim.Render("  "+p.pkg) + "\n\n")
 	for i, name := range p.names {
 		h := p.e.core.Cfg.Harness[name]
 		cursor := "  "
@@ -95,11 +107,11 @@ func (p *harnessPicker) View() string {
 		if name == p.def {
 			def = styleDim.Render("  default")
 		}
-		b.WriteString(fmt.Sprintf("%s%-12s %s%s%s\n", cursor, name, styleDim.Render(h.Command), def, note))
+		b.WriteString(fmt.Sprintf(" %s%-12s %s%s%s\n", cursor, name, styleDim.Render(h.Command), def, note))
 	}
 	if p.msg != "" {
-		b.WriteString("\n" + styleWarn.Render(p.msg) + "\n")
+		b.WriteString("\n " + styleWarn.Render(p.msg) + "\n")
 	}
-	b.WriteString("\n" + keyHelp("enter", "launch", "↑/↓", "choose", "esc", "not now"))
-	return b.String()
+	b.WriteString("\n " + keyHelp("enter", "launch", "↑/↓", "choose", "esc", "not now"))
+	return dialog("launch", b.String(), w-4)
 }

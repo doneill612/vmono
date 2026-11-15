@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/discover"
@@ -56,7 +57,6 @@ type editorModel struct {
 	role     textinput.Model
 
 	focus int
-	msg   string
 }
 
 // newEditor builds the editor for a new package (pkg nil) or an existing
@@ -96,12 +96,59 @@ func newArea(placeholder string) textarea.Model {
 	t.Placeholder = placeholder
 	t.ShowLineNumbers = false
 	t.CharLimit = 0
-	t.SetHeight(4)
+	t.Prompt = ""
+	t.SetHeight(3)
 	return t
 }
 
 // Init implements screen.
 func (m *editorModel) Init() tea.Cmd { return textinput.Blink }
+
+// capturing implements capturing: true while a text field has focus.
+func (m *editorModel) capturing() bool {
+	if m.roleEdit {
+		return true
+	}
+	switch m.focus {
+	case fieldName:
+		return m.pkg == nil
+	case fieldPurpose, fieldContext:
+		return true
+	}
+	return false
+}
+
+// Title implements screen.
+func (m *editorModel) Title() string {
+	if m.pkg != nil {
+		return "edit(" + m.pkg.Name + ")"
+	}
+	return "new package"
+}
+
+// Crumb implements screen.
+func (m *editorModel) Crumb() string {
+	if m.pkg != nil {
+		return "edit"
+	}
+	return "new"
+}
+
+// Hints implements screen: the keys that apply to the focused field.
+func (m *editorModel) Hints() []hint {
+	hs := []hint{{"ctrl+s", "Save"}, {"tab", "Next field"}, {"shift+tab", "Previous"}, {"esc", "Cancel"}}
+	switch {
+	case m.roleEdit:
+		return []hint{{"enter", "Set role"}, {"esc", "Cancel"}}
+	case m.focus == fieldPurpose || m.focus == fieldContext:
+		hs = append(hs, hint{"ctrl+e", "Open $EDITOR"})
+	case m.focus == fieldHarness:
+		hs = append(hs, hint{"←/→", "Choose harness"})
+	case m.focus == fieldMembers:
+		hs = append(hs, hint{"a", "Add/change repos"}, hint{"x", "Remove"}, hint{"m", "Active/ref"}, hint{"r", "Role"})
+	}
+	return hs
+}
 
 // applyFocus focuses the active field's input and blurs the rest.
 func (m *editorModel) applyFocus() tea.Cmd {
@@ -169,12 +216,11 @@ func (m *editorModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	if m.roleEdit {
 		return m.keyRole(k)
 	}
-	m.msg = ""
 	switch k.String() {
 	case "ctrl+s":
 		return m.save()
 	case "esc":
-		return m, goTo(newHome(m.e, ""))
+		return m, pop()
 	case "tab":
 		m.focus = (m.focus + 1) % fieldCount
 		return m, m.applyFocus()
@@ -351,15 +397,13 @@ func (m *editorModel) openExternal(field int) tea.Cmd {
 	}
 	f, err := os.CreateTemp("", "vmono-*.md")
 	if err != nil {
-		m.msg = styleErr.Render(err.Error())
-		return nil
+		return flashErr(err.Error())
 	}
 	name := f.Name()
 	_, werr := f.WriteString(text)
 	f.Close()
 	if werr != nil {
-		m.msg = styleErr.Render(werr.Error())
-		return nil
+		return flashErr(werr.Error())
 	}
 	return tea.ExecProcess(editorCommand(name), func(err error) tea.Msg {
 		return editedTextMsg{field: field, file: name, err: err}
@@ -370,13 +414,11 @@ func (m *editorModel) openExternal(field int) tea.Cmd {
 func (m *editorModel) finishExternal(t editedTextMsg) (screen, tea.Cmd) {
 	defer os.Remove(t.file)
 	if t.err != nil {
-		m.msg = styleErr.Render("editor: " + t.err.Error())
-		return m, nil
+		return m, flashErr("editor: " + t.err.Error())
 	}
 	data, err := os.ReadFile(t.file)
 	if err != nil {
-		m.msg = styleErr.Render(err.Error())
-		return m, nil
+		return m, flashErr(err.Error())
 	}
 	text := strings.TrimRight(string(data), "\n")
 	if t.field == fieldContext {
@@ -396,13 +438,11 @@ func (m *editorModel) save() (screen, tea.Cmd) {
 	if m.pkg == nil {
 		if err := manifest.ValidateName(strings.TrimSpace(m.name.Value())); err != nil {
 			m.focus = fieldName
-			m.msg = styleErr.Render(err.Error())
-			return m, m.applyFocus()
+			return m, tea.Batch(m.applyFocus(), flashErr(err.Error()))
 		}
 	}
 	if len(m.members) == 0 {
-		m.msg = styleWarn.Render("a package needs at least one member; choose repos")
-		return m, m.openPicker()
+		return m, tea.Batch(flash("a package needs at least one member; choose repos"), m.openPicker())
 	}
 	if m.pkg == nil {
 		return m.saveCreate()
@@ -436,8 +476,7 @@ func (m *editorModel) saveEdit() (screen, tea.Cmd) {
 	c := m.e.core
 	edited, err := manifest.Parse(manifest.Encode(m.pkg.M))
 	if err != nil {
-		m.msg = styleErr.Render(err.Error())
-		return m, nil
+		return m, flashErr(err.Error())
 	}
 	edited.Harness = m.harnessName()
 	edited.Purpose = strings.TrimSpace(m.purpose.Value())
@@ -446,11 +485,10 @@ func (m *editorModel) saveEdit() (screen, tea.Cmd) {
 
 	ep, err := c.PlanEdit(m.pkg, edited)
 	if err != nil {
-		m.msg = styleErr.Render(err.Error())
-		return m, nil
+		return m, flashErr(err.Error())
 	}
 	if ep.Plan.Empty() && bytes.Equal(manifest.Encode(m.pkg.M), manifest.Encode(ep.Next)) {
-		return m, goTo(newHome(m.e, "no changes"))
+		return m, goHome("no changes")
 	}
 	name, pkg := m.pkg.Name, m.pkg
 	apply := func(force bool) screen {
@@ -473,39 +511,67 @@ func (m *editorModel) saveEdit() (screen, tea.Cmd) {
 	return m, goTo(apply(false))
 }
 
+// areaHeight is the text area height for a body of h lines: what is left
+// after the fixed rows is split between purpose and context.
+func (m *editorModel) areaHeight(h int) int {
+	rows := len(m.members)
+	if rows < 3 {
+		rows = 3
+	}
+	if rows > 6 {
+		rows = 6
+	}
+	n := (h-9-rows)/2 - 2
+	if n < 2 {
+		n = 2
+	}
+	if n > 8 {
+		n = 8
+	}
+	return n
+}
+
 // View implements screen.
-func (m *editorModel) View() string {
-	m.resize()
-	title := "New package"
-	if m.pkg != nil {
-		title = "Edit package"
+func (m *editorModel) View(w, h int) string {
+	boxW := w - 4
+	if boxW > 110 {
+		boxW = 110
 	}
+	if boxW < 20 {
+		boxW = 20
+	}
+	ah := m.areaHeight(h)
+	for _, a := range []*textarea.Model{&m.purpose, &m.context} {
+		a.SetWidth(boxW - 4)
+		a.SetHeight(ah)
+	}
+
 	var b strings.Builder
-	b.WriteString(styleTitle.Render(title) + "\n\n")
-
-	b.WriteString(m.label("Name", fieldName) + "\n")
+	b.WriteString("\n")
+	b.WriteString(m.label("Name", fieldName) + "  ")
 	if m.pkg != nil {
-		b.WriteString(styleDim.Render(m.pkg.Name+"  (read-only: session history is keyed by path)") + "\n\n")
+		b.WriteString(styleDim.Render(m.pkg.Name + "  (read-only: session history is keyed by path)"))
 	} else {
-		b.WriteString(m.name.View() + "\n\n")
+		b.WriteString(m.name.View())
 	}
-	b.WriteString(m.label("Purpose", fieldPurpose) + styleDim.Render("  ctrl+e opens $EDITOR") + "\n" + m.purpose.View() + "\n\n")
-	b.WriteString(m.label("Context", fieldContext) + styleDim.Render("  tickets, links, decisions") + "\n" + m.context.View() + "\n\n")
+	b.WriteString("\n\n")
+	b.WriteString(m.label("Purpose", fieldPurpose) + styleDim.Render("  ctrl+e opens $EDITOR") + "\n" + m.box(m.purpose.View(), fieldPurpose, boxW) + "\n")
+	b.WriteString(m.label("Context", fieldContext) + styleDim.Render("  tickets, links, decisions") + "\n" + m.box(m.context.View(), fieldContext, boxW) + "\n")
 
-	h := m.harnessName()
-	if h == "" {
-		h = "(default: " + m.e.core.Cfg.DefaultHarness + ")"
+	hn := m.harnessName()
+	if hn == "" {
+		hn = "(default: " + m.e.core.Cfg.DefaultHarness + ")"
 	}
-	b.WriteString(m.label("Harness", fieldHarness) + "  ◂ " + h + " ▸\n\n")
+	b.WriteString(m.label("Harness", fieldHarness) + "  ◂ " + hn + " ▸\n\n")
 
 	b.WriteString(m.label("Members", fieldMembers) + "\n")
 	if len(m.members) == 0 {
-		b.WriteString(styleDim.Render("  none yet — press a to choose repos") + "\n")
+		b.WriteString(styleDim.Render("   none yet — press a to choose repos") + "\n")
 	}
 	for i, mem := range m.members {
-		cursor := "  "
+		cursor := "   "
 		if m.focus == fieldMembers && i == m.cursor {
-			cursor = styleSelected.Render("▸ ")
+			cursor = " " + styleSelected.Render("▸ ")
 		}
 		mode := "active"
 		if mem.Mode == manifest.ModeReference {
@@ -515,36 +581,28 @@ func (m *editorModel) View() string {
 		if role == "" {
 			role = styleDim.Render("(no role)")
 		}
-		b.WriteString(fmt.Sprintf("%s%-16s %s  %s\n", cursor, truncate(mem.Name, 16), styleDim.Render(mode), truncate(role, 60)))
+		b.WriteString(fmt.Sprintf("%s%-16s %s  %s\n", cursor, truncate(mem.Name, 16), styleDim.Render(mode), truncate(role, boxW-30)))
 	}
 	if m.roleEdit {
-		b.WriteString("\n" + m.role.View() + "\n")
+		b.WriteString("\n " + m.role.View() + "\n")
 	}
-	b.WriteString("\n")
-	if m.msg != "" {
-		b.WriteString(m.msg + "\n")
-	}
-	b.WriteString(m.footer())
 	return b.String()
+}
+
+// box frames a text area, brighter when its field has focus.
+func (m *editorModel) box(content string, field, w int) string {
+	col := colFrame
+	if m.focus == field {
+		col = colCyan
+	}
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(col).
+		Padding(0, 1).MarginLeft(1).Width(w - 2).Render(content)
 }
 
 // label renders a field label, highlighted when focused.
 func (m *editorModel) label(text string, field int) string {
 	if m.focus == field {
-		return styleSelected.Render("▸ " + text)
+		return " " + styleSelected.Render("▸ "+text)
 	}
-	return styleLabel.Render("  " + text)
-}
-
-// footer shows keys relevant to the focused field.
-func (m *editorModel) footer() string {
-	switch {
-	case m.roleEdit:
-		return keyHelp("enter", "set role", "esc", "cancel")
-	case m.focus == fieldMembers:
-		return keyHelp("a", "add/change repos", "x", "remove", "m", "active/ref", "r", "role", "tab", "next", "ctrl+s", "save", "esc", "cancel")
-	case m.focus == fieldHarness:
-		return keyHelp("←/→", "choose", "tab", "next", "ctrl+s", "save", "esc", "cancel")
-	}
-	return keyHelp("tab", "next field", "ctrl+s", "save", "esc", "cancel")
+	return " " + styleHeaderCol.Render("  "+text)
 }

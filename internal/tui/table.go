@@ -266,11 +266,16 @@ func (t *table) widths(w int) []int {
 			}
 		}
 	} else if spare := -over; spare > 0 {
+		var flex []int
 		for i, c := range t.cols {
 			if c.flex {
-				ws[i] += spare
-				break
+				flex = append(flex, i)
 			}
+		}
+		for n, i := range flex {
+			share := spare / (len(flex) - n)
+			ws[i] += share
+			spare -= share
 		}
 	}
 	return ws

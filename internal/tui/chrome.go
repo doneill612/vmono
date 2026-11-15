@@ -70,11 +70,21 @@ func renderFrame(title, body string, w, h int) string {
 	return b.String()
 }
 
-// dialog draws a framed box sized to its content, for modals. w is the
-// total width including the border.
-func dialog(title, body string, w int) string {
-	lines := strings.Count(body, "\n") + 1
-	return renderFrame(title, body, w, lines+2)
+// dialog draws a framed box sized to its content, for modals. It is as wide
+// as the widest line plus a margin, never wider than maxW and never
+// narrower than the title needs.
+func dialog(title, body string, maxW int) string {
+	lines := strings.Split(body, "\n")
+	w := lipgloss.Width(title) + 6
+	for _, l := range lines {
+		if n := lipgloss.Width(l) + 3; n > w {
+			w = n
+		}
+	}
+	if w > maxW {
+		w = maxW
+	}
+	return renderFrame(title, body, w, len(lines)+2)
 }
 
 // overlay draws fg over bg with fg's top-left corner at column x, row y.
@@ -165,7 +175,7 @@ func renderHeader(w int, ctx []kv, hints []hint) string {
 		if i < len(ctx) {
 			left = " " + styleAmber.Render(fit(ctx[i].k+":", 14, false)) + ctx[i].v
 		}
-		line := clip(left, leftW)
+		line := clip(left, leftW-2) + "  "
 		for _, c := range colLines {
 			line += c[i]
 		}
@@ -199,17 +209,19 @@ func renderStatus(w int, crumbs []string, flash string, isErr bool) string {
 		chips = append(chips, st.Render("<"+c+">"))
 	}
 	left := " " + strings.Join(chips, " ")
-	if flash == "" {
-		return clip(left, w)
+	right := ""
+	if flash != "" {
+		st := styleOK
+		if isErr {
+			st = styleErr
+		}
+		right = st.Render(truncate(flash, w-lipgloss.Width(left)-3)) + " "
+	} else {
+		right = styleKey.Render("<:>") + styleDim.Render(" command  ") + styleKey.Render("<?>") + styleDim.Render(" help ")
 	}
-	st := styleOK
-	if isErr {
-		st = styleErr
-	}
-	right := st.Render(truncate(flash, w-lipgloss.Width(left)-3)) + " "
 	space := w - lipgloss.Width(left) - lipgloss.Width(right)
 	if space < 1 {
-		space = 1
+		return clip(left, w)
 	}
 	return clip(left+strings.Repeat(" ", space)+right, w)
 }

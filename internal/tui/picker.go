@@ -9,7 +9,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/sahilm/fuzzy"
 
 	"github.com/doneill612/vmono/internal/discover"
 	"github.com/doneill612/vmono/internal/manifest"
@@ -28,22 +27,20 @@ type reposMsg struct {
 	err   error
 }
 
-// pickerModel is the fuzzy-searchable list of every known repo. Space
+// pickerModel is the fuzzy-filterable table of every known repo. Space
 // toggles membership, a and r set active or reference, Enter returns to the
 // editor, and p adds a repo by path from anywhere on disk.
 type pickerModel struct {
-	e         *env
-	items     []discover.Repo
-	chosen    map[string]string // repo path -> mode
-	loaded    bool
-	filter    textinput.Model
-	filtering bool
-	cursor    int
+	e      *env
+	items  []discover.Repo
+	chosen map[string]string // repo path -> mode
+	loaded bool
+	tb     *table
+	filter string
 
 	adding    bool
 	pathInput textinput.Model
 	cands     []string
-	msg       string
 
 	done   func([]pickSel) screen
 	cancel func() screen
@@ -54,17 +51,16 @@ type pickerModel struct {
 // current member from outside any source root).
 func newPicker(e *env, initial map[string]string, extra []discover.Repo,
 	done func([]pickSel) screen, cancel func() screen) *pickerModel {
-	f := newTextInput()
-	f.Prompt = "/ "
-	f.Placeholder = "fuzzy filter"
 	pi := newTextInput()
 	pi.Prompt = "path: "
 	pi.CharLimit = 1024
-	m := &pickerModel{e: e, chosen: map[string]string{}, filter: f, pathInput: pi, done: done, cancel: cancel}
+	m := &pickerModel{e: e, chosen: map[string]string{}, pathInput: pi, done: done, cancel: cancel,
+		tb: newTable([]column{{title: " ", max: 3}, {title: "name", max: 28}, {title: "mode", max: 5}, {title: "branch", max: 24}, {title: "path", flex: true}})}
 	for k, v := range initial {
 		m.chosen[k] = v
 	}
 	m.items = append(m.items, extra...)
+	m.fill()
 	return m
 }
 
@@ -77,21 +73,68 @@ func (m *pickerModel) Init() tea.Cmd {
 	}
 }
 
-// visible returns repos matching the filter.
-func (m *pickerModel) visible() []discover.Repo {
-	q := strings.TrimSpace(m.filter.Value())
-	if q == "" {
-		return m.items
+// Title implements screen.
+func (m *pickerModel) Title() string {
+	t := "repos(select)"
+	if m.filter != "" {
+		t += "(/" + m.filter + ")"
 	}
-	names := make([]string, len(m.items))
-	for i, r := range m.items {
-		names[i] = r.Name + " " + r.Path
+	return fmt.Sprintf("%s[%d selected]", t, len(m.chosen))
+}
+
+// Crumb implements screen.
+func (m *pickerModel) Crumb() string { return "repos" }
+
+// Hints implements screen.
+func (m *pickerModel) Hints() []hint {
+	return []hint{
+		{"space", "Toggle"}, {"a", "Active"}, {"r", "Reference"}, {"p", "Add by path"},
+		{"/", "Filter"}, {"enter", "Done"}, {"esc", "Cancel"},
 	}
-	var out []discover.Repo
-	for _, match := range fuzzy.Find(q, names) {
-		out = append(out, m.items[match.Index])
+}
+
+// capturing implements capturing: the path prompt owns the keyboard.
+func (m *pickerModel) capturing() bool { return m.adding }
+
+// setFilter implements filterable.
+func (m *pickerModel) setFilter(q string) {
+	m.filter = q
+	m.tb.setFilter(q)
+	m.fill()
+}
+
+// filterValue implements filterable.
+func (m *pickerModel) filterValue() string { return m.filter }
+
+// fill rebuilds the table rows from the items and the current selection.
+func (m *pickerModel) fill() {
+	var rows []row
+	for _, r := range m.items {
+		mark, mode := styled("[ ]", styleDim), plain("")
+		if md, ok := m.chosen[r.Path]; ok {
+			mark = styled("[x]", styleOK)
+			mode = plain("active")
+			if md == manifest.ModeReference {
+				mode = plain("ref")
+			}
+		}
+		rows = append(rows, row{
+			id:     r.Path,
+			search: r.Name + " " + r.Path,
+			cells:  []cell{mark, plain(r.Name), mode, styled(r.Branch, styleDim), styled(paths.Contract(r.Path), styleDim)},
+		})
 	}
-	return out
+	switch {
+	case !m.loaded:
+		m.tb.empty = "scanning…"
+	case len(m.items) == 0 && len(m.e.core.Cfg.SourceRoots) == 0:
+		m.tb.empty = "No repos found, and no source root is configured. Press p to add a repo by path."
+	case len(m.items) == 0:
+		m.tb.empty = "No repos found. Press p to add one by path."
+	default:
+		m.tb.empty = "No match."
+	}
+	m.tb.setRows(rows)
 }
 
 // addItem appends a repo unless it is already listed.
@@ -111,42 +154,20 @@ func (m *pickerModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	case reposMsg:
 		m.loaded = true
 		if t.err != nil {
-			m.msg = styleErr.Render(t.err.Error())
-			return m, nil
+			return m, flashErr(t.err.Error())
 		}
 		for _, r := range t.repos {
 			m.addItem(r)
 		}
+		m.fill()
 		return m, nil
 	case tea.KeyMsg:
-		switch {
-		case m.adding:
+		if m.adding {
 			return m.updateAdding(t)
-		case m.filtering:
-			return m.updateFilter(t)
 		}
 		return m.updateKeys(t)
 	}
 	return m, nil
-}
-
-// updateFilter handles keys while filtering.
-func (m *pickerModel) updateFilter(k tea.KeyMsg) (screen, tea.Cmd) {
-	switch k.String() {
-	case "esc":
-		m.filtering = false
-		m.filter.SetValue("")
-		m.filter.Blur()
-		return m, nil
-	case "enter":
-		m.filtering = false
-		m.filter.Blur()
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.filter, cmd = m.filter.Update(k)
-	m.cursor = 0
-	return m, cmd
 }
 
 // updateAdding handles keys in the add-by-path prompt, including tab
@@ -154,7 +175,7 @@ func (m *pickerModel) updateFilter(k tea.KeyMsg) (screen, tea.Cmd) {
 func (m *pickerModel) updateAdding(k tea.KeyMsg) (screen, tea.Cmd) {
 	switch k.String() {
 	case "esc":
-		m.adding, m.cands, m.msg = false, nil, ""
+		m.adding, m.cands = false, nil
 		m.pathInput.Blur()
 		return m, nil
 	case "tab":
@@ -168,16 +189,16 @@ func (m *pickerModel) updateAdding(k tea.KeyMsg) (screen, tea.Cmd) {
 	case "enter":
 		repo, err := m.e.core.ResolveRepo(strings.TrimSpace(m.pathInput.Value()))
 		if err != nil {
-			m.msg = styleErr.Render(err.Error())
-			return m, nil
+			return m, flashErr(err.Error())
 		}
 		m.addItem(repo)
 		m.chosen[repo.Path] = manifest.ModeActive
-		m.adding, m.cands, m.msg = false, nil, "added "+repo.Name
+		m.adding, m.cands = false, nil
 		m.pathInput.Blur()
 		m.pathInput.SetValue("")
-		m.cursor = m.indexOf(repo.Path)
-		return m, nil
+		m.fill()
+		m.tb.restore(repo.Path)
+		return m, flash("added " + repo.Name)
 	}
 	var cmd tea.Cmd
 	m.pathInput, cmd = m.pathInput.Update(k)
@@ -185,58 +206,42 @@ func (m *pickerModel) updateAdding(k tea.KeyMsg) (screen, tea.Cmd) {
 	return m, cmd
 }
 
-// indexOf returns the visible index of a repo path, or 0.
-func (m *pickerModel) indexOf(path string) int {
-	for i, r := range m.visible() {
-		if samePath(r.Path, path) {
-			return i
-		}
-	}
-	return 0
-}
-
 // updateKeys handles the main key map.
 func (m *pickerModel) updateKeys(k tea.KeyMsg) (screen, tea.Cmd) {
-	v := m.visible()
-	var cur *discover.Repo
-	if m.cursor >= 0 && m.cursor < len(v) {
-		cur = &v[m.cursor]
+	if m.tb.handleKey(k.String()) {
+		return m, nil
 	}
-	m.msg = ""
+	cur, has := m.tb.selected()
 	switch k.String() {
 	case "esc":
+		if m.filter != "" {
+			m.setFilter("")
+			return m, nil
+		}
 		return m, goTo(m.cancel())
 	case "enter":
 		return m, goTo(m.done(m.selection()))
-	case "/":
-		m.filtering = true
-		return m, m.filter.Focus()
 	case "p":
 		m.adding = true
 		return m, m.pathInput.Focus()
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(v)-1 {
-			m.cursor++
-		}
 	case " ", "space":
-		if cur != nil {
-			if _, on := m.chosen[cur.Path]; on {
-				delete(m.chosen, cur.Path)
+		if has {
+			if _, on := m.chosen[cur.id]; on {
+				delete(m.chosen, cur.id)
 			} else {
-				m.chosen[cur.Path] = manifest.ModeActive
+				m.chosen[cur.id] = manifest.ModeActive
 			}
+			m.fill()
 		}
 	case "a":
-		if cur != nil {
-			m.chosen[cur.Path] = manifest.ModeActive
+		if has {
+			m.chosen[cur.id] = manifest.ModeActive
+			m.fill()
 		}
 	case "r":
-		if cur != nil {
-			m.chosen[cur.Path] = manifest.ModeReference
+		if has {
+			m.chosen[cur.id] = manifest.ModeReference
+			m.fill()
 		}
 	}
 	return m, nil
@@ -254,69 +259,21 @@ func (m *pickerModel) selection() []pickSel {
 }
 
 // View implements screen.
-func (m *pickerModel) View() string {
-	var b strings.Builder
-	b.WriteString(styleTitle.Render("Choose repos") + styleDim.Render(fmt.Sprintf("  %d selected", len(m.chosen))) + "\n\n")
-	v := m.visible()
-	switch {
-	case !m.loaded:
-		b.WriteString(styleDim.Render("scanning…") + "\n")
-	case len(v) == 0:
-		b.WriteString(styleDim.Render("No repos found. Press p to add one by path, or set a source root in the config.") + "\n")
+func (m *pickerModel) View(w, h int) string {
+	if !m.adding {
+		return m.tb.view(w, h)
 	}
-	height := m.e.h - 10
-	if height < 5 {
-		height = 15
-	}
-	start := 0
-	if m.cursor >= height {
-		start = m.cursor - height + 1
-	}
-	for i := start; i < len(v) && i-start < height; i++ {
-		r := v[i]
-		mark, mode := "[ ]", ""
-		if md, ok := m.chosen[r.Path]; ok {
-			mark = styleOK.Render("[x]")
-			mode = md
-			if md == manifest.ModeReference {
-				mode = "ref"
-			}
+	var extra []string
+	extra = append(extra, " "+m.pathInput.View())
+	for i, c := range m.cands {
+		if i >= 6 {
+			extra = append(extra, styleDim.Render(fmt.Sprintf("   … %d more", len(m.cands)-6)))
+			break
 		}
-		cursor := "  "
-		if i == m.cursor {
-			cursor = styleSelected.Render("▸ ")
-		}
-		branch := ""
-		if r.Branch != "" {
-			branch = " " + r.Branch
-		}
-		b.WriteString(fmt.Sprintf("%s%s %-22s %-7s %s\n", cursor, mark, truncate(r.Name, 22), mode,
-			styleDim.Render(truncate(paths.Contract(r.Path), 40)+branch)))
+		extra = append(extra, styleDim.Render("   "+c))
 	}
-	b.WriteString("\n")
-	if m.filtering || m.filter.Value() != "" {
-		b.WriteString(m.filter.View() + "\n")
-	}
-	if m.adding {
-		b.WriteString(m.pathInput.View() + "\n")
-		for i, c := range m.cands {
-			if i >= 6 {
-				b.WriteString(styleDim.Render(fmt.Sprintf("  … %d more\n", len(m.cands)-6)))
-				break
-			}
-			b.WriteString(styleDim.Render("  "+c) + "\n")
-		}
-		b.WriteString(keyHelp("tab", "complete", "enter", "add", "esc", "cancel"))
-		if m.msg != "" {
-			b.WriteString("\n" + m.msg)
-		}
-		return b.String()
-	}
-	if m.msg != "" {
-		b.WriteString(m.msg + "\n")
-	}
-	b.WriteString(keyHelp("space", "toggle", "a", "active", "r", "reference", "p", "add by path", "/", "filter", "enter", "done", "esc", "cancel"))
-	return b.String()
+	extra = append(extra, " "+keyHelp("tab", "complete", "enter", "add", "esc", "cancel"))
+	return m.tb.view(w, h-len(extra)-1) + "\n\n" + strings.Join(extra, "\n")
 }
 
 // samePath compares two paths after resolving symlinks.

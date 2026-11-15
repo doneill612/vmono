@@ -29,7 +29,7 @@ func TestDeleteCleanPackageWithY(t *testing.T) {
 	seed(t, env, "gone", a)
 	d := newDriver(t, env, "")
 
-	d.key("d")
+	d.key("ctrl+d")
 	d.has("Delete package", "alpha", "clean", "Everything is clean")
 	d.key("n")
 	d.has("packages")
@@ -37,7 +37,7 @@ func TestDeleteCleanPackageWithY(t *testing.T) {
 		t.Fatal("cancel must not delete")
 	}
 
-	d.key("d")
+	d.key("ctrl+d")
 	d.key("y")
 	d.eventually(func() bool { _, err := os.Stat(filepath.Join(env.PackageRoot, "gone")); return os.IsNotExist(err) }, "package removal")
 	d.has("done")
@@ -52,7 +52,7 @@ func TestDeleteDirtyRequiresTypedName(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "risky", "alpha", "wip.txt"), "x")
 	d := newDriver(t, env, "")
 
-	d.key("d")
+	d.key("ctrl+d")
 	d.has("untracked", "Type the package name")
 	d.key("y") // 'y' is just text here, not a confirmation
 	d.key("enter")

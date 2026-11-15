@@ -55,8 +55,33 @@ func (m *confirmModel) allClean() bool {
 	return true
 }
 
+// cancel leaves the dialog: it goes to the screen onCancel builds, or back
+// to the one underneath when onCancel is nil.
+func (m *confirmModel) cancel() tea.Cmd {
+	if m.onCancel == nil {
+		return pop()
+	}
+	return goTo(m.onCancel())
+}
+
+// modal implements modalScreen.
+func (m *confirmModel) modal() {}
+
+// capturing implements capturing: the typed-name box owns the keyboard
+// when work would be lost.
+func (m *confirmModel) capturing() bool { return !m.allClean() }
+
 // Init implements screen.
 func (m *confirmModel) Init() tea.Cmd { return textinput.Blink }
+
+// Title implements screen.
+func (m *confirmModel) Title() string { return m.title }
+
+// Crumb implements screen. The dialog adds no breadcrumb.
+func (m *confirmModel) Crumb() string { return "" }
+
+// Hints implements screen.
+func (m *confirmModel) Hints() []hint { return nil }
 
 // Update implements screen.
 func (m *confirmModel) Update(msg tea.Msg) (screen, tea.Cmd) {
@@ -67,7 +92,7 @@ func (m *confirmModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	clean := m.allClean()
 	switch k.String() {
 	case "esc":
-		return m, goTo(m.onCancel())
+		return m, m.cancel()
 	case "ctrl+b":
 		if m.showBranches {
 			m.deleteBranches = !m.deleteBranches
@@ -79,7 +104,7 @@ func (m *confirmModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		case "y":
 			return m, goTo(m.onConfirm(false, m.deleteBranches))
 		case "n":
-			return m, goTo(m.onCancel())
+			return m, m.cancel()
 		case "b":
 			if m.showBranches {
 				m.deleteBranches = !m.deleteBranches
@@ -100,20 +125,20 @@ func (m *confirmModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 }
 
 // View implements screen.
-func (m *confirmModel) View() string {
+func (m *confirmModel) View(w, h int) string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render(m.title) + styleDim.Render("  "+m.name) + "\n\n")
+	b.WriteString(" " + styleDim.Render("package ") + styleLabel.Render(m.name) + "\n\n")
 	for _, r := range m.rows {
 		switch {
 		case r.Missing:
-			b.WriteString(fmt.Sprintf("  %-16s %s\n", r.Name, styleDim.Render("worktree already gone")))
+			b.WriteString(fmt.Sprintf("   %-16s %s\n", r.Name, styleDim.Render("worktree already gone")))
 		case r.Error != "":
-			b.WriteString(fmt.Sprintf("  %-16s %s\n", r.Name, styleErr.Render("cannot inspect: "+r.Error)))
+			b.WriteString(fmt.Sprintf("   %-16s %s\n", r.Name, styleErr.Render("cannot inspect: "+r.Error)))
 		case r.Unsafe():
-			b.WriteString(fmt.Sprintf("  %-16s %s\n", r.Name, styleWarn.Render(
+			b.WriteString(fmt.Sprintf("   %-16s %s\n", r.Name, styleWarn.Render(
 				fmt.Sprintf("%d dirty · %d untracked · %d unpushed", r.Dirty, r.Untracked, r.Unpushed))))
 		default:
-			b.WriteString(fmt.Sprintf("  %-16s %s\n", r.Name, styleOK.Render("clean")))
+			b.WriteString(fmt.Sprintf("   %-16s %s\n", r.Name, styleOK.Render("clean")))
 		}
 	}
 	b.WriteString("\n")
@@ -122,17 +147,21 @@ func (m *confirmModel) View() string {
 		if m.deleteBranches {
 			box = "[x]"
 		}
-		b.WriteString(box + " also delete package branches already merged into their base\n\n")
+		b.WriteString(" " + box + " also delete package branches already merged into their base\n\n")
 	}
 	if m.allClean() {
-		b.WriteString("Everything is clean.\n" + keyHelp("y", "confirm", "n/esc", "cancel", "b", "toggle branch deletion"))
+		b.WriteString(" Everything is clean.\n " + keyHelp("y", "confirm", "n/esc", "cancel", "b", "toggle branch deletion"))
 	} else {
-		b.WriteString(styleWarn.Render("This will discard the work above.") + "\nType the package name to confirm:\n")
+		b.WriteString(" " + styleWarn.Render("This will discard the work above.") + "\n Type the package name to confirm:\n ")
 		b.WriteString(m.typed.View() + "\n")
 		if m.msg != "" {
-			b.WriteString(styleErr.Render(m.msg) + "\n")
+			b.WriteString(" " + styleErr.Render(m.msg) + "\n")
 		}
-		b.WriteString(keyHelp("enter", "confirm", "esc", "cancel", "ctrl+b", "toggle branch deletion"))
+		b.WriteString(" " + keyHelp("enter", "confirm", "esc", "cancel", "ctrl+b", "toggle branch deletion"))
 	}
-	return b.String()
+	width := w - 8
+	if width > 84 {
+		width = 84
+	}
+	return dialog(m.title, b.String(), width)
 }

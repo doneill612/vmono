@@ -100,8 +100,8 @@ func TestHomeListsFiltersAndPreviews(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "auth-rework", "beta", "wip.txt"), "x")
 
 	d := newDriver(t, env, "")
-	d.has("payments", "auth-rework", "Purpose of")
-	d.has("*") // dirty marker for auth-rework
+	d.has("payments", "auth-rework", "1A")
+	d.has("dirty", "clean") // auth-rework has untracked work
 
 	d.key("/")
 	d.typeText("pay")
@@ -113,7 +113,7 @@ func TestHomeListsFiltersAndPreviews(t *testing.T) {
 	d.key("j")
 	d.key("k")
 	d.key("?")
-	d.has("launch the package's default harness", "copy the package path")
+	d.has("Copy path", "Command bar")
 }
 
 func TestHomeEnterRequestsLaunch(t *testing.T) {
