@@ -123,13 +123,20 @@ func (c *Core) ResolvePackage(arg string) (*Package, error) {
 
 // Summary is one row of the package list.
 type Summary struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Branch     string `json:"branch"`
-	Harness    string `json:"harness,omitempty"`
-	Members    int    `json:"members"`
-	Dirty      bool   `json:"dirty"`
-	LastOpened string `json:"last_opened,omitempty"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Branch  string `json:"branch"`
+	Harness string `json:"harness,omitempty"`
+	Members int    `json:"members"`
+	// Active and Reference split Members by mode.
+	Active    int `json:"active"`
+	Reference int `json:"reference"`
+	// Sources lists each member's source repo as written in the manifest.
+	// It is for callers that relate packages to repos and is not part of
+	// the JSON output.
+	Sources    []string `json:"-"`
+	Dirty      bool     `json:"dirty"`
+	LastOpened string   `json:"last_opened,omitempty"`
 }
 
 // List returns every package under the package root, most recently opened
@@ -158,6 +165,14 @@ func (c *Core) List(withStatus bool) ([]Summary, error) {
 			continue
 		}
 		s := Summary{Name: p.Name, Path: p.Dir, Branch: p.M.Branch, Harness: p.M.Harness, Members: len(p.M.Members)}
+		for _, mem := range p.M.Members {
+			if mem.Mode == manifest.ModeReference {
+				s.Reference++
+			} else {
+				s.Active++
+			}
+			s.Sources = append(s.Sources, mem.Source)
+		}
 		if ip, ok := c.Idx.Packages[p.Name]; ok && !ip.LastOpened.IsZero() {
 			s.LastOpened = ip.LastOpened.Format("2006-01-02T15:04:05Z07:00")
 		}
