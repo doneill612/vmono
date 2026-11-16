@@ -108,7 +108,10 @@ func TestIndexRoundTripAndOrdering(t *testing.T) {
 	idx := index.LoadFrom(file)
 	idx.SetPackage("one", "/p/one")
 	idx.SetPackage("two", "/p/two")
-	idx.RecordLaunch("two", "claude", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	first := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	later := first.Add(48 * time.Hour)
+	idx.RecordLaunch("two", "alpha", "claude", first)
+	idx.RecordLaunch("two", "beta", "claude", later)
 	idx.AddRepo(index.Repo{Path: "/r/x"})
 	if idx.AddRepo(index.Repo{Path: "/r/x"}) {
 		t.Error("duplicate AddRepo should report false")
@@ -118,8 +121,18 @@ func TestIndexRoundTripAndOrdering(t *testing.T) {
 	}
 	got := index.LoadFrom(file)
 	sorted := got.SortedPackages()
-	if len(sorted) != 2 || sorted[0].Name != "two" || len(got.Launches) != 1 || len(got.Repos) != 1 {
+	if len(sorted) != 2 || sorted[0].Name != "two" || len(got.Launches) != 2 || len(got.Repos) != 1 {
 		t.Errorf("round trip/order wrong: %+v", got)
+	}
+	if got.Launches[1].Session != "beta" || !got.Packages["two"].LastOpened.Equal(later) {
+		t.Errorf("the package is last opened when its latest session was: %+v", got.Packages["two"])
+	}
+	if !got.SessionOpened("two", "alpha").Equal(first) || !got.SessionOpened("two", "beta").Equal(later) || !got.SessionOpened("two", "ghost").IsZero() {
+		t.Errorf("per-session last opened lost: %+v", got.Packages["two"].Sessions)
+	}
+	got.RemoveSession("two", "alpha")
+	if !got.SessionOpened("two", "alpha").IsZero() || !got.Packages["two"].LastOpened.Equal(later) {
+		t.Error("removing a session forgets its time but not the package's")
 	}
 	if bad := index.LoadFrom(filepath.Join(t.TempDir(), "missing.json")); len(bad.Packages) != 0 {
 		t.Error("missing file should yield empty index")
