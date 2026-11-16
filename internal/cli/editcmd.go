@@ -46,7 +46,7 @@ func newEditCmd() *cobra.Command {
 	var force, reuse bool
 	cmd := &cobra.Command{
 		Use:   "edit [pkg] [--force] [--reuse-branch]",
-		Short: "Open the manifest in $EDITOR, then sync",
+		Short: "Open the package manifest in $EDITOR, then apply it to every session",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, p, err := resolve(packageArg(args))
@@ -96,6 +96,6 @@ func newEditCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "allow removals that discard unsaved work")
-	cmd.Flags().BoolVar(&reuse, "reuse-branch", false, "check out the package branch if it already exists")
+	cmd.Flags().BoolVar(&reuse, "reuse-branch", false, "check out each session branch if it already exists")
 	return cmd
 }

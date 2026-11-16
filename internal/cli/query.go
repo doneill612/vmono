@@ -38,8 +38,12 @@ func newLsCmd() *cobra.Command {
 				return nil
 			}
 			tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tMEMBERS\tBRANCH\tDIRTY\tLAST OPENED")
+			fmt.Fprintln(tw, "NAME\tMEMBERS\tSESSIONS\tDIRTY\tLAST OPENED")
 			for _, s := range list {
+				if s.Legacy {
+					fmt.Fprintf(tw, "%s\t-\t-\t\tneeds migration: run `vmono doctor --fix`\n", s.Name)
+					continue
+				}
 				dirty := ""
 				if s.Dirty {
 					dirty = "*"
@@ -48,7 +52,7 @@ func newLsCmd() *cobra.Command {
 				if opened == "" {
 					opened = "-"
 				}
-				fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\n", s.Name, s.Members, s.Branch, dirty, opened)
+				fmt.Fprintf(tw, "%s\t%d\t%d\t%s\t%s\n", s.Name, s.Members, s.Sessions, dirty, opened)
 			}
 			return tw.Flush()
 		},
@@ -93,24 +97,24 @@ func newReposCmd() *cobra.Command {
 func newStatusCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "status [pkg] [--json]",
-		Short: "Show each member's branch, dirty state and ahead/behind",
+		Use:   "status [pkg[/session]] [--json]",
+		Short: "Show each member's branch, dirty state and ahead/behind in a session",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := loadCore()
 			if err != nil {
 				return err
 			}
-			p, err := c.ResolvePackage(packageArg(args))
+			s, err := c.ResolveSession(packageArg(args))
 			if err != nil {
 				return err
 			}
-			st := c.Status(p)
+			st := c.Status(s)
 			out := cmd.OutOrStdout()
 			if asJSON {
 				return printJSON(out, st)
 			}
-			fprintf(out, "%s  (%s)\n", st.Name, st.Branch)
+			fprintf(out, "%s/%s  (%s)\n", st.Package, st.Session, st.Branch)
 			tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 			for _, m := range st.Members {
 				fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n", m.Name, m.Mode, where(m), cleanliness(m), aheadBehind(m))
@@ -163,26 +167,35 @@ func aheadBehind(m core.MemberStatus) string {
 	return fmt.Sprintf("↑%d ↓%d", m.Ahead, m.Behind)
 }
 
-// newPathCmd builds `vmono path`.
+// newPathCmd builds `vmono path`. "pkg/session" prints a session directory,
+// "pkg" prints the package directory, and with no argument it is the session
+// the working directory is in, or else its package.
 func newPathCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "path <pkg> [--json]",
-		Short: "Print the package path, for cd \"$(vmono path x)\"",
+		Use:   "path [pkg[/session]] [--json]",
+		Short: "Print a session or package path, for cd \"$(vmono path pkg/session)\"",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := loadCore()
 			if err != nil {
 				return err
 			}
-			p, err := c.ResolvePackage(packageArg(args))
+			p, s, err := c.ResolveContext(packageArg(args))
 			if err != nil {
 				return err
 			}
-			if asJSON {
-				return printJSON(cmd.OutOrStdout(), map[string]string{"name": p.Name, "path": p.Dir})
+			dir := p.Dir
+			info := map[string]string{"name": p.Name}
+			if s != nil {
+				dir = s.Dir
+				info["session"] = s.Name
 			}
-			fprintf(cmd.OutOrStdout(), "%s\n", p.Dir)
+			info["path"] = dir
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), info)
+			}
+			fprintf(cmd.OutOrStdout(), "%s\n", dir)
 			return nil
 		},
 	}
@@ -195,7 +208,7 @@ func newDeleteCmd() *cobra.Command {
 	var force, deleteBranches bool
 	cmd := &cobra.Command{
 		Use:   "delete <pkg> [--force] [--delete-branches]",
-		Short: "Tear down a package",
+		Short: "Tear down a package and every one of its sessions",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := loadCore()
@@ -223,7 +236,7 @@ func newDeleteCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "delete even if members have unsaved work")
-	cmd.Flags().BoolVar(&deleteBranches, "delete-branches", false, "also delete package branches already merged into their base")
+	cmd.Flags().BoolVar(&force, "force", false, "delete even if members have unsaved work in any session")
+	cmd.Flags().BoolVar(&deleteBranches, "delete-branches", false, "also delete session branches already merged into their base")
 	return cmd
 }

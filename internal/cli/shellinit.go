@@ -41,7 +41,7 @@ end
 func newShellInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:       "shell-init zsh|bash|fish|pwsh",
-		Short:     "Print a vcd <pkg> shell function; eval its output in your shell rc",
+		Short:     "Print a vcd <pkg>[/session] shell function; eval its output in your shell rc",
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: []string{"zsh", "bash", "fish", "pwsh"},
 		RunE: func(cmd *cobra.Command, args []string) error {

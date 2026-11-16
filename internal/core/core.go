@@ -283,6 +283,42 @@ func (c *Core) ResolveSession(arg string) (*Session, error) {
 	return c.soleSession(p)
 }
 
+// ResolveContext loads the package a command is about and, when one is
+// meant, its session. It is for commands that work on a whole package but
+// can also report on or act in one session:
+//
+//   - "package/session" names both;
+//   - "package" names the package only;
+//   - an empty arg uses the working directory (or VMONO_ROOT): inside a
+//     session it is that session and its package, and in a package directory
+//     outside any session it is the package only.
+func (c *Core) ResolveContext(arg string) (*Package, *Session, error) {
+	switch {
+	case strings.Contains(arg, "/"):
+		s, err := c.ResolveSession(arg)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.Pkg, s, nil
+	case arg != "":
+		p, err := c.Load(arg)
+		return p, nil, err
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := manifest.FindSession(wd); err == nil {
+		s, err := c.ResolveSession("")
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.Pkg, s, nil
+	}
+	p, err := c.ResolvePackage("")
+	return p, nil, err
+}
+
 // Summary is one row of the package list.
 type Summary struct {
 	Name    string `json:"name"`

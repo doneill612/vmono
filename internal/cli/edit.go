@@ -34,29 +34,53 @@ func resolve(arg string) (*core.Core, *core.Package, error) {
 	return c, p, nil
 }
 
-// newShowCmd builds `vmono show`.
+// newShowCmd builds `vmono show`. Inside a session (or given pkg/session)
+// each member also carries its git status in that session.
 func newShowCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "show [pkg] [--json]",
-		Short: "Show the package's purpose, context, notes and members",
+		Use:   "show [pkg[/session]] [--json]",
+		Short: "Show the package's purpose, context, notes, sessions and members",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, p, err := resolve(packageArg(args))
+			c, err := loadCore()
 			if err != nil {
 				return err
 			}
-			s := c.Show(p)
+			p, sess, err := c.ResolveContext(packageArg(args))
+			if err != nil {
+				return err
+			}
+			s := c.Show(p, sess)
 			out := cmd.OutOrStdout()
 			if asJSON {
 				return printJSON(out, s)
 			}
-			fprintf(out, "%s  (%s)\n%s\n\n", s.Name, s.Branch, s.Path)
+			title := s.Name
+			if s.Session != "" {
+				title += "/" + s.Session + "  (" + s.Branch + ")"
+			}
+			fprintf(out, "%s\n%s\n\n", title, s.Path)
 			section(out, "Purpose", s.Purpose)
 			section(out, "Context", s.Context)
+			if len(s.Sessions) > 0 {
+				fprintf(out, "Sessions\n")
+				for _, ss := range s.Sessions {
+					mark := " "
+					if ss.Name == s.Session {
+						mark = "*"
+					}
+					fprintf(out, "  %s %-16s %s\n", mark, ss.Name, ss.Branch)
+				}
+				fprintf(out, "\n")
+			}
 			fprintf(out, "Members\n")
 			for _, m := range s.Members {
-				fprintf(out, "  %-16s %-9s %-22s %s\n", m.Name, m.Mode, where(m.MemberStatus), cleanliness(m.MemberStatus))
+				if s.Session != "" {
+					fprintf(out, "  %-16s %-9s %-22s %s\n", m.Name, m.Mode, where(m.MemberStatus), cleanliness(m.MemberStatus))
+				} else {
+					fprintf(out, "  %-16s %-9s\n", m.Name, m.Mode)
+				}
 				if m.Role != "" {
 					fprintf(out, "      %s\n", m.Role)
 				}
@@ -171,7 +195,7 @@ func newAddCmd() *cobra.Command {
 	var copyGlobs []string
 	cmd := &cobra.Command{
 		Use:   "add [pkg] <repo> [--ref] [--role TEXT]",
-		Short: "Add a member (a known repo name or a path to any git repo)",
+		Short: "Add a member to the package, and so to every session (a known repo name or a path to any git repo)",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg, rest := splitPkgArgs(args, 2)
@@ -201,7 +225,8 @@ func newAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fprintf(cmd.OutOrStdout(), "added %s at %s/%s\n", r.Name, p.Dir, added)
+			names, _ := p.Sessions()
+			fprintf(cmd.OutOrStdout(), "added %s (%s) to %d session(s)\n", r.Name, added, len(names))
 			return nil
 		},
 	}
@@ -211,7 +236,7 @@ func newAddCmd() *cobra.Command {
 	f.StringVar(&name, "name", "", "member name (default: the repo directory name)")
 	f.StringVar(&base, "base", "", "base ref for an active member, or the ref for a reference member (default origin/HEAD)")
 	f.StringSliceVar(&copyGlobs, "copy", nil, "untracked file globs to copy from the source repo")
-	f.BoolVar(&reuse, "reuse-branch", false, "check out the package branch if it already exists in the repo")
+	f.BoolVar(&reuse, "reuse-branch", false, "check out each session branch if it already exists in the repo")
 	return cmd
 }
 
@@ -220,7 +245,7 @@ func newRmCmd() *cobra.Command {
 	var force, deleteBranch bool
 	cmd := &cobra.Command{
 		Use:   "rm [pkg] <member> [--force] [--delete-branch]",
-		Short: "Remove a member",
+		Short: "Remove a member from the package, and so from every session",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg, rest := splitPkgArgs(args, 2)
@@ -244,7 +269,7 @@ func newRmCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "remove even if the member has unsaved work")
-	cmd.Flags().BoolVar(&deleteBranch, "delete-branch", false, "also delete the package branch if merged into its base")
+	cmd.Flags().BoolVar(&force, "force", false, "remove even if the member has unsaved work in any session")
+	cmd.Flags().BoolVar(&deleteBranch, "delete-branch", false, "also delete each session branch if merged into its base")
 	return cmd
 }

@@ -12,30 +12,30 @@ import (
 // observe a launch without replacing the test process.
 var launchHarness = harness.Run
 
-// newOpenCmd builds `vmono open`, which launches a harness at the package
+// newOpenCmd builds `vmono open`, which launches a harness at a session
 // root. Everything after `--` is passed through to the harness.
 func newOpenCmd() *cobra.Command {
 	var harnessName string
 	cmd := &cobra.Command{
-		Use:   "open <pkg> [--harness H] [-- ARGS]",
-		Short: "Launch a harness at the package root",
+		Use:   "open [pkg[/session]] [--harness H] [-- ARGS]",
+		Short: "Launch a harness at a session root",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkgArgs, extra := args, []string(nil)
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 				pkgArgs, extra = args[:dash], args[dash:]
 			}
 			if len(pkgArgs) > 1 {
-				return errors.New("open takes at most one package; put harness arguments after --")
+				return errors.New("open takes at most one session; put harness arguments after --")
 			}
 			c, err := loadCore()
 			if err != nil {
 				return err
 			}
-			p, err := c.ResolvePackage(packageArg(pkgArgs))
+			s, err := c.ResolveSession(packageArg(pkgArgs))
 			if err != nil {
 				return err
 			}
-			l, err := harness.Prepare(c, p, harnessName, extra)
+			l, err := harness.Prepare(c, s, harnessName, extra)
 			if err != nil {
 				return err
 			}

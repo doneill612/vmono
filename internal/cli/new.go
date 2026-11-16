@@ -10,19 +10,23 @@ import (
 	"github.com/doneill612/vmono/internal/manifest"
 )
 
-// newNewCmd builds `vmono new`, which creates a package from known repo
-// names or paths.
+// newNewCmd builds `vmono new`, which defines a package from known repo
+// names or paths. The package holds no worktrees; with --session it also
+// starts its first session.
 func newNewCmd() *cobra.Command {
 	var active, refs []string
-	var purposeFile, contextFile, branch, harness string
+	var purposeFile, contextFile, branch, harness, session string
 	var reuse bool
 	cmd := &cobra.Command{
-		Use:   "new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--branch B] [--harness H]",
-		Short: "Create a package",
+		Use:   "new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--branch B]]",
+		Short: "Define a package, and optionally start its first session",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(active)+len(refs) == 0 {
 				return errors.New("a package needs at least one member: pass --active and/or --ref")
+			}
+			if session == "" && (branch != "" || reuse) {
+				return errors.New("--branch and --reuse-branch belong to a session: pass --session NAME, or use `vmono session new`")
 			}
 			c, err := loadCore()
 			if err != nil {
@@ -41,7 +45,7 @@ func newNewCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := &manifest.Manifest{Name: args[0], Branch: branch, Harness: harness, Purpose: purpose, Context: context}
+			m := &manifest.Manifest{Name: args[0], Harness: harness, Purpose: purpose, Context: context}
 			for _, group := range []struct {
 				names []string
 				mode  string
@@ -56,15 +60,28 @@ func newNewCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			var p *core.Package
+			var s *core.Session
 			err = withEvents(cmd.ErrOrStderr(), c, func() error {
 				var cerr error
-				p, cerr = c.Create(m, core.CreateOptions{ReuseBranch: reuse})
+				if p, cerr = c.CreatePackage(m); cerr != nil {
+					return cerr
+				}
+				if session != "" {
+					s, cerr = c.CreateSession(p, session, core.SessionOptions{Branch: branch, ReuseBranch: reuse})
+				}
 				return cerr
 			})
 			if err != nil {
+				if p != nil && session != "" {
+					return fmt.Errorf("%w\nthe package %s was created; retry the session with `vmono session new %s %s`", err, p.Name, p.Name, session)
+				}
 				return err
 			}
-			fprintf(out, "%s\n", p.Dir)
+			if s != nil {
+				fprintf(out, "%s\n", s.Dir)
+			} else {
+				fprintf(out, "%s\n", p.Dir)
+			}
 			return nil
 		},
 	}
@@ -73,8 +90,9 @@ func newNewCmd() *cobra.Command {
 	f.StringSliceVar(&refs, "ref", nil, "repos to include as read-only reference members")
 	f.StringVar(&purposeFile, "purpose-file", "", "file holding the package purpose (- for stdin)")
 	f.StringVar(&contextFile, "context-file", "", "file holding extra context (- for stdin)")
-	f.StringVar(&branch, "branch", "", "package branch (default: <branch_prefix><pkg>)")
 	f.StringVar(&harness, "harness", "", "default harness for this package")
-	f.BoolVar(&reuse, "reuse-branch", false, "check out the branch if it already exists in a source repo")
+	f.StringVar(&session, "session", "", "also start a first session with this name")
+	f.StringVar(&branch, "branch", "", "with --session: the session branch (default: <branch_prefix><pkg>/<session>)")
+	f.BoolVar(&reuse, "reuse-branch", false, "with --session: check out the branch if it already exists in a source repo")
 	return cmd
 }

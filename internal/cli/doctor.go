@@ -11,7 +11,7 @@ func newDoctorCmd() *cobra.Command {
 	var fix, asJSON bool
 	cmd := &cobra.Command{
 		Use:   "doctor [--fix] [--json]",
-		Short: "Find drift (missing worktrees, moved sources, stale entries, orphans) and rebuild the index",
+		Short: "Find drift (missing worktrees, moved sources, stale entries, orphans), migrate pre-session packages, and rebuild the index",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := loadCore()
@@ -34,6 +34,9 @@ func newDoctorCmd() *cobra.Command {
 						state = "fixed"
 					}
 					who := f.Package
+					if f.Session != "" {
+						who += "/" + f.Session
+					}
 					if f.Member != "" {
 						who += "/" + f.Member
 					}
@@ -66,15 +69,19 @@ func newDoctorCmd() *cobra.Command {
 func newInspectCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "inspect [pkg] --json",
-		Short: "Print the full resolved model: paths, git common dirs, branches, harness command",
+		Use:   "inspect [pkg[/session]] --json",
+		Short: "Print a session's full resolved model: paths, git common dirs, branches, harness command",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, p, err := resolve(packageArg(args))
+			c, err := loadCore()
 			if err != nil {
 				return err
 			}
-			res, err := c.Inspect(p)
+			s, err := c.ResolveSession(packageArg(args))
+			if err != nil {
+				return err
+			}
+			res, err := c.Inspect(s)
 			if err != nil {
 				return err
 			}

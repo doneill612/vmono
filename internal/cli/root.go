@@ -15,7 +15,7 @@ import (
 func NewRoot(runTUI func() error) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "vmono",
-		Short:         "Manage packages of git worktrees for coding harnesses",
+		Short:         "Manage packages of repos, and the sessions that work on them",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -34,6 +34,7 @@ func NewRoot(runTUI func() error) *cobra.Command {
 		newPathCmd(),
 		newDeleteCmd(),
 		newOpenCmd(),
+		newSessionCmd(),
 		newShowCmd(),
 		newDescribeCmd(),
 		newRoleCmd(),

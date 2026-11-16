@@ -33,13 +33,14 @@ func TestNewLsStatusPathDelete(t *testing.T) {
 	purpose := filepath.Join(env.Root, "purpose.md")
 	testutil.WriteFile(t, purpose, "Do the thing.\n")
 
-	out, stderr, err := run(t, "new", "demo", "--active", a, "--ref", b, "--purpose-file", purpose)
+	out, stderr, err := run(t, "new", "demo", "--active", a, "--ref", b, "--purpose-file", purpose, "--session", "work")
 	if err != nil {
 		t.Fatalf("new: %v\n%s", err, stderr)
 	}
 	dir := strings.TrimSpace(out)
-	if !strings.HasSuffix(dir, "demo") {
-		t.Fatalf("new should print the package path, got %q", out)
+	pkgDir := filepath.Dir(dir)
+	if filepath.Base(dir) != "work" || filepath.Base(pkgDir) != "demo" {
+		t.Fatalf("new --session should print the session path, got %q", out)
 	}
 	if !strings.Contains(stderr, "worktree add") {
 		t.Errorf("progress lines missing from stderr: %q", stderr)
@@ -54,7 +55,7 @@ func TestNewLsStatusPathDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	var list []core.Summary
-	if err := json.Unmarshal([]byte(out), &list); err != nil || len(list) != 1 || list[0].Members != 2 {
+	if err := json.Unmarshal([]byte(out), &list); err != nil || len(list) != 1 || list[0].Members != 2 || list[0].Sessions != 1 {
 		t.Fatalf("ls --json = %q, %v", out, err)
 	}
 	if out, _, _ = run(t, "ls"); !strings.Contains(out, "demo") {
@@ -65,7 +66,7 @@ func TestNewLsStatusPathDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var st core.PackageStatus
+	var st core.SessionStatus
 	if err := json.Unmarshal([]byte(out), &st); err != nil || len(st.Members) != 2 {
 		t.Fatalf("status --json = %q, %v", out, err)
 	}
@@ -73,8 +74,11 @@ func TestNewLsStatusPathDelete(t *testing.T) {
 		t.Errorf("status table = %q", out)
 	}
 
-	if out, _, _ = run(t, "path", "demo"); strings.TrimSpace(out) != dir {
-		t.Errorf("path = %q, want %q", out, dir)
+	if out, _, _ = run(t, "path", "demo"); strings.TrimSpace(out) != pkgDir {
+		t.Errorf("path of a package = %q, want %q", out, pkgDir)
+	}
+	if out, _, _ = run(t, "path", "demo/work"); strings.TrimSpace(out) != dir {
+		t.Errorf("path of a session = %q, want %q", out, dir)
 	}
 
 	out, _, err = run(t, "repos", "--json")
@@ -111,6 +115,8 @@ func TestExitCodes(t *testing.T) {
 		{[]string{"new", "x", "--active", "no-such-repo"}, ExitNotFound},
 		{[]string{"new", "x"}, ExitError},
 		{[]string{"new", "Bad_Name", "--active", "."}, ExitError},
+		{[]string{"session", "rm", "ghost/none"}, ExitNotFound},
+		{[]string{"session", "rm", "noslash"}, ExitError},
 	}
 	for _, tc := range cases {
 		_, _, err := run(t, tc.args...)
@@ -137,7 +143,7 @@ func TestInitWritesConfig(t *testing.T) {
 func TestOpenPassesArgsAndHarness(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
-	if _, stderr, err := run(t, "new", "demo", "--active", a); err != nil {
+	if _, stderr, err := run(t, "new", "demo", "--active", a, "--session", "work"); err != nil {
 		t.Fatalf("%v\n%s", err, stderr)
 	}
 
@@ -160,8 +166,8 @@ func TestOpenPassesArgsAndHarness(t *testing.T) {
 	if len(got.Args) != 2 || got.Args[0] != "-c" || got.Args[1] != "true" {
 		t.Errorf("args = %v", got.Args)
 	}
-	if !strings.HasSuffix(got.Dir, "demo") {
-		t.Errorf("dir = %q", got.Dir)
+	if filepath.Base(got.Dir) != "work" || filepath.Base(filepath.Dir(got.Dir)) != "demo" {
+		t.Errorf("dir = %q, want the session root", got.Dir)
 	}
 
 	_, _, err := run(t, "open", "demo", "--harness", "ghost")
@@ -177,11 +183,12 @@ func TestAgentCommandsInferPackageFromCwd(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
 	b := env.NewSource(t, "beta")
-	out, stderr, err := run(t, "new", "work", "--active", a)
+	out, stderr, err := run(t, "new", "work", "--active", a, "--session", "s1")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, stderr)
 	}
 	dir := strings.TrimSpace(out)
+	pkgDir := filepath.Dir(dir)
 
 	// Outside any package, inference fails with not-found.
 	if _, _, err := run(t, "note", "orphan"); ExitCode(err) != ExitNotFound {
@@ -215,6 +222,9 @@ func TestAgentCommandsInferPackageFromCwd(t *testing.T) {
 	if s.Context != "Ticket PLAT-9." || len(s.Notes) != 1 || s.Notes[0].By != "agent:claude" || len(s.Members) != 2 {
 		t.Errorf("show = %+v", s)
 	}
+	if s.Session != "s1" || s.Branch != "vmono/work/s1" || len(s.Sessions) != 1 || s.Members[0].Branch != "vmono/work/s1" {
+		t.Errorf("show from inside a session should report it: %+v", s)
+	}
 	if s.Members[0].Role != "Owns the gateway" || s.Members[1].Role != "SDK client" {
 		t.Errorf("roles = %+v", s.Members)
 	}
@@ -244,10 +254,10 @@ func TestAgentCommandsInferPackageFromCwd(t *testing.T) {
 		t.Errorf("rm unknown member: exit %d", ExitCode(err))
 	}
 
-	log := testutil.Git(t, dir, "log", "--format=%s")
+	log := testutil.Git(t, pkgDir, "log", "--format=%s")
 	for _, want := range []string{"vmono: note (agent:claude)", "vmono: add beta (agent:claude)", "vmono: rm beta (agent:claude)"} {
 		if !strings.Contains(log, want) {
-			t.Errorf("shell log missing %q:\n%s", want, log)
+			t.Errorf("package log missing %q:\n%s", want, log)
 		}
 	}
 }
@@ -297,7 +307,7 @@ func TestEditAppliesEditorChanges(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
 	b := env.NewSource(t, "beta")
-	out, _, err := run(t, "new", "ed", "--active", a)
+	out, _, err := run(t, "new", "ed", "--active", a, "--session", "work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +357,7 @@ func TestEditAppliesEditorChanges(t *testing.T) {
 func TestSyncCommand(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
-	out, _, err := run(t, "new", "sy", "--active", a)
+	out, _, err := run(t, "new", "sy", "--active", a, "--session", "work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,8 +375,8 @@ func TestSyncCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var res core.SyncResult
-	if err := json.Unmarshal([]byte(out), &res); err != nil || len(res.Recreated) != 1 || len(res.Unlisted) != 1 {
+	var res []core.SessionSync
+	if err := json.Unmarshal([]byte(out), &res); err != nil || len(res) != 1 || res[0].Session != "work" || len(res[0].Recreated) != 1 || len(res[0].Unlisted) != 1 {
 		t.Errorf("sync --json = %q, %v", out, err)
 	}
 	if _, _, err := run(t, "sync", "ghost"); ExitCode(err) != ExitNotFound {
@@ -377,7 +387,7 @@ func TestSyncCommand(t *testing.T) {
 func TestDoctorAndInspectCommands(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
-	out, _, err := run(t, "new", "dr", "--active", a)
+	out, _, err := run(t, "new", "dr", "--active", a, "--session", "work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,9 +453,22 @@ func TestEveryReadCommandEmitsValidJSON(t *testing.T) {
 	if _, _, err := run(t, "new", "js", "--active", a); err != nil {
 		t.Fatal(err)
 	}
+	// A package with no sessions still lists, shows and syncs as valid JSON.
+	for _, args := range [][]string{{"show", "js", "--json"}, {"session", "ls", "js", "--json"}, {"sync", "js", "--json"}, {"path", "js", "--json"}} {
+		out, _, err := run(t, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if strings.Contains(out, "null") {
+			t.Errorf("%v: nil slice leaked as null: %s", args, out)
+		}
+	}
+	if _, _, err := run(t, "session", "new", "js", "work"); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{
-		{"ls", "--json"}, {"repos", "--json"}, {"status", "js", "--json"}, {"show", "js", "--json"},
-		{"inspect", "js", "--json"}, {"path", "js", "--json"}, {"sync", "js", "--json"}, {"doctor", "--json"},
+		{"ls", "--json"}, {"repos", "--json"}, {"status", "js", "--json"}, {"show", "js", "--json"}, {"show", "js/work", "--json"},
+		{"inspect", "js", "--json"}, {"path", "js", "--json"}, {"sync", "js", "--json"}, {"doctor", "--json"}, {"session", "ls", "js", "--json"},
 	} {
 		out, _, err := run(t, args...)
 		if err != nil {
@@ -458,5 +481,196 @@ func TestEveryReadCommandEmitsValidJSON(t *testing.T) {
 		if strings.Contains(out, ": null") {
 			t.Errorf("%v: null field in %s", args, out)
 		}
+	}
+}
+
+func TestNewWithoutSessionMakesOnlyThePackage(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+
+	if _, _, err := run(t, "new", "p", "--active", a, "--branch", "x"); err == nil || ExitCode(err) != ExitError {
+		t.Errorf("--branch without --session must be rejected: %v", err)
+	}
+	out, _, err := run(t, "new", "p", "--active", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := strings.TrimSpace(out)
+	if filepath.Base(dir) != "p" {
+		t.Fatalf("should print the package dir: %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "alpha")); err == nil {
+		t.Error("a package has no worktrees until a session starts")
+	}
+	if out, _, _ := run(t, "session", "ls", "p"); !strings.Contains(out, "no sessions") || !strings.Contains(out, "vmono session new p") {
+		t.Errorf("session ls on an empty package = %q", out)
+	}
+	if _, _, err := run(t, "open", "p"); ExitCode(err) != ExitNotFound {
+		t.Errorf("opening a package with no sessions: exit %d (%v)", ExitCode(err), err)
+	}
+}
+
+func TestSessionNewLsRmAndSelection(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	if _, _, err := run(t, "new", "duo", "--active", a+","+b); err != nil {
+		t.Fatal(err)
+	}
+
+	out, stderr, err := run(t, "session", "new", "duo", "one")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	one := strings.TrimSpace(out)
+	out, _, err = run(t, "session", "new", "duo", "two", "--branch", "feat/PLAT-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	two := strings.TrimSpace(out)
+	if _, _, err := run(t, "session", "new", "duo", "one"); err == nil {
+		t.Error("a duplicate session name must fail")
+	}
+	if got := testutil.Git(t, filepath.Join(two, "alpha"), "branch", "--show-current"); got != "feat/PLAT-1" {
+		t.Errorf("--branch ignored: %q", got)
+	}
+	if got := testutil.Git(t, filepath.Join(one, "alpha"), "branch", "--show-current"); got != "vmono/duo/one" {
+		t.Errorf("default branch = %q", got)
+	}
+
+	out, _, err = run(t, "session", "ls", "duo", "--json")
+	var rows []core.SessionSummary
+	if err != nil || json.Unmarshal([]byte(out), &rows) != nil || len(rows) != 2 {
+		t.Fatalf("session ls --json = %q, %v", out, err)
+	}
+	if text, _, _ := run(t, "session", "ls", "duo"); !strings.Contains(text, "feat/PLAT-1") || !strings.Contains(text, "vmono/duo/one") {
+		t.Errorf("session ls table = %q", text)
+	}
+	if text, _, _ := run(t, "ls"); !strings.Contains(text, "duo") {
+		t.Errorf("ls = %q", text)
+	}
+
+	// A bare package is ambiguous with two sessions; the error lists them.
+	var launched []*harness.Launch
+	orig := launchHarness
+	launchHarness = func(l *harness.Launch, _ bool) error { launched = append(launched, l); return nil }
+	t.Cleanup(func() { launchHarness = orig })
+	testutil.WriteFile(t, filepath.Join(env.Root, "cfg", "config.toml"), "default_harness = \"fake\"\n[harness.fake]\ncommand = \"sh\"\n")
+
+	_, _, err = run(t, "open", "duo")
+	if ExitCode(err) != ExitNotFound || !strings.Contains(err.Error(), "duo/NAME") || !strings.Contains(err.Error(), "one, two") {
+		t.Fatalf("ambiguous open: exit %d, %v", ExitCode(err), err)
+	}
+	if _, _, err := run(t, "open", "duo/two"); err != nil {
+		t.Fatal(err)
+	}
+	if len(launched) != 1 || launched[0].Dir != two {
+		t.Fatalf("launched = %+v", launched)
+	}
+	var sess, pkg string
+	for _, kv := range launched[0].Env {
+		switch {
+		case strings.HasPrefix(kv, "VMONO_SESSION="):
+			sess = strings.TrimPrefix(kv, "VMONO_SESSION=")
+		case strings.HasPrefix(kv, "VMONO_PACKAGE="):
+			pkg = strings.TrimPrefix(kv, "VMONO_PACKAGE=")
+		}
+	}
+	if sess != "two" || pkg != "duo" {
+		t.Errorf("env session=%q package=%q", sess, pkg)
+	}
+
+	// From inside a session the session is inferred; from the package dir it is not.
+	t.Chdir(filepath.Join(one, "alpha"))
+	if out, _, err := run(t, "status", "--json"); err != nil || !strings.Contains(out, `"session": "one"`) {
+		t.Errorf("status inside a session = %q, %v", out, err)
+	}
+	if out, _, _ := run(t, "path"); strings.TrimSpace(out) != one {
+		t.Errorf("path inside a session = %q, want %q", out, one)
+	}
+	t.Chdir(filepath.Dir(one))
+	if _, _, err := run(t, "status"); ExitCode(err) != ExitNotFound {
+		t.Errorf("status in a package dir with two sessions: exit %d", ExitCode(err))
+	}
+	if out, _, _ := run(t, "path"); strings.TrimSpace(out) != filepath.Dir(one) {
+		t.Errorf("path in a package dir = %q", out)
+	}
+
+	// A dirty session refuses removal (exit 2) without touching the other.
+	t.Chdir(env.Root)
+	testutil.WriteFile(t, filepath.Join(one, "alpha", "wip"), "x")
+	_, _, err = run(t, "session", "rm", "duo/one")
+	if ExitCode(err) != ExitRefused || !strings.Contains(err.Error(), "one/alpha") {
+		t.Fatalf("dirty session rm: exit %d, %v", ExitCode(err), err)
+	}
+	if out, _, err := run(t, "session", "rm", "duo/one", "--force"); err != nil || !strings.Contains(out, "removed session duo/one") {
+		t.Fatalf("forced session rm = %q, %v", out, err)
+	}
+	if _, err := os.Stat(one); !os.IsNotExist(err) {
+		t.Error("session dir should be gone")
+	}
+	if _, err := os.Stat(filepath.Join(two, "alpha", "README.md")); err != nil {
+		t.Error("the other session must survive")
+	}
+	// Now there is exactly one, so the bare package form works again.
+	if _, _, err := run(t, "open", "duo"); err != nil {
+		t.Errorf("open of a package with one session: %v", err)
+	}
+}
+
+func TestPackageChangesReachEverySessionFromTheCLI(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	if _, _, err := run(t, "new", "wide", "--active", a, "--session", "one"); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := run(t, "session", "new", "wide", "two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	two := strings.TrimSpace(out)
+	one := filepath.Join(filepath.Dir(two), "one")
+
+	if _, _, err := run(t, "note", "wide", "shared learning"); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, err := run(t, "add", "wide", b)
+	if err != nil {
+		t.Fatalf("add: %v\n%s", err, stderr)
+	}
+	if !strings.Contains(out, "2 session(s)") {
+		t.Errorf("add output = %q", out)
+	}
+	for _, dir := range []string{one, two} {
+		agents, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+		if !strings.Contains(string(agents), "shared learning") || !strings.Contains(string(agents), "beta") {
+			t.Errorf("%s AGENTS.md misses the package change:\n%s", dir, agents)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "beta", "README.md")); err != nil {
+			t.Errorf("%s misses the new member's worktree", dir)
+		}
+	}
+	// Package sync covers both sessions; a session sync only its own.
+	if err := os.RemoveAll(filepath.Join(one, "beta")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(two, "beta")); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = run(t, "sync", "wide/one", "--json")
+	var res []core.SessionSync
+	if err != nil || json.Unmarshal([]byte(out), &res) != nil || len(res) != 1 || res[0].Session != "one" {
+		t.Fatalf("session sync = %q, %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Join(two, "beta")); err == nil {
+		t.Error("syncing one session must not touch the other")
+	}
+	out, _, err = run(t, "sync", "wide", "--json")
+	if err != nil || json.Unmarshal([]byte(out), &res) != nil || len(res) != 2 {
+		t.Fatalf("package sync = %q, %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Join(two, "beta", "README.md")); err != nil {
+		t.Error("package sync should rebuild every session")
 	}
 }

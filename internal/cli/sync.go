@@ -9,47 +9,70 @@ import (
 	"github.com/doneill612/vmono/internal/core"
 )
 
-// newSyncCmd builds `vmono sync`.
+// newSyncCmd builds `vmono sync`. Given a session (pkg/session, or from
+// inside one) it syncs that session; given a package, or run from a package
+// directory, it syncs every session of it.
 func newSyncCmd() *cobra.Command {
 	var refs, asJSON bool
 	cmd := &cobra.Command{
-		Use:   "sync [pkg] [--refs] [--json]",
-		Short: "Make the directory match the manifest and regenerate files",
+		Use:   "sync [pkg[/session]] [--refs] [--json]",
+		Short: "Make session directories match the manifest and regenerate files",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, p, err := resolve(packageArg(args))
+			c, err := loadCore()
 			if err != nil {
 				return err
 			}
-			var res core.SyncResult
+			p, s, err := c.ResolveContext(packageArg(args))
+			if err != nil {
+				return err
+			}
+			var results []core.SessionSync
 			events := cmd.ErrOrStderr()
 			if asJSON {
 				events = discardWriter{}
 			}
+			opts := core.SyncOptions{Refs: refs}
 			serr := withEvents(events, c, func() error {
+				if s != nil {
+					res, e := c.Sync(s, opts)
+					results = []core.SessionSync{{Session: s.Name, SyncResult: res}}
+					return e
+				}
 				var e error
-				res, e = c.Sync(p, core.SyncOptions{Refs: refs})
+				results, e = c.SyncPackage(p, opts)
 				return e
 			})
 			out := cmd.OutOrStdout()
 			if asJSON {
-				if err := printJSON(out, res); err != nil {
+				if results == nil {
+					results = []core.SessionSync{}
+				}
+				if err := printJSON(out, results); err != nil {
 					return err
 				}
 				return serr
 			}
-			summarize(out, "recreated", res.Recreated)
-			summarize(out, "moved to latest ref", res.RefsMoved)
-			summarize(out, "not in manifest", res.Unlisted)
-			summarize(out, "regenerated", res.Files)
-			if len(res.Recreated)+len(res.RefsMoved)+len(res.Unlisted)+len(res.Files) == 0 {
-				fprintf(out, "already in sync\n")
+			if len(results) == 0 {
+				fprintf(out, "no sessions to sync\n")
+			}
+			for _, r := range results {
+				if len(results) > 1 {
+					fprintf(out, "%s:\n", r.Session)
+				}
+				summarize(out, "recreated", r.Recreated)
+				summarize(out, "moved to latest ref", r.RefsMoved)
+				summarize(out, "not in manifest", r.Unlisted)
+				summarize(out, "regenerated", r.Files)
+				if len(r.Recreated)+len(r.RefsMoved)+len(r.Unlisted)+len(r.Files) == 0 {
+					fprintf(out, "already in sync\n")
+				}
 			}
 			return serr
 		},
 	}
 	cmd.Flags().BoolVar(&refs, "refs", false, "also move clean reference members to their latest fetched ref")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON: one entry per session synced")
 	return cmd
 }
 
