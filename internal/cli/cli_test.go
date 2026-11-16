@@ -581,14 +581,29 @@ func TestSessionNewLsRmAndSelection(t *testing.T) {
 	}
 
 	// From inside a session the session is inferred; from the package dir it is not.
-	t.Chdir(filepath.Join(one, "alpha"))
+	// This uses os.Chdir rather than t.Chdir on purpose: t.Chdir keeps the
+	// directory it leaves open until the test ends, and on Windows an open
+	// handle on one/alpha stops the forced removal below from deleting it.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	chdir := func(dir string) {
+		t.Helper()
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PWD", dir) // what t.Chdir does, so symlinked temp dirs resolve as before
+	}
+	chdir(filepath.Join(one, "alpha"))
 	if out, _, err := run(t, "status", "--json"); err != nil || !strings.Contains(out, `"session": "one"`) {
 		t.Errorf("status inside a session = %q, %v", out, err)
 	}
 	if out, _, _ := run(t, "path"); strings.TrimSpace(out) != one {
 		t.Errorf("path inside a session = %q, want %q", out, one)
 	}
-	t.Chdir(filepath.Dir(one))
+	chdir(filepath.Dir(one))
 	if _, _, err := run(t, "status"); ExitCode(err) != ExitNotFound {
 		t.Errorf("status in a package dir with two sessions: exit %d", ExitCode(err))
 	}
@@ -597,7 +612,7 @@ func TestSessionNewLsRmAndSelection(t *testing.T) {
 	}
 
 	// A dirty session refuses removal (exit 2) without touching the other.
-	t.Chdir(env.Root)
+	chdir(env.Root)
 	testutil.WriteFile(t, filepath.Join(one, "alpha", "wip"), "x")
 	_, _, err = run(t, "session", "rm", "duo/one")
 	if ExitCode(err) != ExitRefused || !strings.Contains(err.Error(), "one/alpha") {

@@ -84,6 +84,7 @@ func TestPromptEscCancelsWithoutCreating(t *testing.T) {
 
 func TestOpenKeyLaunchesTheMostRecentlyOpenedSession(t *testing.T) {
 	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
 	seed(t, env, "pay", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
 	// Start a second session, then launch it so it becomes the latest.
