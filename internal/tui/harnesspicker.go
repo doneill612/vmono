@@ -14,19 +14,22 @@ import (
 // key on Home and the "Launch now?" step that ends create, edit and sync,
 // where the package's default harness is preselected.
 type harnessPicker struct {
-	e      *env
-	pkg    string
-	title  string
-	names  []string
-	cursor int
-	def    string
-	msg    string
+	e   *env
+	pkg string
+	// session is the session to launch into; empty means the package's only
+	// session.
+	session string
+	title   string
+	names   []string
+	cursor  int
+	def     string
+	msg     string
 }
 
-// newLaunchPicker builds a picker for launching into pkg, with the
-// package's default harness (or the global default) preselected.
-func newLaunchPicker(e *env, pkg, title string) *harnessPicker {
-	p := &harnessPicker{e: e, pkg: pkg, title: title, names: e.core.Cfg.HarnessNames()}
+// newLaunchPicker builds a picker for launching into a session of pkg, with
+// the package's default harness (or the global default) preselected.
+func newLaunchPicker(e *env, pkg, session, title string) *harnessPicker {
+	p := &harnessPicker{e: e, pkg: pkg, session: session, title: title, names: e.core.Cfg.HarnessNames()}
 	pkgHarness := ""
 	if loaded, err := e.core.Load(pkg); err == nil {
 		pkgHarness = loaded.M.Harness
@@ -84,7 +87,7 @@ func (p *harnessPicker) Update(msg tea.Msg) (screen, tea.Cmd) {
 			p.msg = fmt.Sprintf("%q is not on PATH; install it or pick another", h.Command)
 			return p, nil
 		}
-		return p, func() tea.Msg { return launchMsg{LaunchRequest{Package: p.pkg, Harness: name}} }
+		return p, func() tea.Msg { return launchMsg{LaunchRequest{Package: p.pkg, Session: p.session, Harness: name}} }
 	}
 	return p, nil
 }
@@ -92,7 +95,11 @@ func (p *harnessPicker) Update(msg tea.Msg) (screen, tea.Cmd) {
 // View implements screen.
 func (p *harnessPicker) View(w, h int) string {
 	var b strings.Builder
-	b.WriteString(" " + styleTitle.Render(p.title) + styleDim.Render("  "+p.pkg) + "\n\n")
+	target := p.pkg
+	if p.session != "" {
+		target += "/" + p.session
+	}
+	b.WriteString(" " + styleTitle.Render(p.title) + styleDim.Render("  "+target) + "\n\n")
 	for i, name := range p.names {
 		h := p.e.core.Cfg.Harness[name]
 		cursor := "  "

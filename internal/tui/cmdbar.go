@@ -55,11 +55,11 @@ func (b *cmdBar) view(w int, ghost string) string {
 }
 
 // commandNames lists the commands in the order ghost text prefers them.
-var commandNames = []string{"packages", "pkg", "members", "repos", "harnesses", "config", "new", "help", "quit"}
+var commandNames = []string{"packages", "pkg", "sessions", "members", "repos", "harnesses", "config", "new", "help", "quit"}
 
 // commandAliases maps short forms to command names.
 var commandAliases = map[string]string{
-	"p": "packages", "pkg": "packages", "mem": "members", "hs": "harnesses",
+	"p": "packages", "pkg": "packages", "mem": "members", "hs": "harnesses", "sess": "sessions",
 	"h": "help", "?": "help", "q": "quit", "q!": "quit",
 }
 
@@ -68,7 +68,7 @@ func (a *App) candidates(text string) []string {
 	text = strings.ToLower(strings.TrimLeft(text, " "))
 	var out []string
 	if cmd, arg, ok := strings.Cut(text, " "); ok {
-		if commandAliases[cmd] == "members" || cmd == "members" {
+		if full := commandAliases[cmd]; full == "members" || full == "sessions" || cmd == "members" || cmd == "sessions" {
 			names := append([]string(nil), a.env.pkgNames...)
 			sort.Strings(names)
 			for _, n := range names {
@@ -161,7 +161,7 @@ func (a *App) runCommand(text string) tea.Cmd {
 	}
 	args := fields[1:]
 	switch name {
-	case "members":
+	case "sessions":
 		pkg := ""
 		if len(args) > 0 {
 			pkg = args[0]
@@ -169,12 +169,31 @@ func (a *App) runCommand(text string) tea.Cmd {
 			pkg = sel.selectedPackage()
 		}
 		if pkg == "" {
-			return flashErr("usage: members <package>")
+			return flashErr("usage: sessions <package>")
 		}
 		if a.env.pkgKnown && !contains(a.env.pkgNames, pkg) {
 			return flashErr("no such package: " + pkg)
 		}
-		return a.navigate(newMembers(a.env, pkg))
+		return a.navigate(newSessions(a.env, pkg))
+	case "members":
+		target := ""
+		if len(args) > 0 {
+			target = args[0]
+		} else if sel, ok := a.top().(sessionSelector); ok {
+			if pkg, session := sel.selectedSession(); pkg != "" && session != "" {
+				target = pkg + "/" + session
+			}
+		} else if sel, ok := a.top().(packageSelector); ok {
+			target = sel.selectedPackage()
+		}
+		if target == "" {
+			return flashErr("usage: members <package>/<session>")
+		}
+		s, err := a.env.core.ResolveSession(target)
+		if err != nil {
+			return flashErr(err.Error())
+		}
+		return a.navigate(newMembers(a.env, s.Pkg.Name, s.Name))
 	case "repos":
 		return a.navigate(newRepos(a.env))
 	case "harnesses":

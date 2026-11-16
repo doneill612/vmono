@@ -21,12 +21,14 @@ type describeMsg struct {
 	err   error
 }
 
-// describeModel is the scrollable detail view of a package, or of one of
-// its members: purpose, context, notes and paths for a package; location
-// and git state for a member.
+// describeModel is the scrollable detail view of a package, of a package as
+// seen from one of its sessions, or of one member in a session: purpose,
+// context, notes and paths for a package, plus branch and git state when a
+// session is given; location and git state for a member.
 type describeModel struct {
 	e       *env
 	name    string
+	session string
 	member  string
 	pkg     *core.Package
 	build   func(width int) string
@@ -35,49 +37,64 @@ type describeModel struct {
 	renderW int
 }
 
-// newDescribe builds the detail view. member is empty to describe the
-// package itself.
-func newDescribe(e *env, name, member string) *describeModel {
-	return &describeModel{e: e, name: name, member: member, vp: viewport.New(0, 0)}
+// newDescribe builds the detail view. session is empty to describe the
+// package alone, with no live git state; member is empty to describe the
+// package itself rather than one member, and needs a session.
+func newDescribe(e *env, name, session, member string) *describeModel {
+	return &describeModel{e: e, name: name, session: session, member: member, vp: viewport.New(0, 0)}
 }
 
 // id identifies the subject so stale results are ignored.
-func (m *describeModel) id() string { return m.name + "/" + m.member }
+func (m *describeModel) id() string { return m.name + "/" + m.session + "/" + m.member }
 
 // Init implements screen.
 func (m *describeModel) Init() tea.Cmd { return m.load() }
 
 // load gathers the data off the UI goroutine.
 func (m *describeModel) load() tea.Cmd {
-	c, name, member, id := m.e.core, m.name, m.member, m.id()
+	c, name, session, member, id := m.e.core, m.name, m.session, m.member, m.id()
 	return func() tea.Msg {
 		p, err := c.Load(name)
 		if err != nil {
 			return describeMsg{id: id, err: err}
 		}
-		ins, err := c.Inspect(p)
+		rows, err := c.ListSessions(p, false)
 		if err != nil {
 			return describeMsg{id: id, pkg: p, err: err}
 		}
-		st := c.Status(p)
+		if session == "" {
+			return describeMsg{id: id, pkg: p, build: func(w int) string { return describePackage(p, rows, nil, nil, w) }}
+		}
+		s, err := c.LoadSession(p, session)
+		if err != nil {
+			return describeMsg{id: id, pkg: p, err: err}
+		}
+		ins, err := c.Inspect(s)
+		if err != nil {
+			return describeMsg{id: id, pkg: p, err: err}
+		}
+		st := c.Status(s)
 		if member == "" {
-			return describeMsg{id: id, pkg: p, build: func(w int) string { return describePackage(p, ins, st, w) }}
+			return describeMsg{id: id, pkg: p, build: func(w int) string { return describePackage(p, rows, &ins, &st, w) }}
 		}
 		for i, im := range ins.Members {
 			if im.Name == member {
 				ms := st.Members[i]
-				return describeMsg{id: id, pkg: p, build: func(w int) string { return describeMember(p, im, ms, w) }}
+				return describeMsg{id: id, pkg: p, build: func(w int) string { return describeMember(p, s, im, ms, w) }}
 			}
 		}
-		return describeMsg{id: id, pkg: p, err: fmt.Errorf("%s has no member %q", name, member)}
+		return describeMsg{id: id, pkg: p, err: fmt.Errorf("%s/%s has no member %q", name, session, member)}
 	}
 }
 
 // Title implements screen.
 func (m *describeModel) Title() string {
 	t := "describe(" + m.name + ")"
+	if m.session != "" {
+		t = "describe(" + m.name + "/" + m.session + ")"
+	}
 	if m.member != "" {
-		t = "describe(" + m.name + "/" + m.member + ")"
+		t = "describe(" + m.name + "/" + m.session + "/" + m.member + ")"
 	}
 	if m.build != nil && !(m.vp.AtTop() && m.vp.AtBottom()) {
 		t += fmt.Sprintf("[%d%%]", int(m.vp.ScrollPercent()*100))
@@ -187,28 +204,39 @@ func textBlock(title, text string, w int) string {
 	return b.String()
 }
 
-// describePackage renders the package detail view.
-func describePackage(p *core.Package, ins core.InspectResult, st core.PackageStatus, w int) string {
+// describePackage renders the package detail view. With ins and st (a
+// session was given) it also shows that session's branch and each member's
+// live state; without them it shows the package as defined.
+func describePackage(p *core.Package, sessions []core.SessionSummary, ins *core.InspectResult, st *core.SessionStatus, w int) string {
 	var b strings.Builder
 	h := "default"
 	if p.M.Harness != "" {
 		h = p.M.Harness
 	}
-	if ins.Harness != nil {
+	if ins != nil && ins.Harness != nil {
 		h = fmt.Sprintf("%s (%s)", ins.Harness.Name, ins.Harness.Command)
 		if !ins.Harness.Available {
 			h += " — not found on PATH"
 		}
 	}
 	b.WriteString("\n")
-	for _, f := range [][2]string{
+	fields := [][2]string{
 		{"Name", p.Name},
 		{"Path", paths.Contract(p.Dir)},
-		{"Branch", p.M.Branch},
-		{"Harness", h},
-		{"Created", p.M.Created.Local().Format("2006-01-02 15:04")},
-		{"Manifest", paths.Contract(ins.ManifestPath)},
-	} {
+	}
+	if ins != nil {
+		fields = append(fields,
+			[2]string{"Session", ins.Session},
+			[2]string{"Session path", paths.Contract(ins.Path)},
+			[2]string{"Branch", ins.Branch},
+		)
+	}
+	fields = append(fields,
+		[2]string{"Harness", h},
+		[2]string{"Created", p.M.Created.Local().Format("2006-01-02 15:04")},
+		[2]string{"Manifest", paths.Contract(manifest.Path(p.Dir))},
+	)
+	for _, f := range fields {
 		b.WriteString(field(f[0], f[1], w) + "\n")
 	}
 	b.WriteString(textBlock("Purpose", p.M.Purpose, w))
@@ -224,28 +252,44 @@ func describePackage(p *core.Package, ins core.InspectResult, st core.PackageSta
 		b.WriteString("   " + strings.ReplaceAll(wrap(n.Text, w-5), "\n", "\n   ") + "\n")
 	}
 
+	b.WriteString("\n " + styleHeaderCol.Render("SESSIONS") + "\n")
+	if len(sessions) == 0 {
+		b.WriteString("   " + styleDim.Render("none yet") + "\n")
+	}
+	for _, s := range sessions {
+		b.WriteString("   " + styleLabel.Render(s.Name) + styleDim.Render("  "+s.Branch) + "\n")
+	}
+
 	b.WriteString("\n " + styleHeaderCol.Render("MEMBERS") + "\n")
-	for i, im := range ins.Members {
-		ms := st.Members[i]
+	for i, mem := range p.M.Members {
 		mode := "active"
-		if im.Mode == manifest.ModeReference {
+		if mem.Mode == manifest.ModeReference {
 			mode = "reference"
 		}
-		where := ms.Branch
-		if where == "" {
-			where = ms.Ref
+		line := "   " + styleLabel.Render(mem.Name) + styleDim.Render("  "+mode)
+		if st != nil {
+			ms := st.Members[i]
+			where := ms.Branch
+			if where == "" {
+				where = ms.Ref
+			}
+			line = "   " + styleLabel.Render(mem.Name) + styleDim.Render("  "+mode+"  "+where) + "  " + memberState(ms)
 		}
-		b.WriteString("   " + styleLabel.Render(im.Name) + styleDim.Render("  "+mode+"  "+where) + "  " + memberState(ms) + "\n")
-		if im.Role != "" {
-			b.WriteString("     " + strings.ReplaceAll(wrap(im.Role, w-7), "\n", "\n     ") + "\n")
+		b.WriteString(line + "\n")
+		if mem.Role != "" {
+			b.WriteString("     " + strings.ReplaceAll(wrap(mem.Role, w-7), "\n", "\n     ") + "\n")
 		}
-		b.WriteString("     " + styleDim.Render(truncate(paths.Contract(im.Path), w-7)) + "\n")
+		if ins != nil {
+			b.WriteString("     " + styleDim.Render(truncate(paths.Contract(ins.Members[i].Path), w-7)) + "\n")
+		} else {
+			b.WriteString("     " + styleDim.Render(truncate(mem.Source, w-7)) + "\n")
+		}
 	}
 	return b.String()
 }
 
-// describeMember renders one member's detail view.
-func describeMember(p *core.Package, im core.InspectMember, ms core.MemberStatus, w int) string {
+// describeMember renders one member's detail view in a session.
+func describeMember(p *core.Package, sess *core.Session, im core.InspectMember, ms core.MemberStatus, w int) string {
 	var b strings.Builder
 	mode := "active"
 	if im.Mode == manifest.ModeReference {
@@ -254,6 +298,7 @@ func describeMember(p *core.Package, im core.InspectMember, ms core.MemberStatus
 	b.WriteString("\n")
 	for _, f := range [][2]string{
 		{"Package", p.Name},
+		{"Session", sess.Name},
 		{"Member", im.Name},
 		{"Mode", mode},
 		{"Role", im.Role},

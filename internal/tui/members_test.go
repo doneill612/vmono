@@ -7,15 +7,17 @@ import (
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
-func TestEnterDrillsIntoMembersAndEscReturns(t *testing.T) {
+func TestEnterDrillsIntoSessionsThenMembersAndEscReturns(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
 	seed(t, env, "payments", a, b)
-	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "payments", "beta", "wip.txt"), "x")
+	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "payments", "work", "beta", "wip.txt"), "x")
 
 	d := newDriver(t, env, "")
 	d.key("enter")
-	d.has("members(payments)[2]", "alpha", "beta", "active", "role", "<payments>")
+	d.has("sessions(payments)[1]", "work", "vmono/payments", "<payments>")
+	d.key("m")
+	d.has("members(payments/work)[2]", "alpha", "beta", "active", "role", "<work>")
 	d.has("UNTR")
 	if r, _ := d.app.top().(*membersModel).tb.selected(); r.id != "alpha" {
 		t.Fatalf("selected %q", r.id)
@@ -28,17 +30,26 @@ func TestEnterDrillsIntoMembersAndEscReturns(t *testing.T) {
 	}
 
 	d.key("esc")
+	d.has("sessions(payments)[1]")
+	d.lacks("members(payments/work)")
+	d.key("esc")
 	d.has("packages[1]")
-	d.lacks("members(payments)")
+	d.lacks("sessions(payments)")
 }
 
-func TestMembersOpenLaunchesPackage(t *testing.T) {
+func TestSessionsAndMembersOpenLaunchTheSession(t *testing.T) {
 	env := testutil.NewEnv(t)
 	seed(t, env, "payments", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
 	d.key("enter", "o")
-	if !d.quit || d.app.Launch() == nil || d.app.Launch().Package != "payments" {
-		t.Fatalf("launch = %+v", d.app.Launch())
+	if l := d.app.Launch(); !d.quit || l == nil || l.Package != "payments" || l.Session != "work" {
+		t.Fatalf("launch from sessions = %+v", l)
+	}
+
+	d = newDriver(t, env, "")
+	d.key("enter", "m", "o")
+	if l := d.app.Launch(); !d.quit || l == nil || l.Package != "payments" || l.Session != "work" {
+		t.Fatalf("launch from members = %+v", l)
 	}
 }
 
@@ -48,14 +59,20 @@ func TestDescribePackageAndMember(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("d")
-	d.has("describe(payments)", "PURPOSE", "Purpose of payments", "CONTEXT", "NOTES", "MEMBERS", "alpha", "vmono/payments")
+	d.has("describe(payments)", "PURPOSE", "Purpose of payments", "CONTEXT", "NOTES", "SESSIONS", "work", "MEMBERS", "alpha")
+	d.lacks("Branch:") // a package alone has no branch; its sessions do
 	d.key("esc")
 	d.has("packages[1]")
 
 	d.key("enter", "d")
-	d.has("describe(payments/alpha)", "LOCATION", "Source repo", "STATE", "Branch/ref", "0 modified")
+	d.has("describe(payments/work)", "Session", "Branch", "vmono/payments", "MEMBERS", "alpha")
 	d.key("esc")
-	d.has("members(payments)")
+	d.has("sessions(payments)")
+
+	d.key("m", "d")
+	d.has("describe(payments/work/alpha)", "LOCATION", "Source repo", "STATE", "Branch/ref", "0 modified")
+	d.key("esc")
+	d.has("members(payments/work)")
 }
 
 func TestDescribeEditOpensEditor(t *testing.T) {
@@ -77,17 +94,34 @@ func TestMembersCommand(t *testing.T) {
 	d.key(":")
 	d.typeText("members nope")
 	d.key("enter")
-	d.has("no such package: nope")
+	d.has("no package")
 
 	d.key(":")
 	d.typeText("members pay")
 	d.key("tab") // completes the package name
 	d.key("enter")
-	d.has("members(payments)", "<packages>")
+	d.has("members(payments/work)", "<packages>")
 
 	d.key("esc")
 	d.key(":")
 	d.typeText("mem")
-	d.key("enter") // no argument: the selected package
+	d.key("enter") // no argument: the selected package, which has one session
 	d.has("members(")
+}
+
+func TestSessionsCommand(t *testing.T) {
+	env := testutil.NewEnv(t)
+	seed(t, env, "payments", env.NewSource(t, "alpha"))
+	d := newDriver(t, env, "")
+
+	d.key(":")
+	d.typeText("sessions nope")
+	d.key("enter")
+	d.has("no such package: nope")
+
+	d.key(":")
+	d.typeText("sessions pay")
+	d.key("tab")
+	d.key("enter")
+	d.has("sessions(payments)[1]", "<packages>")
 }

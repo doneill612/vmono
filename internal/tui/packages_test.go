@@ -12,7 +12,8 @@ import (
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
-// seed creates a package named name with the given sources as active members.
+// seed creates a package named name with the given sources as active members,
+// and one session named "work" on its default branch, vmono/<name>/work.
 func seed(t *testing.T, env *testutil.Env, name string, sources ...string) {
 	t.Helper()
 	cfg, err := config.Load()
@@ -27,7 +28,31 @@ func seed(t *testing.T, env *testutil.Env, name string, sources ...string) {
 	for _, s := range sources {
 		m.Members = append(m.Members, manifest.Member{Source: s, Mode: manifest.ModeActive, Role: "role"})
 	}
-	if _, err := c.Create(m, core.CreateOptions{}); err != nil {
+	p, err := c.CreatePackage(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateSession(p, "work", core.SessionOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedPackage creates a package with no sessions.
+func seedPackage(t *testing.T, env *testutil.Env, name string, sources ...string) {
+	t.Helper()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := core.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Name: name, Purpose: "Purpose of " + name}
+	for _, s := range sources {
+		m.Members = append(m.Members, manifest.Member{Source: s, Mode: manifest.ModeActive, Role: "role"})
+	}
+	if _, err := c.CreatePackage(m); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -97,10 +122,10 @@ func TestHomeListsFiltersAndPreviews(t *testing.T) {
 	b := env.NewSource(t, "beta")
 	seed(t, env, "payments", a)
 	seed(t, env, "auth-rework", b)
-	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "auth-rework", "beta", "wip.txt"), "x")
+	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "auth-rework", "work", "beta", "wip.txt"), "x")
 
 	d := newDriver(t, env, "")
-	d.has("payments", "auth-rework", "1A")
+	d.has("payments", "auth-rework", "1A", "SESSIONS")
 	d.has("dirty", "clean") // auth-rework has untracked work
 
 	d.key("/")
@@ -122,7 +147,7 @@ func TestOpenKeyRequestsLaunch(t *testing.T) {
 	seed(t, env, "go", a)
 	d := newDriver(t, env, "")
 	d.key("o")
-	if !d.quit || d.app.Launch() == nil || d.app.Launch().Package != "go" {
+	if !d.quit || d.app.Launch() == nil || d.app.Launch().Package != "go" || d.app.Launch().Session != "work" {
 		t.Fatalf("enter should request launch: quit=%v launch=%+v", d.quit, d.app.Launch())
 	}
 	if !strings.Contains(d.view(), "go") {

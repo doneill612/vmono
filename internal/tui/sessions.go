@@ -1,0 +1,288 @@
+package tui
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/atotto/clipboard"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/doneill612/vmono/internal/core"
+	"github.com/doneill612/vmono/internal/paths"
+)
+
+// sessionsMsg delivers one package's sessions.
+type sessionsMsg struct {
+	name string
+	pkg  *core.Package
+	list []core.SessionSummary
+	err  error
+}
+
+// sessions table columns.
+const (
+	sessColName = iota
+	sessColBranch
+	sessColState
+	sessColOpened
+)
+
+// sessionSelector is implemented by screens that stand on one session, so
+// commands like ":members" can default to it.
+type sessionSelector interface{ selectedSession() (pkg, session string) }
+
+// sessionsModel is the drill-down from a package: one row per session, which
+// is the unit of work a harness is launched into. Every session has a
+// worktree of every member of the package, each on the session's own branch.
+type sessionsModel struct {
+	e      *env
+	name   string
+	pkg    *core.Package
+	list   []core.SessionSummary
+	loaded bool
+	err    string
+	tb     *table
+	filter string
+}
+
+// newSessions builds the sessions view of a package.
+func newSessions(e *env, name string) *sessionsModel {
+	return &sessionsModel{e: e, name: name, tb: newTable([]column{
+		{title: "session", max: 28},
+		{title: "branch", flex: true},
+		{title: "state"},
+		{title: "opened"},
+	})}
+}
+
+// Init implements screen.
+func (m *sessionsModel) Init() tea.Cmd { return m.load() }
+
+// load reads the package and its sessions with dirty markers, off the UI
+// goroutine.
+func (m *sessionsModel) load() tea.Cmd {
+	c, name := m.e.core, m.name
+	return func() tea.Msg {
+		p, err := c.Load(name)
+		if err != nil {
+			return sessionsMsg{name: name, err: err}
+		}
+		list, err := c.ListSessions(p, true)
+		return sessionsMsg{name: name, pkg: p, list: list, err: err}
+	}
+}
+
+// Title implements screen.
+func (m *sessionsModel) Title() string {
+	return frameTitle("sessions", m.name, m.filter, len(m.tb.rows))
+}
+
+// Crumb implements screen.
+func (m *sessionsModel) Crumb() string { return m.name }
+
+// Hints implements screen.
+func (m *sessionsModel) Hints() []hint {
+	return []hint{
+		{"enter", "Open"}, {"l", "Launch…"}, {"n", "New session"}, {"m", "Members"},
+		{"d", "Describe"}, {"y", "Copy path"}, {"e", "Edit package"}, {"s", "Sync"},
+		{"f", "Fetch"}, {"ctrl+d", "Delete"},
+		{"N", "Sort name"}, {"O", "Sort opened"}, {"esc", "Back"},
+	}
+}
+
+// setFilter implements filterable.
+func (m *sessionsModel) setFilter(q string) {
+	m.filter = q
+	m.tb.setFilter(q)
+}
+
+// filterValue implements filterable.
+func (m *sessionsModel) filterValue() string { return m.filter }
+
+// selectedPackage implements packageSelector.
+func (m *sessionsModel) selectedPackage() string { return m.name }
+
+// selectedSession implements sessionSelector.
+func (m *sessionsModel) selectedSession() (string, string) {
+	s, _ := m.selected()
+	return m.name, s.Name
+}
+
+// selected returns the highlighted session.
+func (m *sessionsModel) selected() (core.SessionSummary, bool) {
+	r, ok := m.tb.selected()
+	if !ok {
+		return core.SessionSummary{}, false
+	}
+	for _, s := range m.list {
+		if s.Name == r.id {
+			return s, true
+		}
+	}
+	return core.SessionSummary{}, false
+}
+
+// sessionRow builds one table row.
+func sessionRow(s core.SessionSummary) row {
+	state, stateKey := styled("clean", styleOK), "0"
+	if s.Dirty {
+		state, stateKey = styled("dirty", styleWarn), "1"
+	}
+	state.key = stateKey
+	opened := styled("never", styleDim)
+	if t, err := time.Parse(time.RFC3339, s.LastOpened); err == nil {
+		opened = keyed(ago(t), s.LastOpened, styleDim)
+	}
+	return row{
+		id:     s.Name,
+		search: s.Name + " " + s.Branch,
+		cells:  []cell{plain(s.Name), styled(s.Branch, styleDim), state, opened},
+	}
+}
+
+// fill rebuilds the rows from the loaded list.
+func (m *sessionsModel) fill() {
+	var rows []row
+	for _, s := range m.list {
+		rows = append(rows, sessionRow(s))
+	}
+	switch {
+	case m.err != "":
+		m.tb.empty = m.err
+	case !m.loaded:
+		m.tb.empty = "loading…"
+	case len(m.list) == 0:
+		m.tb.empty = "No sessions yet. Press n to start one."
+	default:
+		m.tb.empty = "No match."
+	}
+	m.tb.setRows(rows)
+}
+
+// Update implements screen.
+func (m *sessionsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
+	switch t := msg.(type) {
+	case sessionsMsg:
+		if t.name != m.name {
+			return m, nil
+		}
+		m.loaded = true
+		if t.err != nil {
+			m.err, m.list = t.err.Error(), nil
+			m.fill()
+			return m, flashErr(m.err)
+		}
+		m.err, m.pkg, m.list = "", t.pkg, t.list
+		m.fill()
+		return m, nil
+	case refreshMsg:
+		return m, m.load()
+	case fetchedMsg:
+		if t.name != m.name {
+			return m, nil
+		}
+		if t.err != nil {
+			return m, tea.Batch(flashErr("fetch "+t.name+": "+t.err.Error()), m.load())
+		}
+		return m, tea.Batch(flash(fmt.Sprintf("fetched %d member(s)", t.n)), m.load())
+	case tea.KeyMsg:
+		return m.key(t)
+	}
+	return m, nil
+}
+
+// key handles the sessions key map.
+func (m *sessionsModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
+	if m.tb.handleKey(k.String()) {
+		return m, nil
+	}
+	switch k.String() {
+	case "esc":
+		if m.filter != "" {
+			m.setFilter("")
+			return m, nil
+		}
+		return m, pop()
+	case "N":
+		m.tb.sortBy(sessColName)
+	case "O":
+		m.tb.sortBy(sessColOpened)
+	case "n":
+		return m, push(newSessionPrompt(m.e, m.name))
+	case "e":
+		if m.pkg == nil {
+			return m, nil
+		}
+		return m, push(newEditor(m.e, m.pkg))
+	case "f":
+		return m, tea.Batch(flash("fetching "+m.name+"…"), fetchAll(m.e.core, m.name))
+	}
+	sel, ok := m.selected()
+	if !ok {
+		return m, nil
+	}
+	switch k.String() {
+	case "enter", "o":
+		return m, func() tea.Msg { return launchMsg{LaunchRequest{Package: m.name, Session: sel.Name}} }
+	case "l":
+		return m, push(newLaunchPicker(m.e, m.name, sel.Name, "Launch with"))
+	case "m":
+		return m, push(newMembers(m.e, m.name, sel.Name))
+	case "d":
+		return m, push(newDescribe(m.e, m.name, sel.Name, ""))
+	case "s":
+		return m, push(newProgress(m.e, syncSessionOp(m.e.core, m.name, sel.Name)))
+	case "y":
+		if err := clipboard.WriteAll(sel.Path); err != nil {
+			return m, flashErr("could not copy: " + err.Error() + " — " + sel.Path)
+		}
+		return m, flash("copied " + paths.Contract(sel.Path))
+	case "ctrl+d":
+		return m, m.startDelete(sel.Name)
+	}
+	return m, nil
+}
+
+// syncSessionOp builds the sync operation for one session. Like create it
+// ends by offering to launch a harness there.
+func syncSessionOp(c *core.Core, pkg, session string) operation {
+	return operation{
+		title:   "Sync " + pkg + "/" + session,
+		pkg:     pkg,
+		session: session,
+		run: func(force, reuse bool) error {
+			s, err := c.ResolveSession(pkg + "/" + session)
+			if err != nil {
+				return err
+			}
+			_, err = c.Sync(s, core.SyncOptions{})
+			return err
+		},
+	}
+}
+
+// startDelete opens the delete confirmation for a session. The package and
+// its other sessions are left alone.
+func (m *sessionsModel) startDelete(session string) tea.Cmd {
+	c := m.e.core
+	s, err := c.ResolveSession(m.name + "/" + session)
+	if err != nil {
+		return flashErr(err.Error())
+	}
+	rows := c.SafetyCheck(s)
+	return push(newConfirm(m.e, "Delete session", session, rows, true,
+		func(force, deleteBranches bool) screen {
+			return newProgress(m.e, operation{
+				title: "Delete " + m.name + "/" + session,
+				run: func(_, _ bool) error {
+					_, err := c.DeleteSession(s, core.DeleteOptions{Force: force, DeleteBranches: deleteBranches})
+					return err
+				},
+				back: func() screen { return newSessions(m.e, m.name) },
+			})
+		},
+		nil).about("session"))
+}
+
+// View implements screen.
+func (m *sessionsModel) View(w, h int) string { return m.tb.view(w, h) }

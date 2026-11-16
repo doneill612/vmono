@@ -10,15 +10,17 @@ import (
 	"github.com/doneill612/vmono/internal/core"
 )
 
-// confirmModel is the delete confirmation: one row per member showing dirty
-// files, untracked files and commits not pushed. When every member is clean
-// y confirms; otherwise the package name must be typed. The same screen
-// guards edits whose removals would discard work.
+// confirmModel is the delete confirmation: one row per member, labeled with
+// its session, showing dirty files, untracked files and commits not pushed.
+// When every member is clean y confirms; otherwise the name must be typed.
+// The same screen guards edits whose removals would discard work.
 type confirmModel struct {
 	e     *env
 	title string
-	// name is the package name to type when work would be lost.
+	// name is the name to type when work would be lost, and noun says what
+	// it names: "package" or "session".
 	name  string
+	noun  string
 	rows  []core.MemberSafety
 	typed textinput.Model
 	// deleteBranches is toggled with b and offered to the confirm callback.
@@ -37,11 +39,18 @@ func newConfirm(e *env, title, name string, rows []core.MemberSafety, showBranch
 	t.Prompt = "> "
 	t.Placeholder = name
 	t.CharLimit = 128
-	m := &confirmModel{e: e, title: title, name: name, rows: rows, typed: t,
+	m := &confirmModel{e: e, title: title, name: name, noun: "package", rows: rows, typed: t,
 		showBranches: showBranches, onConfirm: onConfirm, onCancel: onCancel}
 	if !m.allClean() {
 		m.typed.Focus()
 	}
+	return m
+}
+
+// about sets what the typed name identifies, for confirmations of something
+// other than a package.
+func (m *confirmModel) about(noun string) *confirmModel {
+	m.noun = noun
 	return m
 }
 
@@ -116,7 +125,7 @@ func (m *confirmModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		if m.typed.Value() == m.name {
 			return m, goTo(m.onConfirm(true, m.deleteBranches))
 		}
-		m.msg = "type the package name exactly to confirm"
+		m.msg = "type the " + m.noun + " name exactly to confirm"
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -127,18 +136,18 @@ func (m *confirmModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 // View implements screen.
 func (m *confirmModel) View(w, h int) string {
 	var b strings.Builder
-	b.WriteString(" " + styleDim.Render("package ") + styleLabel.Render(m.name) + "\n\n")
+	b.WriteString(" " + styleDim.Render(m.noun+" ") + styleLabel.Render(m.name) + "\n\n")
 	for _, r := range m.rows {
 		switch {
 		case r.Missing:
-			b.WriteString(fmt.Sprintf("   %-16s %s\n", r.Name, styleDim.Render("worktree already gone")))
+			b.WriteString(fmt.Sprintf("   %-24s %s\n", r.Label(), styleDim.Render("worktree already gone")))
 		case r.Error != "":
-			b.WriteString(fmt.Sprintf("   %-16s %s\n", r.Name, styleErr.Render("cannot inspect: "+r.Error)))
+			b.WriteString(fmt.Sprintf("   %-24s %s\n", r.Label(), styleErr.Render("cannot inspect: "+r.Error)))
 		case r.Unsafe():
-			b.WriteString(fmt.Sprintf("   %-16s %s\n", r.Name, styleWarn.Render(
+			b.WriteString(fmt.Sprintf("   %-24s %s\n", r.Label(), styleWarn.Render(
 				fmt.Sprintf("%d dirty · %d untracked · %d unpushed", r.Dirty, r.Untracked, r.Unpushed))))
 		default:
-			b.WriteString(fmt.Sprintf("   %-16s %s\n", r.Name, styleOK.Render("clean")))
+			b.WriteString(fmt.Sprintf("   %-24s %s\n", r.Label(), styleOK.Render("clean")))
 		}
 	}
 	b.WriteString("\n")
@@ -147,12 +156,12 @@ func (m *confirmModel) View(w, h int) string {
 		if m.deleteBranches {
 			box = "[x]"
 		}
-		b.WriteString(" " + box + " also delete package branches already merged into their base\n\n")
+		b.WriteString(" " + box + " also delete session branches already merged into their base\n\n")
 	}
 	if m.allClean() {
 		b.WriteString(" Everything is clean.\n " + keyHelp("y", "confirm", "n/esc", "cancel", "b", "toggle branch deletion"))
 	} else {
-		b.WriteString(" " + styleWarn.Render("This will discard the work above.") + "\n Type the package name to confirm:\n ")
+		b.WriteString(" " + styleWarn.Render("This will discard the work above.") + "\n Type the " + m.noun + " name to confirm:\n ")
 		b.WriteString(m.typed.View() + "\n")
 		if m.msg != "" {
 			b.WriteString(" " + styleErr.Render(m.msg) + "\n")

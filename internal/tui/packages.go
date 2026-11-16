@@ -30,7 +30,7 @@ type fetchedMsg struct {
 const (
 	pkgColName = iota
 	pkgColMembers
-	pkgColBranch
+	pkgColSessions
 	pkgColHarness
 	pkgColState
 	pkgColOpened
@@ -55,7 +55,7 @@ func newPackages(e *env) *packagesModel {
 	tb := newTable([]column{
 		{title: "name", flex: true},
 		{title: "members"},
-		{title: "branch", flex: true},
+		{title: "sessions"},
 		{title: "harness"},
 		{title: "state"},
 		{title: "opened"},
@@ -101,8 +101,8 @@ func (m *packagesModel) Crumb() string {
 // Hints implements screen.
 func (m *packagesModel) Hints() []hint {
 	return []hint{
-		{"enter", "Members"}, {"o", "Open"}, {"l", "Launch…"}, {"d", "Describe"},
-		{"n", "New"}, {"e", "Edit"}, {"ctrl+d", "Delete"}, {"s", "Sync"},
+		{"enter", "Sessions"}, {"o", "Open latest"}, {"l", "Launch…"}, {"d", "Describe"},
+		{"n", "New package"}, {"e", "Edit"}, {"ctrl+d", "Delete"}, {"s", "Sync all"},
 		{"f", "Fetch"}, {"y", "Copy path"}, {"c", "Edit config"},
 		{"N", "Sort name"}, {"M", "Sort members"}, {"O", "Sort opened"}, {"S", "Sort state"},
 	}
@@ -169,6 +169,16 @@ func (m *packagesModel) fill() {
 
 // packageRow builds one table row.
 func packageRow(s core.Summary) row {
+	if s.Legacy {
+		return row{
+			id:     s.Name,
+			search: s.Name,
+			cells: []cell{
+				plain(s.Name), styled("-", styleDim), styled("-", styleDim), styled("-", styleDim),
+				styled("migrate", styleWarn), styled("run vmono doctor --fix", styleDim),
+			},
+		}
+	}
 	members := fmt.Sprintf("%dA", s.Active)
 	if s.Reference > 0 {
 		members += fmt.Sprintf(" %dR", s.Reference)
@@ -188,11 +198,11 @@ func packageRow(s core.Summary) row {
 	}
 	return row{
 		id:     s.Name,
-		search: s.Name + " " + s.Branch,
+		search: s.Name,
 		cells: []cell{
 			plain(s.Name),
 			keyed(members, numKey(s.Members), styleDim),
-			styled(s.Branch, styleDim),
+			keyed(fmt.Sprint(s.Sessions), numKey(s.Sessions), styleDim),
 			harness,
 			state,
 			opened,
@@ -270,15 +280,21 @@ func (m *packagesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	if !has {
 		return m, nil
 	}
+	if sel.Legacy && k.String() != "y" {
+		switch k.String() {
+		case "enter", "o", "d", "l", "e", "s", "f", "ctrl+d":
+			return m, flashErr(sel.Name + " predates sessions; run `vmono doctor --fix` to migrate it")
+		}
+	}
 	switch k.String() {
 	case "enter":
-		return m, push(newMembers(m.e, sel.Name))
+		return m, push(newSessions(m.e, sel.Name))
 	case "o":
-		return m, func() tea.Msg { return launchMsg{LaunchRequest{Package: sel.Name}} }
+		return m, m.openLatest(sel.Name, false)
 	case "d":
-		return m, push(newDescribe(m.e, sel.Name, ""))
+		return m, push(newDescribe(m.e, sel.Name, "", ""))
 	case "l":
-		return m, push(newLaunchPicker(m.e, sel.Name, "Launch with"))
+		return m, m.openLatest(sel.Name, true)
 	case "y":
 		if err := clipboard.WriteAll(sel.Path); err != nil {
 			return m, flashErr("could not copy: " + err.Error() + " — " + sel.Path)
@@ -300,31 +316,59 @@ func (m *packagesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	return m, nil
 }
 
-// syncOp builds the sync operation for a package. Like create and edit it
-// ends by offering to launch a harness.
+// openLatest launches into the package's most recently opened session, or
+// its first by name when none has been opened. With pick it opens the
+// harness picker for that session instead of launching the default. A package
+// with no sessions opens the new-session prompt.
+func (m *packagesModel) openLatest(name string, pick bool) tea.Cmd {
+	c := m.e.core
+	p, err := c.Load(name)
+	if err != nil {
+		return flashErr(err.Error())
+	}
+	rows, err := c.ListSessions(p, false)
+	if err != nil {
+		return flashErr(err.Error())
+	}
+	if len(rows) == 0 {
+		return tea.Batch(flash(name+" has no sessions yet; start one"), push(newSessionPrompt(m.e, name)))
+	}
+	session := rows[0].Name
+	if pick {
+		return push(newLaunchPicker(m.e, name, session, "Launch with"))
+	}
+	return func() tea.Msg { return launchMsg{LaunchRequest{Package: name, Session: session}} }
+}
+
+// syncOp builds the sync operation for a whole package: every one of its
+// sessions is synced. It ends back at Home, since there is no one session to
+// offer launching into.
 func syncOp(c *core.Core, name string) operation {
 	return operation{
 		title: "Sync " + name,
-		pkg:   name,
 		run: func(force, reuse bool) error {
 			p, err := c.Load(name)
 			if err != nil {
 				return err
 			}
-			_, err = c.Sync(p, core.SyncOptions{})
+			_, err = c.SyncPackage(p, core.SyncOptions{})
 			return err
 		},
 	}
 }
 
-// startDelete opens the delete confirmation for a package.
+// startDelete opens the delete confirmation for a package: every member of
+// every session is checked, and the rows name their session.
 func (m *packagesModel) startDelete(name string) tea.Cmd {
 	c := m.e.core
 	p, err := c.Load(name)
 	if err != nil {
 		return flashErr(err.Error())
 	}
-	rows := c.SafetyCheck(p)
+	rows, err := c.PackageSafety(p)
+	if err != nil {
+		return flashErr(err.Error())
+	}
 	return push(newConfirm(m.e, "Delete package", name, rows, true,
 		func(force, deleteBranches bool) screen {
 			return newProgress(m.e, operation{

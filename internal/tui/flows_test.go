@@ -30,7 +30,7 @@ func TestDeleteCleanPackageWithY(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("ctrl+d")
-	d.has("Delete package", "alpha", "clean", "Everything is clean")
+	d.has("Delete package", "work/alpha", "clean", "Everything is clean")
 	d.key("n")
 	d.has("packages")
 	if _, err := os.Stat(filepath.Join(env.PackageRoot, "gone")); err != nil {
@@ -49,7 +49,7 @@ func TestDeleteDirtyRequiresTypedName(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
 	seed(t, env, "risky", a)
-	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "risky", "alpha", "wip.txt"), "x")
+	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "risky", "work", "alpha", "wip.txt"), "x")
 	d := newDriver(t, env, "")
 
 	d.key("ctrl+d")
@@ -66,25 +66,49 @@ func TestDeleteDirtyRequiresTypedName(t *testing.T) {
 	d.eventually(func() bool { _, err := os.Stat(filepath.Join(env.PackageRoot, "risky")); return os.IsNotExist(err) }, "forced delete")
 }
 
-func TestSyncEndsWithLaunchNow(t *testing.T) {
+// TestPackageSyncRebuildsEverySession syncs a whole package from Home: it has
+// no single session to offer launching into, so it ends at "done".
+func TestPackageSyncRebuildsEverySession(t *testing.T) {
 	env := testutil.NewEnv(t)
 	useFakeHarness(t, env)
 	a := env.NewSource(t, "alpha")
 	seed(t, env, "heal", a)
-	if err := os.RemoveAll(filepath.Join(env.PackageRoot, "heal", "alpha")); err != nil {
+	if err := os.RemoveAll(filepath.Join(env.PackageRoot, "heal", "work", "alpha")); err != nil {
 		t.Fatal(err)
 	}
 	d := newDriver(t, env, "")
 
 	d.key("s")
-	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
-	d.has("fake", "default")
-	if _, err := os.Stat(filepath.Join(env.PackageRoot, "heal", "alpha", "README.md")); err != nil {
+	d.eventually(func() bool { return containsView(d, "enter back to packages") }, "sync to finish")
+	if _, err := os.Stat(filepath.Join(env.PackageRoot, "heal", "work", "alpha", "README.md")); err != nil {
 		t.Error("sync should have recreated the worktree")
 	}
 	d.key("enter")
-	if !d.quit || d.app.Launch() == nil || d.app.Launch().Package != "heal" || d.app.Launch().Harness != "fake" {
-		t.Fatalf("launch = %+v quit=%v", d.app.Launch(), d.quit)
+	d.has("packages")
+}
+
+// TestSessionSyncEndsWithLaunchNow syncs one session from the sessions view,
+// which does know where to launch afterward.
+func TestSessionSyncEndsWithLaunchNow(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	a := env.NewSource(t, "alpha")
+	seed(t, env, "heal", a)
+	if err := os.RemoveAll(filepath.Join(env.PackageRoot, "heal", "work", "alpha")); err != nil {
+		t.Fatal(err)
+	}
+	d := newDriver(t, env, "")
+
+	d.key("enter", "s")
+	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+	d.has("fake", "default", "heal/work")
+	if _, err := os.Stat(filepath.Join(env.PackageRoot, "heal", "work", "alpha", "README.md")); err != nil {
+		t.Error("sync should have recreated the worktree")
+	}
+	d.key("enter")
+	l := d.app.Launch()
+	if !d.quit || l == nil || l.Package != "heal" || l.Session != "work" || l.Harness != "fake" {
+		t.Fatalf("launch = %+v quit=%v", l, d.quit)
 	}
 }
 
@@ -105,7 +129,7 @@ func TestHarnessPickerBlocksMissingCommand(t *testing.T) {
 	}
 	d.key("up")
 	d.key("enter")
-	if d.app.Launch() == nil || d.app.Launch().Harness != "fake" {
+	if d.app.Launch() == nil || d.app.Launch().Harness != "fake" || d.app.Launch().Session != "work" {
 		t.Fatalf("launch = %+v", d.app.Launch())
 	}
 }

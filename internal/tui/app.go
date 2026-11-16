@@ -16,11 +16,12 @@ import (
 	"github.com/doneill612/vmono/internal/harness"
 )
 
-// LaunchRequest asks the caller to start a harness at a package once the
-// TUI has released the terminal. Harness is empty to use the package's
-// default.
+// LaunchRequest asks the caller to start a harness at a session once the
+// TUI has released the terminal. Session is empty to use the package's only
+// session. Harness is empty to use the package's default.
 type LaunchRequest struct {
 	Package string
+	Session string
 	Harness string
 }
 
@@ -435,11 +436,15 @@ func (a *App) Launch() *LaunchRequest { return a.env.launch }
 // caller reopens the TUI when it exits, carrying message if the launch
 // itself failed. A harness's own non-zero exit is not a vmono failure.
 func handoff(c *core.Core, req *LaunchRequest) (message string, again bool, err error) {
-	pkg, err := c.Load(req.Package)
+	target := req.Package
+	if req.Session != "" {
+		target += "/" + req.Session
+	}
+	sess, err := c.ResolveSession(target)
 	if err != nil {
 		return err.Error(), true, nil
 	}
-	l, err := harness.Prepare(c, pkg, req.Harness, nil)
+	l, err := harness.Prepare(c, sess, req.Harness, nil)
 	if err != nil {
 		return err.Error(), true, nil
 	}

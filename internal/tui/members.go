@@ -11,12 +11,12 @@ import (
 	"github.com/doneill612/vmono/internal/paths"
 )
 
-// membersMsg delivers one package's members with live git status.
+// membersMsg delivers one session's members with live git status.
 type membersMsg struct {
-	name   string
-	pkg    *core.Package
-	status core.PackageStatus
-	err    error
+	id      string
+	session *core.Session
+	status  core.SessionStatus
+	err     error
 }
 
 // members table columns.
@@ -37,22 +37,23 @@ const (
 // commands like ":members" can default to it.
 type packageSelector interface{ selectedPackage() string }
 
-// membersModel is the drill-down from a package: one row per member with
-// its branch or ref, upstream, and working tree state.
+// membersModel is the drill-down from a session: one row per member with its
+// branch or ref, upstream, and working tree state in that session.
 type membersModel struct {
-	e      *env
-	name   string
-	pkg    *core.Package
-	status core.PackageStatus
-	loaded bool
-	err    string
-	tb     *table
-	filter string
+	e       *env
+	name    string
+	session string
+	sess    *core.Session
+	status  core.SessionStatus
+	loaded  bool
+	err     string
+	tb      *table
+	filter  string
 }
 
-// newMembers builds the members view of a package.
-func newMembers(e *env, name string) *membersModel {
-	return &membersModel{e: e, name: name, tb: newTable([]column{
+// newMembers builds the members view of one session of a package.
+func newMembers(e *env, name, session string) *membersModel {
+	return &membersModel{e: e, name: name, session: session, tb: newTable([]column{
 		{title: "name", max: 24},
 		{title: "mode"},
 		{title: "branch/ref", max: 32},
@@ -69,25 +70,28 @@ func newMembers(e *env, name string) *membersModel {
 // Init implements screen.
 func (m *membersModel) Init() tea.Cmd { return m.load() }
 
-// load reads the package and its member status off the UI goroutine.
+// id identifies the session so stale results are ignored.
+func (m *membersModel) id() string { return m.name + "/" + m.session }
+
+// load reads the session and its member status off the UI goroutine.
 func (m *membersModel) load() tea.Cmd {
-	c, name := m.e.core, m.name
+	c, id := m.e.core, m.id()
 	return func() tea.Msg {
-		p, err := c.Load(name)
+		s, err := c.ResolveSession(id)
 		if err != nil {
-			return membersMsg{name: name, err: err}
+			return membersMsg{id: id, err: err}
 		}
-		return membersMsg{name: name, pkg: p, status: c.Status(p)}
+		return membersMsg{id: id, session: s, status: c.Status(s)}
 	}
 }
 
 // Title implements screen.
 func (m *membersModel) Title() string {
-	return frameTitle("members", m.name, m.filter, len(m.tb.rows))
+	return frameTitle("members", m.id(), m.filter, len(m.tb.rows))
 }
 
 // Crumb implements screen.
-func (m *membersModel) Crumb() string { return m.name }
+func (m *membersModel) Crumb() string { return m.session }
 
 // Hints implements screen.
 func (m *membersModel) Hints() []hint {
@@ -109,6 +113,9 @@ func (m *membersModel) filterValue() string { return m.filter }
 
 // selectedPackage implements packageSelector.
 func (m *membersModel) selectedPackage() string { return m.name }
+
+// selectedSession implements sessionSelector.
+func (m *membersModel) selectedSession() (string, string) { return m.name, m.session }
 
 // selectedMember returns the highlighted member's status.
 func (m *membersModel) selectedMember() (core.MemberStatus, bool) {
@@ -191,17 +198,17 @@ func (m *membersModel) fill() {
 func (m *membersModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch t := msg.(type) {
 	case membersMsg:
-		if t.name != m.name {
+		if t.id != m.id() {
 			return m, nil
 		}
 		m.loaded = true
 		if t.err != nil {
 			m.err = t.err.Error()
-			m.status = core.PackageStatus{}
+			m.status = core.SessionStatus{}
 			m.fill()
 			return m, flashErr(m.err)
 		}
-		m.err, m.pkg, m.status = "", t.pkg, t.status
+		m.err, m.sess, m.status = "", t.session, t.status
 		m.fill()
 		return m, nil
 	case refreshMsg:
@@ -237,29 +244,29 @@ func (m *membersModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	case "M":
 		m.tb.sortBy(memColMode)
 	case "enter", "o":
-		return m, func() tea.Msg { return launchMsg{LaunchRequest{Package: m.name}} }
+		return m, func() tea.Msg { return launchMsg{LaunchRequest{Package: m.name, Session: m.session}} }
 	case "l":
-		return m, push(newLaunchPicker(m.e, m.name, "Launch with"))
+		return m, push(newLaunchPicker(m.e, m.name, m.session, "Launch with"))
 	case "s":
-		return m, push(newProgress(m.e, syncOp(m.e.core, m.name)))
+		return m, push(newProgress(m.e, syncSessionOp(m.e.core, m.name, m.session)))
 	case "f":
 		return m, tea.Batch(flash("fetching "+m.name+"…"), fetchAll(m.e.core, m.name))
 	case "e":
-		if m.pkg == nil {
+		if m.sess == nil {
 			return m, nil
 		}
-		return m, push(newEditor(m.e, m.pkg))
+		return m, push(newEditor(m.e, m.sess.Pkg))
 	case "d":
 		if ms, ok := m.selectedMember(); ok {
-			return m, push(newDescribe(m.e, m.name, ms.Name))
+			return m, push(newDescribe(m.e, m.name, m.session, ms.Name))
 		}
 	case "y":
-		if ms, ok := m.selectedMember(); ok && m.pkg != nil {
-			for _, mem := range m.pkg.M.Members {
+		if ms, ok := m.selectedMember(); ok && m.sess != nil {
+			for _, mem := range m.sess.Pkg.M.Members {
 				if mem.Name != ms.Name {
 					continue
 				}
-				dir := m.pkg.MemberDir(mem)
+				dir := m.sess.MemberDir(mem)
 				if err := clipboard.WriteAll(dir); err != nil {
 					return m, flashErr("could not copy: " + err.Error() + " — " + dir)
 				}

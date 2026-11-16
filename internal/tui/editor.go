@@ -450,7 +450,8 @@ func (m *editorModel) save() (screen, tea.Cmd) {
 	return m.saveEdit()
 }
 
-// saveCreate runs Create through the progress screen.
+// saveCreate defines the package through the progress screen, then asks for
+// its first session, so creating a package still ends at a harness.
 func (m *editorModel) saveCreate() (screen, tea.Cmd) {
 	c := m.e.core
 	name := strings.TrimSpace(m.name.Value())
@@ -461,11 +462,11 @@ func (m *editorModel) saveCreate() (screen, tea.Cmd) {
 	}
 	return m, goTo(newProgress(m.e, operation{
 		title: "Create " + name,
-		pkg:   name,
 		run: func(force, reuse bool) error {
-			_, err := c.Create(nm, core.CreateOptions{ReuseBranch: reuse})
+			_, err := c.CreatePackage(nm)
 			return err
 		},
+		next: func() screen { return newSessionPrompt(m.e, name) },
 		back: func() screen { return m },
 	}))
 }
@@ -494,7 +495,6 @@ func (m *editorModel) saveEdit() (screen, tea.Cmd) {
 	apply := func(force bool) screen {
 		return newProgress(m.e, operation{
 			title: "Edit " + name,
-			pkg:   name,
 			force: force,
 			run: func(force, reuse bool) error {
 				_, err := c.ApplyEdit(pkg, edited, core.EditOptions{Force: force, ReuseBranch: reuse})

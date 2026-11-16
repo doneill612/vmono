@@ -77,8 +77,13 @@ func TestCreateFlowEditorPickerProgressLaunch(t *testing.T) {
 	d.has("the gateway")
 
 	d.key("ctrl+s")
+	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
+	d.has("package shiny", "vmono/shiny/<session>")
+	d.typeText("task")
+	d.has("vmono/shiny/task")
+	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
-	d.has("default")
+	d.has("default", "shiny/task")
 
 	p := loadPkg(t, "shiny")
 	if p.M.Purpose != "Ship the shiny thing." || len(p.M.Members) != 2 {
@@ -90,11 +95,14 @@ func TestCreateFlowEditorPickerProgressLaunch(t *testing.T) {
 	if p.M.Members[1].Name != "contracts" || p.M.Members[1].Mode != manifest.ModeReference {
 		t.Errorf("contracts = %+v", p.M.Members[1])
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "_ref", "contracts", "README.md")); err != nil {
-		t.Error("reference worktree missing")
+	if _, err := os.Stat(filepath.Join(p.Dir, "task", "_ref", "contracts", "README.md")); err != nil {
+		t.Error("reference worktree missing from the session")
+	}
+	if _, err := os.Stat(filepath.Join(p.Dir, "alpha")); err == nil {
+		t.Error("the package directory must not hold worktrees")
 	}
 	d.key("enter")
-	if d.app.Launch() == nil || d.app.Launch().Package != "shiny" || d.app.Launch().Harness != "fake" {
+	if d.app.Launch() == nil || d.app.Launch().Package != "shiny" || d.app.Launch().Session != "task" || d.app.Launch().Harness != "fake" {
 		t.Fatalf("launch = %+v", d.app.Launch())
 	}
 }
@@ -103,7 +111,7 @@ func TestCreateAsksBeforeReusingExistingBranch(t *testing.T) {
 	env := testutil.NewEnv(t)
 	useSourceRoot(t, env)
 	a := env.NewSource(t, "alpha")
-	testutil.Git(t, a, "branch", "vmono/reuse")
+	testutil.Git(t, a, "branch", "vmono/reuse/work")
 	d := newDriver(t, env, "")
 
 	d.key("n")
@@ -111,11 +119,14 @@ func TestCreateAsksBeforeReusingExistingBranch(t *testing.T) {
 	d.key("ctrl+s")
 	d.has("repos(select)")
 	d.key("space", "enter", "ctrl+s")
+	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
+	d.typeText("work")
+	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "already exists") }, "reuse prompt")
 	d.has("Check it out instead")
 	d.key("y")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt after reuse")
-	if br := testutil.Git(t, filepath.Join(env.PackageRoot, "reuse", "alpha"), "branch", "--show-current"); br != "vmono/reuse" {
+	if br := testutil.Git(t, filepath.Join(env.PackageRoot, "reuse", "work", "alpha"), "branch", "--show-current"); br != "vmono/reuse/work" {
 		t.Errorf("branch = %q", br)
 	}
 }
@@ -126,7 +137,7 @@ func TestEditFlowRoleAndRemovalWithConfirm(t *testing.T) {
 	a := env.NewSource(t, "alpha")
 	b := env.NewSource(t, "beta")
 	seed(t, env, "work", a, b)
-	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "work", "beta", "wip.txt"), "x")
+	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "work", "work", "beta", "wip.txt"), "x")
 	d := newDriver(t, env, "")
 
 	d.key("e")
@@ -141,17 +152,17 @@ func TestEditFlowRoleAndRemovalWithConfirm(t *testing.T) {
 	d.key("down", "x") // remove beta, which has untracked work
 	d.lacks("beta")
 	d.key("ctrl+s")
-	d.has("Discard unsaved work?", "beta", "untracked", "Type the package name")
+	d.has("Discard unsaved work?", "work/beta", "untracked", "Type the package name")
 	d.typeText("work")
 	d.key("enter")
-	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt after edit")
+	d.eventually(func() bool { return containsView(d, "enter back to packages") }, "edit to finish")
 
 	p := loadPkg(t, "work")
 	if len(p.M.Members) != 1 || p.M.Members[0].Role != "changed role" {
 		t.Fatalf("manifest after edit = %+v", p.M.Members)
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "beta")); !os.IsNotExist(err) {
-		t.Error("beta worktree should be gone")
+	if _, err := os.Stat(filepath.Join(p.Dir, "work", "beta")); !os.IsNotExist(err) {
+		t.Error("beta worktree should be gone from the session")
 	}
 }
 
@@ -174,7 +185,7 @@ func TestEditCancelWithEscAndHarnessCycle(t *testing.T) {
 	d.key("right")
 	d.has("claude ▸")
 	d.key("ctrl+s")
-	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+	d.eventually(func() bool { return containsView(d, "enter back to packages") }, "edit to finish")
 	if p := loadPkg(t, "cyc"); p.M.Harness != "claude" {
 		t.Errorf("harness = %q", p.M.Harness)
 	}
@@ -204,7 +215,7 @@ func TestPickerAddByPathWithCompletion(t *testing.T) {
 	d.key("enter")
 	d.has("added elsewhere", "[x]")
 	d.key("enter", "ctrl+s")
-	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
 	if p := loadPkg(t, "bypath"); len(p.M.Members) != 1 || p.M.Members[0].Name != "elsewhere" {
 		t.Errorf("members = %+v", p.M.Members)
 	}

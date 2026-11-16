@@ -18,9 +18,13 @@ type operation struct {
 	// run performs the work. The progress screen attaches an event channel
 	// to the core first, so run only calls core operations.
 	run func(force, reuse bool) error
-	// pkg is the package to offer launching afterward; empty means return
-	// to Home instead.
-	pkg string
+	// pkg and session name the session to offer launching afterward; an
+	// empty pkg means return to Home instead.
+	pkg, session string
+	// next, when set, builds the screen to show on success instead of the
+	// launch picker. Creating a package uses it to ask for its first
+	// session.
+	next func() screen
 	// force and reuse are passed to run; reuse is also set when the user
 	// answers the branch-exists prompt.
 	force, reuse bool
@@ -178,8 +182,11 @@ func (m *progressModel) finish(err error) (screen, tea.Cmd) {
 	switch {
 	case err == nil:
 		m.state = progDone
+		if m.op.next != nil {
+			return m, goTo(m.op.next())
+		}
 		if m.op.pkg != "" {
-			return m, goTo(newLaunchPicker(m.e, m.op.pkg, "Launch now?"))
+			return m, goTo(newLaunchPicker(m.e, m.op.pkg, m.op.session, "Launch now?"))
 		}
 	case errors.As(err, &be) && !m.op.reuse:
 		m.state, m.fail = progAskReuse, err
