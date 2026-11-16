@@ -70,11 +70,23 @@ type progressModel struct {
 	fail  error
 }
 
-// newProgress builds the screen; it starts the operation on Init.
-func newProgress(e *env, op operation) *progressModel {
+// newSpinner returns the spinner shared by every screen that waits on work,
+// so the progress view and the repo scans animate identically.
+func newSpinner() spinner.Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	return &progressModel{e: e, op: op, index: map[string]int{}, spin: s}
+	return s
+}
+
+// scanningLabel is the animated placeholder shown while repos are being
+// discovered: the current spinner frame followed by the given text.
+func scanningLabel(s spinner.Model, text string) string {
+	return s.View() + " " + text
+}
+
+// newProgress builds the screen; it starts the operation on Init.
+func newProgress(e *env, op operation) *progressModel {
+	return &progressModel{e: e, op: op, index: map[string]int{}, spin: newSpinner()}
 }
 
 // Init implements screen.

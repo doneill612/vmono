@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/doneill612/vmono/internal/discover"
@@ -45,13 +46,14 @@ type reposModel struct {
 	repos  []discover.Repo
 	used   map[string]int
 	loaded bool
+	spin   spinner.Model
 	tb     *table
 	filter string
 }
 
 // newRepos builds the repos view.
 func newRepos(e *env) *reposModel {
-	return &reposModel{e: e, tb: newTable([]column{
+	return &reposModel{e: e, spin: newSpinner(), tb: newTable([]column{
 		{title: "name", max: 28},
 		{title: "branch", max: 24},
 		{title: "remote", flex: true},
@@ -60,8 +62,9 @@ func newRepos(e *env) *reposModel {
 	})}
 }
 
-// Init implements screen.
-func (m *reposModel) Init() tea.Cmd { return m.load() }
+// Init implements screen. It starts the repo scan and the spinner that
+// animates the placeholder until the scan reports back.
+func (m *reposModel) Init() tea.Cmd { return tea.Batch(m.load(), m.spin.Tick) }
 
 // load lists repos and package usage off the UI goroutine.
 func (m *reposModel) load() tea.Cmd {
@@ -137,7 +140,7 @@ func (m *reposModel) fill() {
 	}
 	switch {
 	case !m.loaded:
-		m.tb.empty = "scanning…"
+		m.tb.empty = scanningLabel(m.spin, "scanning…")
 	case len(m.repos) == 0 && len(m.e.core.Cfg.SourceRoots) == 0:
 		m.tb.empty = "No repos known, and no source root is configured. Press a to find a repo by path, or c to set a source root."
 	case len(m.repos) == 0:
@@ -165,6 +168,14 @@ func (m *reposModel) selected() (discover.Repo, bool) {
 // Update implements screen.
 func (m *reposModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch t := msg.(type) {
+	case spinner.TickMsg:
+		if m.loaded {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(t)
+		m.tb.empty = scanningLabel(m.spin, "scanning…")
+		return m, cmd
 	case repoListMsg:
 		m.loaded = true
 		if t.err != nil {

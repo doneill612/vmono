@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sahilm/fuzzy"
@@ -58,6 +59,10 @@ type finderModel struct {
 	scans   map[string][]string
 	pending map[string]bool
 	dir     string
+	// spin animates the scanning line; ticking is true while a tick chain
+	// is in flight so a second scan does not start another.
+	spin    spinner.Model
+	ticking bool
 }
 
 // newFinder builds the finder for owner, starting in the first source root
@@ -72,7 +77,7 @@ func newFinder(e *env, owner screen) *finderModel {
 	}
 	in.SetValue(start)
 	in.CursorEnd()
-	return &finderModel{e: e, owner: owner, in: in, scans: map[string][]string{}, pending: map[string]bool{}}
+	return &finderModel{e: e, owner: owner, in: in, scans: map[string][]string{}, pending: map[string]bool{}, spin: newSpinner()}
 }
 
 // modal implements modalScreen.
@@ -188,6 +193,10 @@ func (m *finderModel) recompute() tea.Cmd {
 		if _, done := m.scans[m.dir]; !done && !m.pending[m.dir] && filepath.Dir(m.dir) != m.dir {
 			m.pending[m.dir] = true
 			cmd = m.scan(m.dir)
+			if !m.ticking {
+				m.ticking = true
+				cmd = tea.Batch(cmd, m.spin.Tick)
+			}
 		}
 	}
 	if len(m.sugg) > maxSuggestions {
@@ -222,6 +231,14 @@ func (m *finderModel) scan(dir string) tea.Cmd {
 // Update implements screen.
 func (m *finderModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch t := msg.(type) {
+	case spinner.TickMsg:
+		if len(m.pending) == 0 {
+			m.ticking = false
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(t)
+		return m, cmd
 	case finderScanMsg:
 		delete(m.pending, t.dir)
 		m.scans[t.dir] = t.repos
@@ -363,7 +380,7 @@ func (m *finderModel) View(w, h int) string {
 	b.WriteString("\n")
 	switch {
 	case m.pending[m.dir]:
-		b.WriteString(" " + styleDim.Render("scanning "+paths.Contract(m.dir)+" for repos…") + "\n")
+		b.WriteString(" " + styleDim.Render(scanningLabel(m.spin, "scanning "+paths.Contract(m.dir)+" for repos…")) + "\n")
 	case len(m.sugg) > rows:
 		b.WriteString(" " + styleDim.Render(fmt.Sprintf("%d matches; keep typing to narrow", len(m.sugg))) + "\n")
 	default:

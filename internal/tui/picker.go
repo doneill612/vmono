@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/doneill612/vmono/internal/discover"
@@ -32,6 +33,7 @@ type pickerModel struct {
 	items  []discover.Repo
 	chosen map[string]string // repo path -> mode
 	loaded bool
+	spin   spinner.Model
 	tb     *table
 	filter string
 
@@ -44,7 +46,7 @@ type pickerModel struct {
 // current member from outside any source root).
 func newPicker(e *env, initial map[string]string, extra []discover.Repo,
 	done func([]pickSel) screen, cancel func() screen) *pickerModel {
-	m := &pickerModel{e: e, chosen: map[string]string{}, done: done, cancel: cancel,
+	m := &pickerModel{e: e, chosen: map[string]string{}, spin: newSpinner(), done: done, cancel: cancel,
 		tb: newTable([]column{{title: " ", max: 3}, {title: "name", max: 28}, {title: "mode", max: 5}, {title: "branch", max: 24}, {title: "path", flex: true}})}
 	for k, v := range initial {
 		m.chosen[k] = v
@@ -54,13 +56,15 @@ func newPicker(e *env, initial map[string]string, extra []discover.Repo,
 	return m
 }
 
-// Init implements screen.
+// Init implements screen. It starts the repo scan and the spinner that
+// animates the placeholder until the scan reports back.
 func (m *pickerModel) Init() tea.Cmd {
 	c := m.e.core
-	return func() tea.Msg {
+	load := func() tea.Msg {
 		repos, err := c.Repos()
 		return reposMsg{repos: repos, err: err}
 	}
+	return tea.Batch(load, m.spin.Tick)
 }
 
 // Title implements screen.
@@ -113,7 +117,7 @@ func (m *pickerModel) fill() {
 	}
 	switch {
 	case !m.loaded:
-		m.tb.empty = "scanning…"
+		m.tb.empty = scanningLabel(m.spin, "scanning…")
 	case len(m.items) == 0 && len(m.e.core.Cfg.SourceRoots) == 0:
 		m.tb.empty = "No repos found, and no source root is configured. Press p to find a repo by path."
 	case len(m.items) == 0:
@@ -138,6 +142,14 @@ func (m *pickerModel) addItem(r discover.Repo) {
 // Update implements screen.
 func (m *pickerModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch t := msg.(type) {
+	case spinner.TickMsg:
+		if m.loaded {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(t)
+		m.tb.empty = scanningLabel(m.spin, "scanning…")
+		return m, cmd
 	case reposMsg:
 		m.loaded = true
 		if t.err != nil {
