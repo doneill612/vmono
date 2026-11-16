@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,7 @@ import (
 
 func sample() *Manifest {
 	m := &Manifest{
-		Schema:  1,
+		Schema:  SchemaVersion,
 		Name:    "platform-auth",
 		Created: time.Date(2026, 11, 13, 21, 20, 0, 0, time.FixedZone("EST", -5*3600)),
 		Harness: "claude",
@@ -22,15 +23,12 @@ func sample() *Manifest {
 		},
 		Notes: []Note{{At: time.Date(2026, 11, 14, 10, 5, 0, 0, time.UTC), By: "agent:claude", Text: "v3 frozen\twith tab"}},
 	}
-	m.ApplyDefaults("vmono/")
+	m.ApplyDefaults()
 	return m
 }
 
 func TestDefaults(t *testing.T) {
 	m := sample()
-	if m.Branch != "vmono/platform-auth" {
-		t.Errorf("branch = %q", m.Branch)
-	}
 	if m.Members[0].Path != "api-gateway" || m.Members[0].Base != "origin/HEAD" {
 		t.Errorf("active defaults wrong: %+v", m.Members[0])
 	}
@@ -181,5 +179,77 @@ func TestSlugifyAndRecentNotes(t *testing.T) {
 	notes := m.RecentNotes(MaxNotesRendered)
 	if len(notes) != MaxNotesRendered || notes[0].At.Before(notes[1].At) {
 		t.Errorf("RecentNotes not newest-first/capped: %d", len(notes))
+	}
+}
+
+const legacyBody = `schema  = 1
+name    = "old-pkg"
+created = 2026-11-01T10:00:00Z
+branch  = "vmono/old-pkg"
+
+purpose = "Legacy purpose."
+
+[[member]]
+name   = "alpha"
+source = "/src/alpha"
+mode   = "active"
+path   = "alpha"
+base   = "origin/main"
+`
+
+func TestParseLegacyReturnsLegacyError(t *testing.T) {
+	_, err := Parse([]byte(legacyBody))
+	var le *LegacyError
+	if !errors.As(err, &le) || !errors.Is(err, ErrLegacy) {
+		t.Fatalf("want LegacyError, got %v", err)
+	}
+	if le.Branch != "vmono/old-pkg" {
+		t.Errorf("legacy branch = %q", le.Branch)
+	}
+}
+
+func TestLoadLegacyConverts(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, Dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path(dir), []byte(legacyBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, branch, err := LoadLegacy(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "vmono/old-pkg" || m.Schema != SchemaVersion || m.Purpose != "Legacy purpose." || len(m.Members) != 1 {
+		t.Errorf("converted wrong: branch=%q %+v", branch, m)
+	}
+	if _, err := Load(dir); !errors.Is(err, ErrLegacy) {
+		t.Errorf("Load of a legacy package = %v, want ErrLegacy", err)
+	}
+	out := string(Encode(m))
+	if strings.Contains(out, "branch") || !strings.Contains(out, "schema  = 2") {
+		t.Errorf("encoded manifest should be schema 2 without a branch:\n%s", out)
+	}
+}
+
+func TestFindFromInsideSession(t *testing.T) {
+	pkg := t.TempDir()
+	if err := Save(pkg, sample()); err != nil {
+		t.Fatal(err)
+	}
+	sess := filepath.Join(pkg, "work")
+	if err := SaveSession(sess, sampleSession()); err != nil {
+		t.Fatal(err)
+	}
+	deep := filepath.Join(sess, "api-gateway", "src")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Find(deep); err != nil || got != pkg {
+		t.Errorf("Find from inside a session = %q, %v; want the package %q", got, err, pkg)
+	}
+	t.Setenv("VMONO_ROOT", sess)
+	if got, err := Find(t.TempDir()); err != nil || got != pkg {
+		t.Errorf("Find via session VMONO_ROOT = %q, %v; want %q", got, err, pkg)
 	}
 }

@@ -14,7 +14,6 @@ func Encode(m *Manifest) []byte {
 	fmt.Fprintf(&b, "schema  = %d\n", m.Schema)
 	fmt.Fprintf(&b, "name    = %s\n", quote(m.Name))
 	fmt.Fprintf(&b, "created = %s\n", m.Created.Format(time.RFC3339))
-	fmt.Fprintf(&b, "branch  = %s\n", quote(m.Branch))
 	if m.Harness != "" {
 		fmt.Fprintf(&b, "harness = %s\n", quote(m.Harness))
 	}

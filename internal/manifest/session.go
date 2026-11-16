@@ -136,23 +136,12 @@ func SaveSession(sessionDir string, s *Session) error {
 // returns os.ErrNotExist when neither applies, including when start is in a
 // package directory outside any session.
 func FindSession(start string) (string, error) {
-	dir, err := filepath.Abs(start)
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(SessionPath(dir)); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
+	if dir, ok := walkUp(start, SessionPath); ok {
+		return dir, nil
 	}
 	if root := os.Getenv("VMONO_ROOT"); root != "" {
-		if _, err := os.Stat(SessionPath(root)); err == nil {
-			return root, nil
+		if dir, ok := walkUp(root, SessionPath); ok {
+			return dir, nil
 		}
 	}
 	return "", os.ErrNotExist

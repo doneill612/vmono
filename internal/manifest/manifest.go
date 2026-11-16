@@ -16,8 +16,14 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// SchemaVersion is the manifest schema this build reads and writes.
-const SchemaVersion = 1
+// SchemaVersion is the manifest schema this build reads and writes. Schema 1
+// was the single-state package that held its own branch and worktrees;
+// schema 2 is the session-based package, where the branch and worktrees
+// live in sessions. See LegacyError.
+const SchemaVersion = 2
+
+// LegacySchemaVersion is the manifest schema that predates sessions.
+const LegacySchemaVersion = 1
 
 // Dir and File locate the manifest inside a package directory.
 const (
@@ -57,12 +63,13 @@ type Note struct {
 	Text string    `toml:"text"`
 }
 
-// Manifest describes a package completely.
+// Manifest describes a package completely: its members and the text that
+// explains them. It holds no branch or worktree state; that belongs to a
+// Session.
 type Manifest struct {
 	Schema  int       `toml:"schema"`
 	Name    string    `toml:"name"`
 	Created time.Time `toml:"created"`
-	Branch  string    `toml:"branch"`
 	Harness string    `toml:"harness,omitempty"`
 	Purpose string    `toml:"purpose,omitempty"`
 	Context string    `toml:"context,omitempty"`
@@ -106,14 +113,10 @@ func DefaultPath(name, mode string) string {
 	return name
 }
 
-// ApplyDefaults fills defaulted fields. branchPrefix is used when the
-// manifest has no branch.
-func (m *Manifest) ApplyDefaults(branchPrefix string) {
+// ApplyDefaults fills defaulted fields.
+func (m *Manifest) ApplyDefaults() {
 	if m.Schema == 0 {
 		m.Schema = SchemaVersion
-	}
-	if m.Branch == "" && m.Name != "" {
-		m.Branch = branchPrefix + m.Name
 	}
 	for i := range m.Members {
 		mem := &m.Members[i]
@@ -142,9 +145,6 @@ func (m *Manifest) Validate() error {
 	}
 	if err := ValidateName(m.Name); err != nil {
 		errs = append(errs, err)
-	}
-	if strings.TrimSpace(m.Branch) == "" {
-		errs = append(errs, errors.New("branch is empty"))
 	}
 	names := map[string]bool{}
 	paths := map[string]bool{}
@@ -246,9 +246,7 @@ func Load(pkgDir string) (*Manifest, error) {
 	return LoadFile(Path(pkgDir))
 }
 
-// LoadFile reads, defaults and validates a manifest file. Branch defaults
-// use the standard "vmono/" prefix only when the file omits a branch, which
-// hand-written manifests may legitimately do.
+// LoadFile reads, defaults and validates a manifest file.
 func LoadFile(file string) (*Manifest, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -257,8 +255,13 @@ func LoadFile(file string) (*Manifest, error) {
 	return Parse(data)
 }
 
-// Parse decodes manifest bytes, rejecting unknown keys so typos surface.
+// Parse decodes manifest bytes, rejecting unknown keys so typos surface. A
+// schema 1 manifest is not parsed; it returns a *LegacyError so callers can
+// point the user at `vmono doctor --fix`.
 func Parse(data []byte) (*Manifest, error) {
+	if legacy := detectLegacy(data); legacy != nil {
+		return nil, legacy
+	}
 	var m Manifest
 	md, err := toml.Decode(string(data), &m)
 	if err != nil {
@@ -271,7 +274,7 @@ func Parse(data []byte) (*Manifest, error) {
 		}
 		return nil, fmt.Errorf("parse manifest: unknown keys: %s", strings.Join(keys, ", "))
 	}
-	m.ApplyDefaults("vmono/")
+	m.ApplyDefaults()
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
@@ -294,27 +297,37 @@ func Save(pkgDir string, m *Manifest) error {
 	return os.Rename(tmp, file)
 }
 
-// Find locates the package directory for the current context. It walks up
-// from start looking for .vmono/manifest.toml, then falls back to
-// VMONO_ROOT. It returns os.ErrNotExist when neither applies.
-func Find(start string) (string, error) {
+// walkUp returns the nearest directory at or above start for which file(dir)
+// exists.
+func walkUp(start string, file func(dir string) string) (string, bool) {
 	dir, err := filepath.Abs(start)
 	if err != nil {
-		return "", err
+		return "", false
 	}
 	for {
-		if _, err := os.Stat(Path(dir)); err == nil {
-			return dir, nil
+		if _, err := os.Stat(file(dir)); err == nil {
+			return dir, true
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			break
+			return "", false
 		}
 		dir = parent
 	}
+}
+
+// Find locates the package directory for the current context. It walks up
+// from start looking for .vmono/manifest.toml, which also finds the package
+// from inside one of its sessions, then falls back to the same walk from
+// VMONO_ROOT. VMONO_ROOT is the session directory inside a harness. It
+// returns os.ErrNotExist when neither applies.
+func Find(start string) (string, error) {
+	if dir, ok := walkUp(start, Path); ok {
+		return dir, nil
+	}
 	if root := os.Getenv("VMONO_ROOT"); root != "" {
-		if _, err := os.Stat(Path(root)); err == nil {
-			return root, nil
+		if dir, ok := walkUp(root, Path); ok {
+			return dir, nil
 		}
 	}
 	return "", os.ErrNotExist
