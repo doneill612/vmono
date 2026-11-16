@@ -17,7 +17,7 @@ type InspectMember struct {
 	Role   string `json:"role,omitempty"`
 	Remote string `json:"remote,omitempty"`
 	// Path is the absolute worktree directory; RelPath is relative to the
-	// package root.
+	// session root.
 	Path    string `json:"path"`
 	RelPath string `json:"rel_path"`
 	// Source is the absolute source repo.
@@ -32,7 +32,7 @@ type InspectMember struct {
 	Exists       bool   `json:"exists"`
 }
 
-// InspectHarness is the resolved harness for a package.
+// InspectHarness is the resolved harness for a session.
 type InspectHarness struct {
 	Name      string            `json:"name"`
 	Command   string            `json:"command"`
@@ -43,12 +43,17 @@ type InspectHarness struct {
 	Available bool              `json:"available"`
 }
 
-// InspectResult is the full resolved model of a package.
+// InspectResult is the full resolved model of a session and its package.
 type InspectResult struct {
-	Name         string `json:"name"`
-	Path         string `json:"path"`
+	Package string `json:"package"`
+	Session string `json:"session"`
+	// Path is the session directory, which is where a harness is launched.
+	Path string `json:"path"`
+	// PackagePath is the package directory.
+	PackagePath  string `json:"package_path"`
 	ManifestPath string `json:"manifest_path"`
-	// ShellGitDir is the package's own git directory.
+	SessionPath  string `json:"session_path"`
+	// ShellGitDir is the session's own git directory.
 	ShellGitDir string          `json:"shell_git_dir"`
 	Branch      string          `json:"branch"`
 	Harness     *InspectHarness `json:"harness,omitempty"`
@@ -60,22 +65,24 @@ type InspectResult struct {
 // Inspect resolves every path, each member's git common dir and branch, and
 // the harness command, for scripts and wrapping tools. It reads only; a
 // missing worktree is reported with Exists false rather than failing.
-func (c *Core) Inspect(p *Package) (InspectResult, error) {
+func (c *Core) Inspect(s *Session) (InspectResult, error) {
+	p := s.Pkg
 	out := InspectResult{
-		Name: p.Name, Path: p.Dir, ManifestPath: manifest.Path(p.Dir),
-		ShellGitDir: filepath.Join(p.Dir, ".git"), Branch: p.M.Branch,
+		Package: p.Name, Session: s.Name, Path: s.Dir, PackagePath: p.Dir,
+		ManifestPath: manifest.Path(p.Dir), SessionPath: manifest.SessionPath(s.Dir),
+		ShellGitDir: filepath.Join(s.Dir, ".git"), Branch: s.S.Branch,
 		Members: []InspectMember{},
 	}
+	env := map[string]string{"VMONO_PACKAGE": p.Name, "VMONO_SESSION": s.Name, "VMONO_ROOT": s.Dir}
 	if name, h, err := c.Cfg.ResolveHarness("", p.M.Harness); err == nil {
 		ih := &InspectHarness{Name: name, Command: h.Command, Args: append([]string{}, h.Args...), Adapter: h.Adapter, Env: h.Env}
 		if path, err := exec.LookPath(h.Command); err == nil {
 			ih.Path, ih.Available = path, true
 		}
 		out.Harness = ih
-		out.LaunchEnv = map[string]string{"VMONO_PACKAGE": p.Name, "VMONO_ROOT": p.Dir, "VMONO_AUTHOR": "agent:" + name}
-	} else {
-		out.LaunchEnv = map[string]string{"VMONO_PACKAGE": p.Name, "VMONO_ROOT": p.Dir}
+		env["VMONO_AUTHOR"] = "agent:" + name
 	}
+	out.LaunchEnv = env
 
 	for _, mem := range p.M.Members {
 		src, err := paths.Abs(mem.Source)
@@ -84,10 +91,10 @@ func (c *Core) Inspect(p *Package) (InspectResult, error) {
 		}
 		im := InspectMember{
 			Name: mem.Name, Mode: mem.Mode, Role: mem.Role, Remote: mem.Remote,
-			Path: p.MemberDir(mem), RelPath: mem.Path, Source: src,
+			Path: s.MemberDir(mem), RelPath: mem.Path, Source: src,
 		}
 		if mem.Mode == manifest.ModeActive {
-			im.Branch, im.Base = p.M.Branch, mem.Base
+			im.Branch, im.Base = s.S.Branch, mem.Base
 		} else {
 			im.Ref = mem.Ref
 		}

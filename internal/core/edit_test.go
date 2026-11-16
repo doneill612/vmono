@@ -12,18 +12,17 @@ import (
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
-// newPackage creates a package with one active member "alpha".
-func newPackage(t *testing.T, c *Core, env *testutil.Env, name string) (*Package, string) {
+// newPackage creates a package with one active member "alpha" and one
+// session named "work" on branch vmono/<name>. It returns the package, the
+// session and alpha's source path.
+func newPackage(t *testing.T, c *Core, env *testutil.Env, name string) (*Package, *Session, string) {
 	t.Helper()
 	a := env.NewSource(t, "alpha")
-	p, err := c.Create(request(name, []string{a}, nil), CreateOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return p, a
+	p, s := newWork(t, c, request(name, []string{a}, nil))
+	return p, s, a
 }
 
-// subjects returns the shell repo's commit subjects, newest first.
+// subjects returns a repo's commit subjects, newest first.
 func subjects(t *testing.T, dir string) []string {
 	t.Helper()
 	return strings.Split(testutil.Git(t, dir, "log", "--format=%s"), "\n")
@@ -31,7 +30,7 @@ func subjects(t *testing.T, dir string) []string {
 
 func TestDescribeRoleNoteRenderAndCommitAsAuthor(t *testing.T) {
 	c, env := newCore(t)
-	p, _ := newPackage(t, c, env, "ctx")
+	p, s, _ := newPackage(t, c, env, "ctx")
 	c.Author = "agent:claude"
 
 	purpose, context := "New purpose.", "Ticket PLAT-1."
@@ -45,7 +44,7 @@ func TestDescribeRoleNoteRenderAndCommitAsAuthor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	agents, _ := os.ReadFile(filepath.Join(p.Dir, "AGENTS.md"))
+	agents, _ := os.ReadFile(filepath.Join(s.Dir, "AGENTS.md"))
 	for _, want := range []string{"New purpose.", "Ticket PLAT-1.", "Owns the thing", "contracts v3 is frozen", "(agent:claude)"} {
 		if !strings.Contains(string(agents), want) {
 			t.Errorf("AGENTS.md missing %q", want)
@@ -62,7 +61,7 @@ func TestDescribeRoleNoteRenderAndCommitAsAuthor(t *testing.T) {
 		t.Errorf("commit log = %v, want %v", log, want)
 	}
 	if out := testutil.Git(t, p.Dir, "status", "--porcelain"); out != "" {
-		t.Errorf("shell repo should be clean: %s", out)
+		t.Errorf("package repo should be clean: %s", out)
 	}
 
 	if err := c.SetRole(p, "ghost", "x"); !errors.Is(err, ErrNotFound) {
@@ -78,7 +77,7 @@ func TestDescribeRoleNoteRenderAndCommitAsAuthor(t *testing.T) {
 
 func TestAutoCommitOff(t *testing.T) {
 	c, env := newCore(t)
-	p, _ := newPackage(t, c, env, "nocommit")
+	p, _, _ := newPackage(t, c, env, "nocommit")
 	c.Cfg.AutoCommit = false
 	if err := c.AddNote(p, "hello"); err != nil {
 		t.Fatal(err)
@@ -93,7 +92,7 @@ func TestAutoCommitOff(t *testing.T) {
 
 func TestAddMemberAndRemoveMember(t *testing.T) {
 	c, env := newCore(t)
-	p, a := newPackage(t, c, env, "grow")
+	p, s, a := newPackage(t, c, env, "grow")
 	b := env.NewSource(t, "beta")
 	ref := env.NewSource(t, "contracts")
 
@@ -101,7 +100,7 @@ func TestAddMemberAndRemoveMember(t *testing.T) {
 	if err != nil || added.Name != "beta" || added.Path != "beta" {
 		t.Fatalf("AddMember = %+v, %v", added, err)
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "beta", "README.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(s.Dir, "beta", "README.md")); err != nil {
 		t.Error("worktree must exist immediately")
 	}
 	if _, err := c.AddMember(p, AddOptions{Source: ref, Reference: true, Role: "specs"}); err != nil {
@@ -114,7 +113,7 @@ func TestAddMemberAndRemoveMember(t *testing.T) {
 	if !strings.Contains(strings.Join(subjects(t, p.Dir), "|"), "vmono: add beta (user)") {
 		t.Errorf("add not committed: %v", subjects(t, p.Dir))
 	}
-	ign, _ := os.ReadFile(filepath.Join(p.Dir, ".gitignore"))
+	ign, _ := os.ReadFile(filepath.Join(s.Dir, ".gitignore"))
 	if !strings.Contains(string(ign), "/beta/") {
 		t.Errorf(".gitignore not regenerated: %s", ign)
 	}
@@ -127,12 +126,12 @@ func TestAddMemberAndRemoveMember(t *testing.T) {
 	}
 
 	// Remove: refused when dirty, allowed when forced, branch kept.
-	testutil.WriteFile(t, filepath.Join(p.Dir, "beta", "wip.txt"), "x")
+	testutil.WriteFile(t, filepath.Join(s.Dir, "beta", "wip.txt"), "x")
 	_, err = c.RemoveMember(p, "beta", RemoveOptions{})
 	if !errors.Is(err, ErrRefused) {
 		t.Fatalf("dirty remove = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "beta")); err != nil {
+	if _, err := os.Stat(filepath.Join(s.Dir, "beta")); err != nil {
 		t.Fatal("refused removal must leave the worktree")
 	}
 	res, err := c.RemoveMember(p, "beta", RemoveOptions{Force: true, DeleteBranch: true})
@@ -142,7 +141,7 @@ func TestAddMemberAndRemoveMember(t *testing.T) {
 	if len(res.BranchesDeleted) != 1 || gitx.BranchExists(b, "vmono/grow") {
 		t.Errorf("merged branch should be deleted: %+v", res)
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "beta")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(s.Dir, "beta")); !os.IsNotExist(err) {
 		t.Error("worktree should be gone")
 	}
 	if reloaded, _ = c.Load("grow"); len(reloaded.M.Members) != 2 {
@@ -155,7 +154,7 @@ func TestAddMemberAndRemoveMember(t *testing.T) {
 
 func TestAddMemberFailureLeavesManifestAlone(t *testing.T) {
 	c, env := newCore(t)
-	p, _ := newPackage(t, c, env, "safe")
+	p, s, _ := newPackage(t, c, env, "safe")
 	b := env.NewSource(t, "beta")
 
 	_, err := c.AddMember(p, AddOptions{Source: b, Copy: []string{"../escape"}})
@@ -169,7 +168,7 @@ func TestAddMemberFailureLeavesManifestAlone(t *testing.T) {
 	if len(reloaded.M.Members) != 1 {
 		t.Errorf("on-disk manifest changed: %+v", reloaded.M.Members)
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "beta")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(s.Dir, "beta")); !os.IsNotExist(err) {
 		t.Error("failed add must be rolled back")
 	}
 	if gitx.BranchExists(b, "vmono/safe") {
@@ -192,22 +191,22 @@ func TestAddMemberFailureLeavesManifestAlone(t *testing.T) {
 
 func TestShow(t *testing.T) {
 	c, env := newCore(t)
-	p, _ := newPackage(t, c, env, "view")
+	p, s, _ := newPackage(t, c, env, "view")
 	if err := c.AddNote(p, "first"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.AddNote(p, "second"); err != nil {
 		t.Fatal(err)
 	}
-	testutil.WriteFile(t, filepath.Join(p.Dir, "alpha", "README.md"), "changed")
-	s := c.Show(p)
-	if s.Name != "view" || s.Purpose != "test purpose" || len(s.Notes) != 2 || len(s.Members) != 1 {
-		t.Fatalf("show = %+v", s)
+	testutil.WriteFile(t, filepath.Join(s.Dir, "alpha", "README.md"), "changed")
+	sh := c.Show(p, s)
+	if sh.Name != "view" || sh.Session != "work" || sh.Purpose != "test purpose" || len(sh.Notes) != 2 || len(sh.Members) != 1 || len(sh.Sessions) != 1 {
+		t.Fatalf("show = %+v", sh)
 	}
-	if s.Notes[0].Text == s.Notes[1].Text {
+	if sh.Notes[0].Text == sh.Notes[1].Text {
 		t.Error("notes should be distinct")
 	}
-	m := s.Members[0]
+	m := sh.Members[0]
 	if m.Dirty != 1 || m.Mode != manifest.ModeActive || m.Branch != "vmono/view" || m.Source == "" || m.Role == "" {
 		t.Errorf("member = %+v", m)
 	}
@@ -218,7 +217,7 @@ func edited(p *Package) *manifest.Manifest { return clone(p.M) }
 
 func TestApplyEditAddRemoveSwitchAndMeta(t *testing.T) {
 	c, env := newCore(t)
-	p, _ := newPackage(t, c, env, "diff")
+	p, s, _ := newPackage(t, c, env, "diff")
 	b := env.NewSource(t, "beta")
 
 	// Metadata-only edit touches no worktrees.
@@ -239,7 +238,7 @@ func TestApplyEditAddRemoveSwitchAndMeta(t *testing.T) {
 	if plan, err = c.ApplyEdit(p, e, EditOptions{}); err != nil || len(plan.Add) != 1 {
 		t.Fatalf("add edit: %+v, %v", plan, err)
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "beta", "README.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(s.Dir, "beta", "README.md")); err != nil {
 		t.Fatal("added member worktree missing")
 	}
 
@@ -253,10 +252,10 @@ func TestApplyEditAddRemoveSwitchAndMeta(t *testing.T) {
 	if plan, err = c.ApplyEdit(p, e, EditOptions{}); err != nil || len(plan.Switch) != 1 {
 		t.Fatalf("switch to reference: %+v, %v", plan, err)
 	}
-	if st, _ := gitx.StatusOf(filepath.Join(p.Dir, "_ref", "beta")); !st.Detached {
+	if st, _ := gitx.StatusOf(filepath.Join(s.Dir, "_ref", "beta")); !st.Detached {
 		t.Error("beta should now be a detached reference")
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "beta")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(s.Dir, "beta")); !os.IsNotExist(err) {
 		t.Error("old active worktree should be gone")
 	}
 	if !gitx.BranchExists(b, "vmono/diff") {
@@ -277,17 +276,17 @@ func TestApplyEditAddRemoveSwitchAndMeta(t *testing.T) {
 	}
 
 	// Removal of a dirty member is refused, then forced.
-	testutil.WriteFile(t, filepath.Join(p.Dir, "beta", "wip"), "x")
+	testutil.WriteFile(t, filepath.Join(s.Dir, "beta", "wip"), "x")
 	e = edited(p)
 	e.Members = e.Members[:1]
 	ep, err := c.PlanEdit(p, e)
-	if err != nil || len(ep.Unsafe) != 1 || ep.Unsafe[0].Name != "beta" {
+	if err != nil || len(ep.Unsafe) != 1 || ep.Unsafe[0].Name != "beta" || ep.Unsafe[0].Session != "work" {
 		t.Fatalf("PlanEdit unsafe = %+v, %v", ep, err)
 	}
 	if _, err := c.ApplyEdit(p, e, EditOptions{}); !errors.Is(err, ErrRefused) {
 		t.Fatalf("dirty removal = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "beta")); err != nil {
+	if _, err := os.Stat(filepath.Join(s.Dir, "beta")); err != nil {
 		t.Fatal("refused edit must change nothing")
 	}
 	if _, err := c.ApplyEdit(p, e, EditOptions{Force: true}); err != nil {
@@ -304,17 +303,12 @@ func TestApplyEditAddRemoveSwitchAndMeta(t *testing.T) {
 
 func TestApplyEditRejectsIdentityChangesAndReplacesSource(t *testing.T) {
 	c, env := newCore(t)
-	p, a := newPackage(t, c, env, "ident")
+	p, s, a := newPackage(t, c, env, "ident")
 
 	e := edited(p)
 	e.Name = "renamed"
 	if _, err := c.ApplyEdit(p, e, EditOptions{}); err == nil {
 		t.Error("renaming a package must be rejected")
-	}
-	e = edited(p)
-	e.Branch = "other/branch"
-	if _, err := c.ApplyEdit(p, e, EditOptions{}); err == nil {
-		t.Error("changing the branch with active members must be rejected")
 	}
 	e = edited(p)
 	e.Members[0].Path = "../escape"
@@ -330,7 +324,7 @@ func TestApplyEditRejectsIdentityChangesAndReplacesSource(t *testing.T) {
 	if err != nil || len(plan.Remove) != 1 || len(plan.Add) != 1 {
 		t.Fatalf("replace edit: %+v, %v", plan, err)
 	}
-	if br := gitx.CurrentBranch(filepath.Join(p.Dir, "alpha")); br != "vmono/ident" {
+	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "vmono/ident" {
 		t.Errorf("replaced worktree branch = %q", br)
 	}
 }

@@ -12,18 +12,22 @@ import (
 	"github.com/doneill612/vmono/internal/gitx"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
+	"github.com/doneill612/vmono/internal/render"
 )
 
-// CreateOptions tunes Create.
-type CreateOptions struct {
-	// ReuseBranch checks out a package branch that already exists in a
+// SessionOptions tunes CreateSession.
+type SessionOptions struct {
+	// Branch overrides the session's default branch,
+	// <branch_prefix><package>/<session>.
+	Branch string
+	// ReuseBranch checks out a session branch that already exists in a
 	// source repo instead of failing. The CLI requires --reuse-branch; the
 	// TUI asks and retries on BranchExistsError.
 	ReuseBranch bool
 }
 
-// BranchExistsError reports that the package branch already exists in a
-// source repo. Callers may retry with CreateOptions.ReuseBranch.
+// BranchExistsError reports that the session branch already exists in a
+// source repo. Callers may retry with SessionOptions.ReuseBranch.
 type BranchExistsError struct {
 	Member string
 	Branch string
@@ -74,8 +78,39 @@ func (c *Core) prepareMembers(m *manifest.Manifest) (map[string]string, error) {
 		}
 		abs[m.Members[i].Name] = top
 	}
-	m.ApplyDefaults(c.Cfg.BranchPrefix)
+	m.ApplyDefaults()
 	return abs, nil
+}
+
+// memberSources resolves every member's source of an existing manifest to an
+// absolute path, keyed by member name.
+func memberSources(m *manifest.Manifest) (map[string]string, error) {
+	srcs := make(map[string]string, len(m.Members))
+	for _, mem := range m.Members {
+		abs, err := paths.Abs(mem.Source)
+		if err != nil {
+			return nil, err
+		}
+		srcs[mem.Name] = abs
+	}
+	return srcs, nil
+}
+
+// checkDistinctSources rejects two active members that share a repo: one
+// branch can only be checked out once, so a session could not hold both.
+func checkDistinctSources(m *manifest.Manifest, srcs map[string]string) error {
+	activeSources := map[string]string{}
+	for _, mem := range m.Members {
+		if mem.Mode != manifest.ModeActive {
+			continue
+		}
+		src := srcs[mem.Name]
+		if other, dup := activeSources[src]; dup {
+			return fmt.Errorf("members %s and %s are the same repo; one branch can only be checked out once", other, mem.Name)
+		}
+		activeSources[src] = mem.Name
+	}
+	return nil
 }
 
 // realPath cleans a path and resolves symlinks so paths git reports (which
@@ -109,39 +144,37 @@ func resolveRef(src, ref string, warn func(string)) (string, error) {
 }
 
 // preflightMembers checks the members in check before anything touches
-// disk: sources are usable, no two active members share a repo, the package
-// branch is not checked out elsewhere, and base/ref resolve. srcs maps every
+// disk, for a session on branch: sources are usable, no two active members
+// share a repo, the branch is not checked out elsewhere and does not collide
+// with another branch's ref path, and base/ref resolve. srcs maps every
 // member of m (not only check) to its absolute source. It returns the
-// members whose package branch already exists in their source.
-func preflightMembers(m *manifest.Manifest, srcs map[string]string, check []manifest.Member, reuse bool, removing map[string]bool) (existing map[string]bool, err error) {
+// members whose branch already exists in their source.
+func preflightMembers(m *manifest.Manifest, branch string, srcs map[string]string, check []manifest.Member, reuse bool, removing map[string]bool) (existing map[string]bool, err error) {
 	existing = map[string]bool{}
-	activeSources := map[string]string{}
-	for _, mem := range m.Members {
-		if mem.Mode != manifest.ModeActive {
-			continue
-		}
-		src := srcs[mem.Name]
-		if other, dup := activeSources[src]; dup {
-			return nil, fmt.Errorf("members %s and %s are the same repo; one branch can only be checked out once", other, mem.Name)
-		}
-		activeSources[src] = mem.Name
+	if err := checkDistinctSources(m, srcs); err != nil {
+		return nil, err
 	}
 	for _, mem := range check {
 		src := srcs[mem.Name]
 		switch mem.Mode {
 		case manifest.ModeActive:
-			if at, err := gitx.BranchCheckedOutAt(src, m.Branch); err != nil {
+			if at, err := gitx.BranchCheckedOutAt(src, branch); err != nil {
 				return nil, fmt.Errorf("%s: %w", mem.Name, err)
 			} else if at != "" && !removing[realPath(at)] {
-				return nil, fmt.Errorf("%s: branch %q is already checked out at %s", mem.Name, m.Branch, at)
+				return nil, fmt.Errorf("%s: branch %q is already checked out at %s", mem.Name, branch, at)
 			}
-			if gitx.BranchExists(src, m.Branch) {
+			if gitx.BranchExists(src, branch) {
 				if !reuse {
-					return nil, &BranchExistsError{Member: mem.Name, Branch: m.Branch}
+					return nil, &BranchExistsError{Member: mem.Name, Branch: branch}
 				}
 				existing[mem.Name] = true
-			} else if _, err := resolveRef(src, mem.Base, nil); err != nil {
-				return nil, fmt.Errorf("%s: %w", mem.Name, err)
+			} else {
+				if other, clash := gitx.BranchRefConflict(src, branch); clash {
+					return nil, fmt.Errorf("%s: branch %q conflicts with existing branch %q (git cannot hold both); pass a different branch name, or rename %q with `git branch -m`", mem.Name, branch, other, other)
+				}
+				if _, err := resolveRef(src, mem.Base, nil); err != nil {
+					return nil, fmt.Errorf("%s: %w", mem.Name, err)
+				}
 			}
 		case manifest.ModeReference:
 			if _, err := resolveRef(src, mem.Ref, nil); err != nil {
@@ -152,15 +185,16 @@ func preflightMembers(m *manifest.Manifest, srcs map[string]string, check []mani
 	return existing, nil
 }
 
-// Create builds a new package from a manifest whose members name their
-// sources. It follows the spec's create sequence: validate, init the shell
-// repo, add worktrees, copy files, render, commit. If any step fails, every
-// step already done is undone and the error names the failing member.
+// CreatePackage defines a new package from a manifest whose members name
+// their sources: it creates the package directory, its own git repo, the
+// manifest and a .gitignore, and commits them. It makes no worktrees; the
+// work happens in sessions, made with CreateSession. If any step fails, every
+// step already done is undone.
 //
 // The manifest needs Name and Members (Source and Mode each); everything
-// else is defaulted. The shell repo always gets an initial commit, even
-// with auto_commit off, because OpenCode identifies a project by it.
-func (c *Core) Create(m *manifest.Manifest, opts CreateOptions) (*Package, error) {
+// else is defaulted. The package repo always gets an initial commit, even
+// with auto_commit off.
+func (c *Core) CreatePackage(m *manifest.Manifest) (*Package, error) {
 	if err := gitx.CheckVersion(); err != nil {
 		return nil, err
 	}
@@ -177,6 +211,9 @@ func (c *Core) Create(m *manifest.Manifest, opts CreateOptions) (*Package, error
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
+	if err := checkDistinctSources(m, srcs); err != nil {
+		return nil, err
+	}
 	dir, err := c.PackageDir(m.Name)
 	if err != nil {
 		return nil, err
@@ -184,54 +221,112 @@ func (c *Core) Create(m *manifest.Manifest, opts CreateOptions) (*Package, error
 	if _, err := os.Stat(dir); err == nil {
 		return nil, fmt.Errorf("package %q already exists at %s", m.Name, dir)
 	}
-	existing, err := preflightMembers(m, srcs, m.Members, opts.ReuseBranch, nil)
+
+	p := &Package{Name: m.Name, Dir: dir, M: m}
+	steps := []apply.Step{
+		{
+			Name: "create package",
+			Run: func(func(string)) error {
+				if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+					return err
+				}
+				if err := os.Mkdir(dir, 0o755); err != nil {
+					return err
+				}
+				if err := gitx.Init(dir, "main"); err != nil {
+					return err
+				}
+				return manifest.Save(dir, m)
+			},
+			Undo: func() error { return os.RemoveAll(dir) },
+		},
+		{Name: "render files", Run: func(func(string)) error {
+			_, err := render.RenderPackage(dir)
+			return err
+		}},
+		{Name: "commit", Run: func(func(string)) error {
+			_, err := gitx.CommitAll(dir, "vmono: create "+m.Name, "")
+			return err
+		}},
+	}
+	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(steps); err != nil {
+		return nil, err
+	}
+	c.Idx.SetPackage(m.Name, dir)
+	_ = c.Idx.Save()
+	return p, nil
+}
+
+// CreateSession starts a new session of a package: it validates, then makes
+// the session directory with its own git repo and session file, a worktree
+// of every member on the session branch, copies each member's untracked
+// files, renders the generated files and commits them. If any step fails,
+// every step already done is undone and the error names the failing member.
+//
+// The session repo always gets an initial commit, even with auto_commit off,
+// because OpenCode identifies a project by it: that is what makes each
+// session its own project.
+func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Session, error) {
+	if err := gitx.CheckVersion(); err != nil {
+		return nil, err
+	}
+	if err := manifest.ValidateName(name); err != nil {
+		return nil, err
+	}
+	ms := &manifest.Session{Package: p.Name, Name: name, Branch: opts.Branch, Created: time.Now().Truncate(time.Second)}
+	ms.ApplyDefaults(c.Cfg.BranchPrefix)
+	if err := ms.Validate(); err != nil {
+		return nil, err
+	}
+	dir := p.SessionDir(name)
+	if _, err := os.Stat(dir); err == nil {
+		return nil, fmt.Errorf("package %s already has a session %q at %s", p.Name, name, dir)
+	}
+	srcs, err := memberSources(p.M)
+	if err != nil {
+		return nil, err
+	}
+	existing, err := preflightMembers(p.M, ms.Branch, srcs, p.M.Members, opts.ReuseBranch, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	p := &Package{Name: m.Name, Dir: dir, M: m}
+	s := &Session{Pkg: p, Name: name, Dir: dir, S: ms}
 	var srcList []string
-	for _, mem := range m.Members {
+	for _, mem := range p.M.Members {
 		srcList = append(srcList, srcs[mem.Name])
 	}
 	steps := c.fetchStep(srcList...)
 	steps = append(steps, apply.Step{
-		Name: "create package",
+		Name: "create session",
 		Run: func(func(string)) error {
-			if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-				return err
-			}
 			if err := os.Mkdir(dir, 0o755); err != nil {
 				return err
 			}
 			if err := gitx.Init(dir, "main"); err != nil {
 				return err
 			}
-			return manifest.Save(dir, m)
+			return manifest.SaveSession(dir, ms)
 		},
 		Undo: func() error { return os.RemoveAll(dir) },
 	})
-	for _, mem := range m.Members {
-		steps = append(steps, c.addMemberSteps(p, mem, srcs[mem.Name], existing[mem.Name])...)
+	for _, mem := range p.M.Members {
+		steps = append(steps, c.addMemberSteps(s, mem, srcs[mem.Name], existing[mem.Name])...)
 	}
 	steps = append(steps,
 		apply.Step{Name: "render files", Run: func(func(string)) error {
-			_, err := c.Render(p)
+			_, err := c.Render(s)
 			return err
 		}},
 		apply.Step{Name: "commit", Run: func(func(string)) error {
-			_, err := gitx.CommitAll(dir, "vmono: create "+m.Name, "")
+			_, err := gitx.CommitAll(dir, "vmono: create session "+name, "")
 			return err
 		}},
 	)
-
-	runner := &apply.Runner{Events: c.Events, Rollback: true}
-	if err := runner.Run(steps); err != nil {
+	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(steps); err != nil {
 		return nil, err
 	}
-	c.Idx.SetPackage(m.Name, dir)
-	_ = c.Idx.Save()
-	return p, nil
+	return s, nil
 }
 
 // fetchSources fetches the distinct repos behind srcs concurrently and
@@ -291,14 +386,14 @@ func (c *Core) fetchStep(srcs ...string) []apply.Step {
 	}}}
 }
 
-// addMemberSteps returns the apply steps that bring one member's worktree
-// into existence: worktree add and copying files. It does not fetch; callers
+// addMemberSteps returns the apply steps that bring one member's worktree in
+// a session into existence: worktree add and copying files. It does not fetch; callers
 // put fetchStep ahead of the member steps. Rollback of the
 // worktree step removes the worktree and any branch it created.
-func (c *Core) addMemberSteps(p *Package, mem manifest.Member, src string, branchExists bool) []apply.Step {
+func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branchExists bool) []apply.Step {
 	var steps []apply.Step
-	dst := p.MemberDir(mem)
-	branch := p.M.Branch
+	dst := s.MemberDir(mem)
+	branch := s.S.Branch
 
 	switch mem.Mode {
 	case manifest.ModeActive:
@@ -318,6 +413,13 @@ func (c *Core) addMemberSteps(p *Package, mem manifest.Member, src string, branc
 				return err
 			}
 			if err := gitx.WorktreeAddBranch(src, dst, branch, base); err != nil {
+				// git creates the branch before it checks the target path, so
+				// a refused add (an occupied directory, say) leaves the branch
+				// behind. It did not exist before this step, so it is ours to
+				// remove.
+				if gitx.BranchExists(src, branch) {
+					_ = gitx.DeleteBranch(src, branch, true)
+				}
 				return err
 			}
 			createdBranch = true

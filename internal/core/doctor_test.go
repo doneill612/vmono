@@ -22,7 +22,7 @@ func kinds(r DoctorResult) []string {
 
 func TestDoctorHealthyPackageHasNoFindings(t *testing.T) {
 	c, env := newCore(t)
-	newPackage(t, c, env, "fine")
+	_, _, _ = newPackage(t, c, env, "fine")
 	res, err := c.Doctor(false)
 	if err != nil {
 		t.Fatal(err)
@@ -34,8 +34,8 @@ func TestDoctorHealthyPackageHasNoFindings(t *testing.T) {
 
 func TestDoctorFindsAndFixesMissingWorktreeAndStaleEntry(t *testing.T) {
 	c, env := newCore(t)
-	p, _ := newPackage(t, c, env, "drift")
-	if err := os.RemoveAll(filepath.Join(p.Dir, "alpha")); err != nil {
+	_, s, _ := newPackage(t, c, env, "drift")
+	if err := os.RemoveAll(filepath.Join(s.Dir, "alpha")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -44,7 +44,7 @@ func TestDoctorFindsAndFixesMissingWorktreeAndStaleEntry(t *testing.T) {
 	if !strings.Contains(got, KindMissingWorktree) || !strings.Contains(got, KindStaleWorktree) || res.Remaining() != 2 {
 		t.Fatalf("report-only findings = %v", res.Findings)
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "alpha")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(s.Dir, "alpha")); !os.IsNotExist(err) {
 		t.Fatal("doctor without --fix must not change anything")
 	}
 
@@ -55,7 +55,7 @@ func TestDoctorFindsAndFixesMissingWorktreeAndStaleEntry(t *testing.T) {
 	if res.Remaining() != 0 {
 		t.Errorf("fix left findings: %+v", res.Findings)
 	}
-	if _, err := os.Stat(filepath.Join(p.Dir, "alpha", "README.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(s.Dir, "alpha", "README.md")); err != nil {
 		t.Error("worktree not recreated")
 	}
 	if again, _ := c.Doctor(false); again.Remaining() != 0 {
@@ -65,13 +65,13 @@ func TestDoctorFindsAndFixesMissingWorktreeAndStaleEntry(t *testing.T) {
 
 func TestDoctorRelocatesMovedSourceByRemote(t *testing.T) {
 	c, env := newCore(t)
-	p, a := newPackage(t, c, env, "moved")
+	_, s, a := newPackage(t, c, env, "moved")
 	c.Cfg.SourceRoots = []string{filepath.Dir(a)}
 
 	// Move the source repo elsewhere under the source root; it keeps its
 	// remote. Detach the package's worktree registration first by removing
 	// the worktree directory so the move is clean.
-	if err := os.RemoveAll(filepath.Join(p.Dir, "alpha")); err != nil {
+	if err := os.RemoveAll(filepath.Join(s.Dir, "alpha")); err != nil {
 		t.Fatal(err)
 	}
 	moved := filepath.Join(filepath.Dir(a), "alpha-renamed")
@@ -94,20 +94,20 @@ func TestDoctorRelocatesMovedSourceByRemote(t *testing.T) {
 	if !strings.HasSuffix(reloaded.M.Members[0].Source, "alpha-renamed") {
 		t.Errorf("source not relocated: %q", reloaded.M.Members[0].Source)
 	}
-	if br := gitx.CurrentBranch(filepath.Join(p.Dir, "alpha")); br != "vmono/moved" {
+	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "vmono/moved" {
 		t.Errorf("worktree not rebuilt from the new source: %q", br)
 	}
 }
 
 func TestDoctorReportsUnfixableAndRebuildsIndex(t *testing.T) {
 	c, env := newCore(t)
-	p, a := newPackage(t, c, env, "gone")
+	_, s, a := newPackage(t, c, env, "gone")
 	root, _ := c.PackageRoot()
 
 	if err := os.MkdirAll(filepath.Join(root, "random-dir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(filepath.Join(p.Dir, "alpha")); err != nil {
+	if err := os.RemoveAll(filepath.Join(s.Dir, "alpha")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.RemoveAll(a); err != nil {
@@ -158,16 +158,13 @@ func TestInspect(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")
 	ref := env.NewSource(t, "contracts")
-	p, err := c.Create(request("insp", []string{a}, []string{ref}), CreateOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := c.Inspect(p)
+	_, s := newWork(t, c, request("insp", []string{a}, []string{ref}))
+	r, err := c.Inspect(s)
 	if err != nil {
 		t.Fatal(err)
 	}
 	data, _ := json.Marshal(r)
-	if r.Name != "insp" || len(r.Members) != 2 || r.Harness == nil || r.Harness.Name != "claude" {
+	if r.Package != "insp" || r.Session != "work" || len(r.Members) != 2 || r.Harness == nil || r.Harness.Name != "claude" {
 		t.Fatalf("inspect = %s", data)
 	}
 	m := r.Members[0]
@@ -179,14 +176,14 @@ func TestInspect(t *testing.T) {
 	if r.Members[1].Ref != "origin/HEAD" || r.Members[1].RelPath != "_ref/contracts" {
 		t.Errorf("reference member = %+v", r.Members[1])
 	}
-	if r.LaunchEnv["VMONO_AUTHOR"] != "agent:claude" || r.LaunchEnv["VMONO_ROOT"] != p.Dir {
+	if r.LaunchEnv["VMONO_AUTHOR"] != "agent:claude" || r.LaunchEnv["VMONO_ROOT"] != s.Dir || r.LaunchEnv["VMONO_SESSION"] != "work" || r.LaunchEnv["VMONO_PACKAGE"] != "insp" {
 		t.Errorf("launch env = %v", r.LaunchEnv)
 	}
 }
 
 func TestDoctorPrunesStaleEntriesOfAHandDeletedPackage(t *testing.T) {
 	c, env := newCore(t)
-	p, a := newPackage(t, c, env, "gone")
+	p, _, a := newPackage(t, c, env, "gone")
 	c.Cfg.SourceRoots = []string{filepath.Dir(a)}
 
 	// Deleting the package directory by hand takes the manifest with it, so

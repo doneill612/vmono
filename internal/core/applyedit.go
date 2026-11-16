@@ -2,7 +2,6 @@ package core
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -20,11 +19,14 @@ type EditOptions struct {
 	ReuseBranch bool
 }
 
-// EditPlan is what applying an edited manifest would do. The TUI shows it
-// for confirmation; Unsafe lists removals that would discard work.
+// EditPlan is what applying an edited manifest would do, to every session of
+// the package. The TUI shows it for confirmation; Unsafe lists removals, per
+// session, that would discard work.
 type EditPlan struct {
 	Plan   manifest.Plan
 	Unsafe []MemberSafety
+	// Sessions are the sessions the plan applies to.
+	Sessions []*Session
 	// Next is the normalized manifest that would be saved.
 	Next *manifest.Manifest
 	// Srcs maps each member name in Next to its absolute source.
@@ -32,20 +34,14 @@ type EditPlan struct {
 }
 
 // PlanEdit normalizes and validates an edited manifest against the current
-// one and returns the diff, without changing anything. The package name,
-// creation time and (once active members exist) branch cannot change.
+// one and returns the diff, without changing anything. The package name and
+// creation time cannot change.
 func (c *Core) PlanEdit(p *Package, edited *manifest.Manifest) (*EditPlan, error) {
 	next := clone(edited)
 	if next.Name != p.Name {
 		return nil, fmt.Errorf("package names cannot change (was %q, got %q): session history is keyed by path", p.Name, next.Name)
 	}
 	next.Created = p.M.Created
-	if next.Branch == "" {
-		next.Branch = p.M.Branch
-	}
-	if next.Branch != p.M.Branch && len(p.M.Active()) > 0 {
-		return nil, errors.New("the package branch cannot change while active members exist")
-	}
 	srcs, err := c.prepareMembers(next)
 	if err != nil {
 		return nil, err
@@ -53,20 +49,25 @@ func (c *Core) PlanEdit(p *Package, edited *manifest.Manifest) (*EditPlan, error
 	if err := next.Validate(); err != nil {
 		return nil, err
 	}
+	sessions, err := c.LoadSessions(p)
+	if err != nil {
+		return nil, err
+	}
 	plan := manifest.Diff(p.M, next)
-	unsafe := unsafeOf(c.Safety(p, plan.Removals()))
-	return &EditPlan{Plan: plan, Unsafe: unsafe, Next: next, Srcs: srcs}, nil
+	unsafe := unsafeOf(c.safetyAcross(sessions, plan.Removals()))
+	return &EditPlan{Plan: plan, Unsafe: unsafe, Sessions: sessions, Next: next, Srcs: srcs}, nil
 }
 
 // ApplyEdit applies an edited manifest as a diff: only members added,
-// removed or switched run, and the rest are left alone. Removals that would
-// discard work return a *RefusedError unless forced.
+// removed or switched run, in every session, and the rest are left alone.
+// Removals that would discard work in any session return a *RefusedError
+// unless forced.
 //
-// Order: additions that do not reuse a removed path run first and are
-// undone if one fails, then removals, then additions that replace a removed
-// path (a changed source, base or ref). A failure in the last group leaves
-// the removed worktrees gone; the saved manifest is unchanged, so a
-// following `vmono sync` rebuilds them.
+// Order: additions that do not reuse a removed path run first, in every
+// session, and are undone if one fails, then removals, then additions that
+// replace a removed path (a changed source, base or ref). A failure in the
+// last group leaves the removed worktrees gone; the saved manifest is
+// unchanged, so a following `vmono sync` rebuilds them.
 func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions) (manifest.Plan, error) {
 	ep, err := c.PlanEdit(p, edited)
 	if err != nil {
@@ -88,27 +89,34 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 
 	removing := map[string]bool{}
 	removedPaths := map[string]bool{}
+	for _, s := range ep.Sessions {
+		for _, r := range removals {
+			removing[realPath(filepath.Join(s.Dir, filepath.FromSlash(r.Path)))] = true
+		}
+	}
 	for _, r := range removals {
-		removing[realPath(filepath.Join(p.Dir, filepath.FromSlash(r.Path)))] = true
 		removedPaths[strings.ToLower(filepath.ToSlash(r.Path))] = true
 	}
-	// A re-added active member whose old worktree holds the package branch
+	// A re-added active member whose old worktree holds the session branch
 	// is a replacement, so reusing the branch is expected, not an error.
 	replacing := map[string]bool{}
 	for _, r := range plan.Remove {
 		replacing[r.Name] = r.Mode == manifest.ModeActive
 	}
-	existing, err := preflightMembers(ep.Next, ep.Srcs, adds, opts.ReuseBranch || len(replacing) > 0, removing)
-	if err != nil {
-		return plan, err
-	}
-	for _, mem := range adds {
-		if !replacing[mem.Name] && existing[mem.Name] && !opts.ReuseBranch {
-			return plan, &BranchExistsError{Member: mem.Name, Branch: ep.Next.Branch}
+	existing := make(map[string]map[string]bool, len(ep.Sessions))
+	for _, s := range ep.Sessions {
+		ex, err := preflightMembers(ep.Next, s.S.Branch, ep.Srcs, adds, opts.ReuseBranch || len(replacing) > 0, removing)
+		if err != nil {
+			return plan, sessionErr(s, len(ep.Sessions), err)
+		}
+		existing[s.Name] = ex
+		for _, mem := range adds {
+			if !replacing[mem.Name] && ex[mem.Name] && !opts.ReuseBranch {
+				return plan, &BranchExistsError{Member: mem.Name, Branch: s.S.Branch}
+			}
 		}
 	}
 
-	nextPkg := &Package{Name: p.Name, Dir: p.Dir, M: ep.Next}
 	var first, last []manifest.Member
 	for _, mem := range adds {
 		if removedPaths[strings.ToLower(filepath.ToSlash(mem.Path))] {
@@ -121,13 +129,20 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	for _, mem := range adds {
 		addSrcs = append(addSrcs, ep.Srcs[mem.Name])
 	}
+	multi := len(ep.Sessions) > 1
 	addSteps := func(list []manifest.Member, fetch bool) []apply.Step {
 		var steps []apply.Step
-		if fetch {
+		if fetch && len(ep.Sessions) > 0 {
 			steps = c.fetchStep(addSrcs...)
 		}
-		for _, mem := range list {
-			steps = append(steps, c.addMemberSteps(nextPkg, mem, ep.Srcs[mem.Name], existing[mem.Name])...)
+		for _, s := range ep.Sessions {
+			for _, mem := range list {
+				ss := c.addMemberSteps(s, mem, ep.Srcs[mem.Name], existing[s.Name][mem.Name])
+				if multi {
+					labelSteps(ss, s.Name)
+				}
+				steps = append(steps, ss...)
+			}
 		}
 		return steps
 	}
@@ -137,12 +152,17 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	}
 	var rmSteps []apply.Step
 	var res DeleteResult
-	for _, mem := range removals {
-		steps, err := c.removeMemberSteps(p, mem, opts.Force, false, &res)
-		if err != nil {
-			return plan, err
+	for _, s := range ep.Sessions {
+		for _, mem := range removals {
+			ss, err := c.removeMemberSteps(s, mem, opts.Force, false, &res)
+			if err != nil {
+				return plan, err
+			}
+			if multi {
+				labelSteps(ss, s.Name)
+			}
+			rmSteps = append(rmSteps, ss...)
 		}
-		rmSteps = append(rmSteps, steps...)
 	}
 	if err := (&apply.Runner{Events: c.Events}).Run(rmSteps); err != nil {
 		return plan, err

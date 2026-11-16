@@ -12,6 +12,7 @@ import (
 	"github.com/doneill612/vmono/internal/gitx"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
+	"github.com/doneill612/vmono/internal/render"
 )
 
 // SyncOptions tunes Sync.
@@ -34,7 +35,7 @@ type SyncResult struct {
 	Files []string `json:"files"`
 }
 
-// reservedTop are top-level names in a package that are not members.
+// reservedTop are top-level names in a session that are not members.
 var reservedTop = map[string]bool{
 	".git": true, ".vmono": true, ".claude": true, ".opencode": true,
 	"AGENTS.md": true, "CLAUDE.md": true, ".gitignore": true, "opencode.json": true,
@@ -72,25 +73,60 @@ func worktreeOf(src, dir string) worktreeState {
 	return wtOK
 }
 
-// Sync makes the package directory match its manifest and regenerates
-// files. It recreates missing worktrees (pruning stale registrations
-// first), warns about directories the manifest does not list, never
-// removes anything, and, with Refs, moves clean reference members to their
-// latest fetched ref. Per-member problems are reported in Skipped and as
-// warnings; the rest of the sync still runs.
-func (c *Core) Sync(p *Package, opts SyncOptions) (SyncResult, error) {
+// SessionSync is one session's result in a package-wide sync.
+type SessionSync struct {
+	Session string `json:"session"`
+	SyncResult
+}
+
+// SyncPackage syncs every session of a package: it regenerates the package's
+// own .gitignore, committing it when it changed and auto_commit is on, then
+// runs Sync on each session. A session that fails does not stop the others;
+// the errors are joined.
+func (c *Core) SyncPackage(p *Package, opts SyncOptions) ([]SessionSync, error) {
+	var errs []error
+	changed, err := render.RenderPackage(p.Dir)
+	if err != nil {
+		errs = append(errs, err)
+	} else if len(changed) > 0 && c.Cfg.AutoCommit {
+		if _, err := gitx.CommitAll(p.Dir, fmt.Sprintf("vmono: sync (%s)", c.Author), ""); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	sessions, err := c.LoadSessions(p)
+	if err != nil {
+		return nil, errors.Join(append(errs, err)...)
+	}
+	out := make([]SessionSync, 0, len(sessions))
+	for _, s := range sessions {
+		res, err := c.Sync(s, opts)
+		out = append(out, SessionSync{Session: s.Name, SyncResult: res})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("session %s: %w", s.Name, err))
+		}
+	}
+	return out, errors.Join(errs...)
+}
+
+// Sync makes a session directory match its package's manifest and
+// regenerates files. It recreates missing worktrees (pruning stale
+// registrations first), warns about directories the manifest does not list,
+// never removes anything, and, with Refs, moves clean reference members to
+// their latest fetched ref. Per-member problems are reported in Skipped and
+// as warnings; the rest of the sync still runs.
+func (c *Core) Sync(s *Session, opts SyncOptions) (SyncResult, error) {
 	res := SyncResult{Recreated: []string{}, Unlisted: []string{}, RefsMoved: []string{}, Skipped: []string{}}
 	var errs []error
 
-	if err := c.prefetchForSync(p, opts); err != nil {
+	if err := c.prefetchForSync(s, opts); err != nil {
 		return res, err
 	}
-	for _, mem := range p.M.Members {
+	for _, mem := range s.Pkg.M.Members {
 		src, err := paths.Abs(mem.Source)
 		if err != nil {
 			return res, err
 		}
-		dir := p.MemberDir(mem)
+		dir := s.MemberDir(mem)
 		if _, err := os.Stat(src); err != nil {
 			msg := "source repo is missing: " + src
 			res.Skipped = append(res.Skipped, mem.Name+": "+msg)
@@ -103,7 +139,7 @@ func (c *Core) Sync(p *Package, opts SyncOptions) (SyncResult, error) {
 			res.Skipped = append(res.Skipped, mem.Name+": "+msg)
 			c.warnEvent(mem.Name, "sync", msg)
 		case wtMissing:
-			if err := c.recreateMember(p, mem, src); err != nil {
+			if err := c.recreateMember(s, mem, src); err != nil {
 				res.Skipped = append(res.Skipped, mem.Name+": "+err.Error())
 				errs = append(errs, err)
 				continue
@@ -111,7 +147,7 @@ func (c *Core) Sync(p *Package, opts SyncOptions) (SyncResult, error) {
 			res.Recreated = append(res.Recreated, mem.Name)
 		case wtOK:
 			if opts.Refs && mem.Mode == manifest.ModeReference {
-				moved, skip := c.moveRef(p, mem, src)
+				moved, skip := c.moveRef(s, mem, src)
 				if moved {
 					res.RefsMoved = append(res.RefsMoved, mem.Name)
 				}
@@ -123,18 +159,18 @@ func (c *Core) Sync(p *Package, opts SyncOptions) (SyncResult, error) {
 		}
 	}
 
-	res.Unlisted = unlistedDirs(p)
+	res.Unlisted = unlistedDirs(s)
 	for _, u := range res.Unlisted {
 		c.warnEvent("", "sync", "directory not in manifest: "+u)
 	}
 
-	changed, err := c.Render(p)
+	changed, err := c.Render(s)
 	if err != nil {
 		return res, err
 	}
 	res.Files = append([]string{}, changed...)
 	if c.Cfg.AutoCommit {
-		if _, err := gitx.CommitAll(p.Dir, fmt.Sprintf("vmono: sync (%s)", c.Author), ""); err != nil {
+		if _, err := gitx.CommitAll(s.Dir, fmt.Sprintf("vmono: sync (%s)", c.Author), ""); err != nil {
 			return res, err
 		}
 	}
@@ -147,9 +183,9 @@ func (c *Core) Sync(p *Package, opts SyncOptions) (SyncResult, error) {
 // whose worktree is intact. A source that is missing on disk is skipped
 // here and reported by the main loop. Fetch failures only warn, so the sync
 // continues with the refs already on disk.
-func (c *Core) prefetchForSync(p *Package, opts SyncOptions) error {
+func (c *Core) prefetchForSync(s *Session, opts SyncOptions) error {
 	var srcs []string
-	for _, mem := range p.M.Members {
+	for _, mem := range s.Pkg.M.Members {
 		src, err := paths.Abs(mem.Source)
 		if err != nil {
 			return err
@@ -157,7 +193,7 @@ func (c *Core) prefetchForSync(p *Package, opts SyncOptions) error {
 		if _, err := os.Stat(src); err != nil {
 			continue
 		}
-		switch worktreeOf(src, p.MemberDir(mem)) {
+		switch worktreeOf(src, s.MemberDir(mem)) {
 		case wtMissing:
 			if c.Cfg.FetchOnCreate {
 				srcs = append(srcs, src)
@@ -177,27 +213,27 @@ func (c *Core) prefetchForSync(p *Package, opts SyncOptions) error {
 // recreateMember rebuilds one member's missing worktree. Stale
 // registrations are pruned first, and an existing package branch is checked
 // out rather than recreated, since branches are kept when worktrees go.
-func (c *Core) recreateMember(p *Package, mem manifest.Member, src string) error {
+func (c *Core) recreateMember(s *Session, mem manifest.Member, src string) error {
 	if err := gitx.WorktreePrune(src); err != nil {
 		return err
 	}
 	exists := false
 	if mem.Mode == manifest.ModeActive {
-		if at, err := gitx.BranchCheckedOutAt(src, p.M.Branch); err != nil {
+		if at, err := gitx.BranchCheckedOutAt(src, s.S.Branch); err != nil {
 			return err
 		} else if at != "" {
-			return fmt.Errorf("branch %q is already checked out at %s", p.M.Branch, at)
+			return fmt.Errorf("branch %q is already checked out at %s", s.S.Branch, at)
 		}
-		exists = gitx.BranchExists(src, p.M.Branch)
+		exists = gitx.BranchExists(src, s.S.Branch)
 	}
-	return (&apply.Runner{Events: c.Events}).Run(c.addMemberSteps(p, mem, src, exists))
+	return (&apply.Runner{Events: c.Events}).Run(c.addMemberSteps(s, mem, src, exists))
 }
 
 // moveRef moves a clean reference member to its latest fetched ref, using
 // the refs prefetchForSync already brought in. It returns whether it moved
 // and, if it declined, why.
-func (c *Core) moveRef(p *Package, mem manifest.Member, src string) (moved bool, skip string) {
-	dir := p.MemberDir(mem)
+func (c *Core) moveRef(s *Session, mem manifest.Member, src string) (moved bool, skip string) {
+	dir := s.MemberDir(mem)
 	st, err := gitx.StatusOf(dir)
 	if err != nil {
 		return false, err.Error()
@@ -228,16 +264,16 @@ func (c *Core) moveRef(p *Package, mem manifest.Member, src string) (moved bool,
 
 // unlistedDirs returns top-level (and _ref) directories that are neither
 // reserved files nor listed by a member.
-func unlistedDirs(p *Package) []string {
+func unlistedDirs(s *Session) []string {
 	listed := map[string]bool{}
-	for _, mem := range p.M.Members {
+	for _, mem := range s.Pkg.M.Members {
 		slash := filepath.ToSlash(mem.Path)
 		listed[slash] = true
 		listed[strings.SplitN(slash, "/", 2)[0]] = true
 	}
 	out := []string{}
 	scan := func(rel string) {
-		entries, err := os.ReadDir(filepath.Join(p.Dir, filepath.FromSlash(rel)))
+		entries, err := os.ReadDir(filepath.Join(s.Dir, filepath.FromSlash(rel)))
 		if err != nil {
 			return
 		}

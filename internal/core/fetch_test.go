@@ -41,7 +41,7 @@ func collect(c *Core, fn func()) []apply.Event {
 	return evs
 }
 
-func TestCreateFetchesAllSourcesInOneStepFirst(t *testing.T) {
+func TestCreateSessionFetchesAllSourcesInOneStepFirst(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")
 	b := env.NewSource(t, "beta")
@@ -50,9 +50,10 @@ func TestCreateFetchesAllSourcesInOneStepFirst(t *testing.T) {
 		publishBranch(t, env, src, "feature")
 	}
 
+	p := mustPackage(t, c, request("fetchy", []string{a, b}, []string{ref}))
 	var err error
 	evs := collect(c, func() {
-		_, err = c.Create(request("fetchy", []string{a, b}, []string{ref}), CreateOptions{})
+		_, err = c.CreateSession(p, "work", SessionOptions{})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -77,15 +78,16 @@ func TestCreateFetchesAllSourcesInOneStepFirst(t *testing.T) {
 	}
 }
 
-func TestCreateWithFetchOnCreateOffSkipsFetch(t *testing.T) {
+func TestCreateSessionWithFetchOnCreateOffSkipsFetch(t *testing.T) {
 	c, env := newCore(t)
 	c.Cfg.FetchOnCreate = false
 	a := env.NewSource(t, "alpha")
 	publishBranch(t, env, a, "feature")
 
+	p := mustPackage(t, c, request("nofetch", []string{a}, nil))
 	var err error
 	evs := collect(c, func() {
-		_, err = c.Create(request("nofetch", []string{a}, nil), CreateOptions{})
+		_, err = c.CreateSession(p, "work", SessionOptions{})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -100,16 +102,17 @@ func TestCreateWithFetchOnCreateOffSkipsFetch(t *testing.T) {
 	}
 }
 
-func TestCreateContinuesWhenAFetchFails(t *testing.T) {
+func TestCreateSessionContinuesWhenAFetchFails(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")
 	b := env.NewSource(t, "beta")
 	publishBranch(t, env, a, "feature")
 	testutil.Git(t, b, "remote", "set-url", "origin", filepath.Join(env.Root, "remotes", "gone.git"))
 
+	p := mustPackage(t, c, request("partial", []string{a, b}, nil))
 	var err error
 	evs := collect(c, func() {
-		_, err = c.Create(request("partial", []string{a, b}, nil), CreateOptions{})
+		_, err = c.CreateSession(p, "work", SessionOptions{})
 	})
 	if err != nil {
 		t.Fatalf("a failed fetch must not fail the create: %v", err)

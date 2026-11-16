@@ -9,18 +9,20 @@ import (
 	"github.com/doneill612/vmono/internal/apply"
 	"github.com/doneill612/vmono/internal/gitx"
 	"github.com/doneill612/vmono/internal/manifest"
-	"github.com/doneill612/vmono/internal/paths"
 )
 
-// save is the single apply path every manifest change goes through, whether
-// it comes from the TUI, the CLI or an agent: write the manifest,
-// regenerate files, and commit to the shell repo as "vmono: <op>
-// (<author>)" when auto_commit is on. That history records who changed what.
+// save is the single apply path every package change goes through, whether
+// it comes from the TUI, the CLI or an agent: write the manifest, commit it
+// to the package repo as "vmono: <op> (<author>)" when auto_commit is on, and
+// regenerate the files of every session. The package repo's history records
+// who changed what. Session repos hold only generated files, so the
+// regenerated files are left for the next sync to commit rather than adding a
+// commit to every session for every note.
 func (c *Core) save(p *Package, op string) error {
 	if err := manifest.Save(p.Dir, p.M); err != nil {
 		return err
 	}
-	if _, err := c.Render(p); err != nil {
+	if err := c.RenderAll(p); err != nil {
 		return err
 	}
 	if !c.Cfg.AutoCommit {
@@ -108,10 +110,11 @@ type AddOptions struct {
 	ReuseBranch bool
 }
 
-// AddMember adds a member to a package: validate, create its worktree,
-// copy files, then save the manifest and regenerate files. If the worktree
-// steps fail they are undone and the manifest is left unchanged. A new
-// worktree is usable immediately.
+// AddMember adds a member to a package, and so to every session of it:
+// validate, create its worktree in each session, copy files, then save the
+// manifest and regenerate files. If any session's worktree steps fail they
+// are undone in every session and the manifest is left unchanged, so the add
+// lands everywhere or nowhere. A new worktree is usable immediately.
 func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 	mem := manifest.Member{Source: opts.Source, Name: opts.Name, Role: strings.Join(strings.Fields(opts.Role), " "), Copy: opts.Copy}
 	if opts.Reference {
@@ -126,27 +129,41 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 
 	next := clone(p.M)
 	next.Members = append(next.Members, mem)
-	next.ApplyDefaults(c.Cfg.BranchPrefix)
+	next.ApplyDefaults()
 	if err := next.Validate(); err != nil {
 		return mem, err
 	}
 	added := next.Members[len(next.Members)-1]
 
-	srcs := map[string]string{}
-	for _, existing := range p.M.Members {
-		abs, err := paths.Abs(existing.Source)
-		if err != nil {
-			return added, err
-		}
-		srcs[existing.Name] = abs
-	}
-	srcs[added.Name] = src
-	existing, err := preflightMembers(next, srcs, []manifest.Member{added}, opts.ReuseBranch, nil)
+	srcs, err := memberSources(p.M)
 	if err != nil {
 		return added, err
 	}
+	srcs[added.Name] = src
+	sessions, err := c.LoadSessions(p)
+	if err != nil {
+		return added, err
+	}
+	existing := make(map[string]map[string]bool, len(sessions))
+	for _, s := range sessions {
+		ex, err := preflightMembers(next, s.S.Branch, srcs, []manifest.Member{added}, opts.ReuseBranch, nil)
+		if err != nil {
+			return added, sessionErr(s, len(sessions), err)
+		}
+		existing[s.Name] = ex
+	}
 
-	steps := append(c.fetchStep(src), c.addMemberSteps(&Package{Name: p.Name, Dir: p.Dir, M: next}, added, src, existing[added.Name])...)
+	var steps []apply.Step
+	if len(sessions) > 0 {
+		steps = c.fetchStep(src)
+	}
+	for _, s := range sessions {
+		ss := c.addMemberSteps(s, added, src, existing[s.Name][added.Name])
+		if len(sessions) > 1 {
+			labelSteps(ss, s.Name)
+		}
+		steps = append(steps, ss...)
+	}
 	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(steps); err != nil {
 		return added, err
 	}
@@ -157,6 +174,17 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 	return added, nil
 }
 
+// sessionErr names the session in an error from a per-session check when the
+// package has several, so the person knows which one to fix. With a single
+// session the plain error reads better.
+func sessionErr(s *Session, total int, err error) error {
+	var be *BranchExistsError
+	if total <= 1 || errors.As(err, &be) {
+		return err
+	}
+	return fmt.Errorf("session %s: %w", s.Name, err)
+}
+
 // RemoveOptions tunes RemoveMember.
 type RemoveOptions struct {
 	// Force removes the member even if it has unsaved work.
@@ -165,9 +193,10 @@ type RemoveOptions struct {
 	DeleteBranch bool
 }
 
-// RemoveMember removes a member's worktree and drops it from the manifest.
-// It returns a *RefusedError, changing nothing, when the member has dirty
-// files, untracked files or unpushed commits and force was not given.
+// RemoveMember removes a member's worktree from every session and drops it
+// from the manifest. It returns a *RefusedError, changing nothing, when the
+// member has dirty files, untracked files or unpushed commits in any session
+// and force was not given.
 func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (DeleteResult, error) {
 	var res DeleteResult
 	mem, ok := p.M.Member(name)
@@ -175,12 +204,23 @@ func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (Delete
 		return res, NotFound("package %s has no member %q", p.Name, name)
 	}
 	target := *mem
-	if bad := unsafeOf(c.Safety(p, []manifest.Member{target})); len(bad) > 0 && !opts.Force {
-		return res, &RefusedError{Unsafe: bad}
-	}
-	steps, err := c.removeMemberSteps(p, target, opts.Force, opts.DeleteBranch, &res)
+	sessions, err := c.LoadSessions(p)
 	if err != nil {
 		return res, err
+	}
+	if bad := unsafeOf(c.safetyAcross(sessions, []manifest.Member{target})); len(bad) > 0 && !opts.Force {
+		return res, &RefusedError{Unsafe: bad}
+	}
+	var steps []apply.Step
+	for _, s := range sessions {
+		ss, err := c.removeMemberSteps(s, target, opts.Force, opts.DeleteBranch, &res)
+		if err != nil {
+			return res, err
+		}
+		if len(sessions) > 1 {
+			labelSteps(ss, s.Name)
+		}
+		steps = append(steps, ss...)
 	}
 	if err := (&apply.Runner{Events: c.Events}).Run(steps); err != nil {
 		return res, err
@@ -195,7 +235,8 @@ func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (Delete
 	return res, c.save(p, "rm "+name)
 }
 
-// ShowMember is one member in Show: manifest fields plus live status.
+// ShowMember is one member in Show: manifest fields plus, when Show is given
+// a session, live status.
 type ShowMember struct {
 	MemberStatus
 	Source string   `json:"source"`
@@ -212,38 +253,64 @@ type ShowNote struct {
 	Text string `json:"text"`
 }
 
-// ShowResult is everything an agent needs to know about its package.
-type ShowResult struct {
-	Name    string       `json:"name"`
-	Path    string       `json:"path"`
-	Branch  string       `json:"branch"`
-	Harness string       `json:"harness,omitempty"`
-	Purpose string       `json:"purpose"`
-	Context string       `json:"context"`
-	Notes   []ShowNote   `json:"notes"`
-	Members []ShowMember `json:"members"`
+// ShowSession is one session of the package as reported by Show.
+type ShowSession struct {
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
 }
 
-// Show reports the purpose, context, notes (newest first) and members with
-// mode, role, branch and live git status.
-func (c *Core) Show(p *Package) ShowResult {
+// ShowResult is everything an agent needs to know about its package and, when
+// it is inside one, its session.
+type ShowResult struct {
+	Name string `json:"name"`
+	// Path is the session directory when Session is set, otherwise the
+	// package directory.
+	Path string `json:"path"`
+	// Session and Branch are set only when Show was given a session.
+	Session  string        `json:"session,omitempty"`
+	Branch   string        `json:"branch,omitempty"`
+	Harness  string        `json:"harness,omitempty"`
+	Purpose  string        `json:"purpose"`
+	Context  string        `json:"context"`
+	Notes    []ShowNote    `json:"notes"`
+	Sessions []ShowSession `json:"sessions"`
+	Members  []ShowMember  `json:"members"`
+}
+
+// Show reports the package's purpose, context, notes (newest first), its
+// sessions, and its members with mode and role. When s is not nil it is the
+// caller's own session, and each member also carries live git status from
+// that session's worktree and the result names the session and its branch.
+func (c *Core) Show(p *Package, s *Session) ShowResult {
 	out := ShowResult{
-		Name: p.Name, Path: p.Dir, Branch: p.M.Branch, Harness: p.M.Harness,
+		Name: p.Name, Path: p.Dir, Harness: p.M.Harness,
 		Purpose: strings.TrimSpace(p.M.Purpose), Context: strings.TrimSpace(p.M.Context),
-		Notes: []ShowNote{}, Members: []ShowMember{},
+		Notes: []ShowNote{}, Sessions: []ShowSession{}, Members: []ShowMember{},
+	}
+	if s != nil {
+		out.Path, out.Session, out.Branch = s.Dir, s.Name, s.S.Branch
 	}
 	for _, n := range p.M.RecentNotes(0) {
 		out.Notes = append(out.Notes, ShowNote{At: n.At.Format(time.RFC3339), By: n.By, Text: n.Text})
+	}
+	if sessions, err := c.LoadSessions(p); err == nil {
+		for _, sess := range sessions {
+			out.Sessions = append(out.Sessions, ShowSession{Name: sess.Name, Path: sess.Dir, Branch: sess.S.Branch})
+		}
 	}
 	for _, mem := range p.M.Members {
 		base := mem.Base
 		if mem.Mode == manifest.ModeReference {
 			base = ""
 		}
-		out.Members = append(out.Members, ShowMember{
-			MemberStatus: memberStatus(p, mem),
-			Source:       mem.Source, Remote: mem.Remote, Base: base, Copy: mem.Copy, Hooks: mem.Hooks,
-		})
+		sm := ShowMember{Source: mem.Source, Remote: mem.Remote, Base: base, Copy: mem.Copy, Hooks: mem.Hooks}
+		if s != nil {
+			sm.MemberStatus = memberStatus(s, mem)
+		} else {
+			sm.MemberStatus = MemberStatus{Name: mem.Name, Mode: mem.Mode, Path: mem.Path, Role: mem.Role}
+		}
+		out.Members = append(out.Members, sm)
 	}
 	return out
 }

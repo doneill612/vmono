@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,9 @@ import (
 // Finding kinds reported by Doctor.
 const (
 	KindBadManifest     = "bad-manifest"
+	KindLegacyPackage   = "legacy-package"
+	KindBadSession      = "bad-session"
+	KindOrphanSessDir   = "orphan-session-dir"
 	KindOrphanDir       = "orphan-dir"
 	KindMissingWorktree = "missing-worktree"
 	KindMovedSource     = "moved-source"
@@ -29,6 +33,7 @@ const (
 type Finding struct {
 	Kind    string `json:"kind"`
 	Package string `json:"package,omitempty"`
+	Session string `json:"session,omitempty"`
 	Member  string `json:"member,omitempty"`
 	Message string `json:"message"`
 	// Fixed is true when --fix repaired it (or, for the index, when it was
@@ -55,14 +60,16 @@ func (r DoctorResult) Remaining() int {
 }
 
 // Doctor looks for drift between manifests, worktrees and source repos:
-// invalid manifests, directories with no manifest, missing worktrees,
-// sources that moved, stale worktree entries and unclaimed worktrees. The
+// invalid manifests, packages from before sessions, directories with no
+// manifest or session file, missing worktrees in any session, sources that
+// moved, stale worktree entries and unclaimed worktrees. The
 // worktree lists of every known source repo are checked, not only those of
 // repos a surviving package uses, because a package directory deleted by
 // hand takes its manifest with it and leaves its worktree entries behind in
 // the source repos with nothing else pointing at them. It
 // always rebuilds the index cache from the package root. With fix it
-// repairs what is safe to repair: recreating missing worktrees, relocating a
+// repairs what is safe to repair: migrating a package from before sessions
+// into a package with one session, recreating missing worktrees, relocating a
 // moved source by matching its remote, and pruning stale entries.
 // Directories and worktrees it cannot attribute are only reported, never
 // deleted.
@@ -98,7 +105,12 @@ func (c *Core) Doctor(fix bool) (DoctorResult, error) {
 			continue
 		}
 		p, err := c.Load(e.Name())
-		if err != nil {
+		if errors.Is(err, manifest.ErrLegacy) {
+			p = c.handleLegacy(e.Name(), fix, sources, claimed, add)
+			if p == nil {
+				continue
+			}
+		} else if err != nil {
 			add(Finding{Kind: KindBadManifest, Package: e.Name(), Message: err.Error()})
 			continue
 		}
@@ -127,10 +139,60 @@ func (c *Core) Doctor(fix bool) (DoctorResult, error) {
 // knownRepo is a source repo that could be a moved member's new home.
 type knownRepo struct{ Path, Remote string }
 
-// checkPackage inspects one package's members, collecting the set of source
-// repos it uses into sources.
+// handleLegacy reports a package from before sessions and, with fix,
+// migrates it, returning the freshly loaded package. Without fix, or when the
+// migration fails, it returns nil after claiming the package's worktrees and
+// sources so they are not reported as orphans.
+func (c *Core) handleLegacy(name string, fix bool, sources, claimed map[string]bool, add func(Finding)) *Package {
+	f := Finding{Kind: KindLegacyPackage, Package: name, Message: "package predates sessions; `vmono doctor --fix` migrates it to a package with one session"}
+	if fix {
+		if err := c.migratePackage(name); err != nil {
+			f.Message = "could not migrate to sessions: " + err.Error()
+			add(f)
+			c.claimLegacy(name, sources, claimed)
+			return nil
+		}
+		f.Message, f.Fixed = "migrated to a package with one session", true
+		p, err := c.Load(name)
+		if err != nil {
+			add(f)
+			add(Finding{Kind: KindBadManifest, Package: name, Message: err.Error()})
+			return nil
+		}
+		add(f)
+		return p
+	}
+	add(f)
+	c.claimLegacy(name, sources, claimed)
+	return nil
+}
+
+// claimLegacy marks a legacy package's sources and worktree directories as
+// accounted for, from its schema 1 manifest.
+func (c *Core) claimLegacy(name string, sources, claimed map[string]bool) {
+	dir, err := c.PackageDir(name)
+	if err != nil {
+		return
+	}
+	m, _, err := manifest.LoadLegacy(dir)
+	if err != nil {
+		return
+	}
+	for _, mem := range m.Members {
+		if src, err := paths.Abs(mem.Source); err == nil {
+			sources[realPath(src)] = true
+		}
+		claimed[realPath(filepath.Join(dir, filepath.FromSlash(mem.Path)))] = true
+	}
+}
+
+// checkPackage inspects one package: its members' sources once (they are
+// package-level), then every session's worktrees. It collects the set of
+// source repos in use into sources and the worktree directories that belong
+// to a session into claimed.
 func (c *Core) checkPackage(p *Package, known []knownRepo, fix bool, sources, claimed map[string]bool, add func(Finding)) {
 	relocated := false
+	usable := map[string]string{}
 	for i := range p.M.Members {
 		mem := &p.M.Members[i]
 		src, err := paths.Abs(mem.Source)
@@ -156,28 +218,63 @@ func (c *Core) checkPackage(p *Package, known []knownRepo, fix bool, sources, cl
 				Message: "source relocated to " + newSrc, Fixed: true})
 		}
 		sources[realPath(src)] = true
-		claimed[realPath(p.MemberDir(*mem))] = true
+		usable[mem.Name] = src
+	}
 
-		switch worktreeOf(src, p.MemberDir(*mem)) {
-		case wtForeign:
-			add(Finding{Kind: KindForeignDir, Package: p.Name, Member: mem.Name,
-				Message: "directory exists but is not a worktree of " + src})
-		case wtMissing:
-			f := Finding{Kind: KindMissingWorktree, Package: p.Name, Member: mem.Name,
-				Message: "worktree directory is missing: " + mem.Path}
-			if fix {
-				if err := c.recreateMember(p, *mem, src); err != nil {
-					f.Message += " (could not recreate: " + err.Error() + ")"
-				} else {
-					f.Fixed = true
-				}
+	c.checkSessionDirs(p, add)
+	names, _ := p.Sessions()
+	for _, name := range names {
+		s, err := c.LoadSession(p, name)
+		if err != nil {
+			add(Finding{Kind: KindBadSession, Package: p.Name, Session: name, Message: err.Error()})
+			continue
+		}
+		for _, mem := range p.M.Members {
+			src, ok := usable[mem.Name]
+			if !ok {
+				continue
 			}
-			add(f)
+			claimed[realPath(s.MemberDir(mem))] = true
+			switch worktreeOf(src, s.MemberDir(mem)) {
+			case wtForeign:
+				add(Finding{Kind: KindForeignDir, Package: p.Name, Session: name, Member: mem.Name,
+					Message: "directory exists but is not a worktree of " + src})
+			case wtMissing:
+				f := Finding{Kind: KindMissingWorktree, Package: p.Name, Session: name, Member: mem.Name,
+					Message: "worktree directory is missing: " + mem.Path}
+				if fix {
+					if err := c.recreateMember(s, mem, src); err != nil {
+						f.Message += " (could not recreate: " + err.Error() + ")"
+					} else {
+						f.Fixed = true
+					}
+				}
+				add(f)
+			}
 		}
 	}
 	if relocated {
 		if err := c.save(p, "doctor relocate sources"); err != nil {
 			add(Finding{Kind: KindBadManifest, Package: p.Name, Message: "could not save relocated sources: " + err.Error()})
+		}
+	}
+}
+
+// checkSessionDirs reports directories inside a package that are not
+// sessions: no session file, so vmono cannot tell what they are. They are
+// left alone, since they may hold someone's work.
+func (c *Core) checkSessionDirs(p *Package, add func(Finding)) {
+	entries, err := os.ReadDir(p.Dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if _, err := os.Stat(manifest.SessionPath(filepath.Join(p.Dir, e.Name()))); err != nil {
+			add(Finding{Kind: KindOrphanSessDir, Package: p.Name,
+				Message: fmt.Sprintf("directory %s has no session file; not a session (left alone)", e.Name())})
 		}
 	}
 }

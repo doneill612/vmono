@@ -11,9 +11,11 @@ import (
 	"github.com/doneill612/vmono/internal/paths"
 )
 
-// MemberSafety is the result of the pre-delete check for one member: work
-// that removing its worktree would discard.
+// MemberSafety is the result of the pre-delete check for one member of one
+// session: work that removing its worktree would discard.
 type MemberSafety struct {
+	// Session names the session the worktree belongs to.
+	Session   string `json:"session,omitempty"`
 	Name      string `json:"name"`
 	Mode      string `json:"mode"`
 	Missing   bool   `json:"missing,omitempty"`
@@ -22,6 +24,14 @@ type MemberSafety struct {
 	// Unpushed counts commits that exist on no remote.
 	Unpushed int    `json:"unpushed"`
 	Error    string `json:"error,omitempty"`
+}
+
+// Label returns "session/member", or just the member when no session is set.
+func (s MemberSafety) Label() string {
+	if s.Session == "" {
+		return s.Name
+	}
+	return s.Session + "/" + s.Name
 }
 
 // Unsafe reports whether removing this member would lose work. A member
@@ -42,9 +52,9 @@ func (e *RefusedError) Error() string {
 	for _, s := range e.Unsafe {
 		switch {
 		case s.Error != "":
-			parts = append(parts, fmt.Sprintf("%s (cannot inspect: %s)", s.Name, s.Error))
+			parts = append(parts, fmt.Sprintf("%s (cannot inspect: %s)", s.Label(), s.Error))
 		default:
-			parts = append(parts, fmt.Sprintf("%s (%d dirty, %d untracked, %d unpushed)", s.Name, s.Dirty, s.Untracked, s.Unpushed))
+			parts = append(parts, fmt.Sprintf("%s (%d dirty, %d untracked, %d unpushed)", s.Label(), s.Dirty, s.Untracked, s.Unpushed))
 		}
 	}
 	return ErrRefused.Error() + ": " + strings.Join(parts, "; ") + " (use --force to override)"
@@ -53,39 +63,58 @@ func (e *RefusedError) Error() string {
 // Is makes errors.Is(err, ErrRefused) true.
 func (e *RefusedError) Is(target error) bool { return target == ErrRefused }
 
-// Safety checks the given members for work that would be lost if their
-// worktrees were removed: dirty files, untracked files, and commits on no
-// remote. Members whose directory is already gone are safe.
-func (c *Core) Safety(p *Package, members []manifest.Member) []MemberSafety {
+// Safety checks the given members of a session for work that would be lost
+// if their worktrees were removed: dirty files, untracked files, and commits
+// on no remote. Members whose directory is already gone are safe.
+func (c *Core) Safety(s *Session, members []manifest.Member) []MemberSafety {
 	out := make([]MemberSafety, 0, len(members))
 	for _, mem := range members {
-		s := MemberSafety{Name: mem.Name, Mode: mem.Mode}
-		dir := p.MemberDir(mem)
+		ms := MemberSafety{Session: s.Name, Name: mem.Name, Mode: mem.Mode}
+		dir := s.MemberDir(mem)
 		if _, err := os.Stat(dir); err != nil {
-			s.Missing = true
-			out = append(out, s)
+			ms.Missing = true
+			out = append(out, ms)
 			continue
 		}
 		st, err := gitx.StatusOf(dir)
 		if err != nil {
-			s.Error = err.Error()
-			out = append(out, s)
+			ms.Error = err.Error()
+			out = append(out, ms)
 			continue
 		}
-		s.Dirty, s.Untracked = st.Dirty, st.Untracked
+		ms.Dirty, ms.Untracked = st.Dirty, st.Untracked
 		if n, err := gitx.Unpushed(dir); err != nil {
-			s.Error = err.Error()
+			ms.Error = err.Error()
 		} else {
-			s.Unpushed = n
+			ms.Unpushed = n
 		}
-		out = append(out, s)
+		out = append(out, ms)
 	}
 	return out
 }
 
-// SafetyCheck runs Safety over every member of the package.
-func (c *Core) SafetyCheck(p *Package) []MemberSafety {
-	return c.Safety(p, p.M.Members)
+// SafetyCheck runs Safety over every member of the session.
+func (c *Core) SafetyCheck(s *Session) []MemberSafety {
+	return c.Safety(s, s.Pkg.M.Members)
+}
+
+// safetyAcross runs Safety for the given members in every session.
+func (c *Core) safetyAcross(sessions []*Session, members []manifest.Member) []MemberSafety {
+	var out []MemberSafety
+	for _, s := range sessions {
+		out = append(out, c.Safety(s, members)...)
+	}
+	return out
+}
+
+// PackageSafety runs SafetyCheck over every session of a package, for the
+// delete confirmation. Each row names its session.
+func (c *Core) PackageSafety(p *Package) ([]MemberSafety, error) {
+	sessions, err := c.LoadSessions(p)
+	if err != nil {
+		return nil, err
+	}
+	return c.safetyAcross(sessions, p.M.Members), nil
 }
 
 // unsafeOf filters to members that would lose work.
@@ -99,45 +128,102 @@ func unsafeOf(all []MemberSafety) []MemberSafety {
 	return out
 }
 
-// DeleteOptions tunes Delete.
+// DeleteOptions tunes Delete and DeleteSession.
 type DeleteOptions struct {
 	// Force deletes even when members have dirty files, untracked files or
 	// unpushed commits.
 	Force bool
-	// DeleteBranches deletes package branches that are already merged into
+	// DeleteBranches deletes session branches that are already merged into
 	// their base. Unmerged branches are always kept, even with Force.
 	DeleteBranches bool
 }
 
-// DeleteResult reports what happened to package branches.
+// DeleteResult reports what happened to session branches.
 type DeleteResult struct {
 	BranchesDeleted []string `json:"branches_deleted"`
 	BranchesKept    []string `json:"branches_kept"`
 }
 
-// Delete tears a package down: it checks every member for lost work
+// sessionSteps returns the apply steps that tear one session down: remove
+// each member's worktree, then the session directory. Safety checks are the
+// caller's job. With prefix set, each step's member is labeled
+// "session/member" so a package-wide run reads clearly.
+func (c *Core) sessionSteps(s *Session, opts DeleteOptions, res *DeleteResult, prefix bool) ([]apply.Step, error) {
+	var steps []apply.Step
+	for _, mem := range s.Pkg.M.Members {
+		ms, err := c.removeMemberSteps(s, mem, opts.Force, opts.DeleteBranches, res)
+		if err != nil {
+			return nil, err
+		}
+		steps = append(steps, ms...)
+	}
+	steps = append(steps, apply.Step{Name: "remove session", Run: func(func(string)) error {
+		return os.RemoveAll(s.Dir)
+	}})
+	if prefix {
+		labelSteps(steps, s.Name)
+	}
+	return steps, nil
+}
+
+// labelSteps prefixes each step's member with the session name, giving
+// package-level steps the session name alone.
+func labelSteps(steps []apply.Step, session string) {
+	for i := range steps {
+		if steps[i].Member == "" {
+			steps[i].Member = session
+		} else {
+			steps[i].Member = session + "/" + steps[i].Member
+		}
+	}
+}
+
+// DeleteSession tears one session down: it checks every member for lost work
 // (returning a *RefusedError unless forced), removes each worktree and
 // prunes its source, optionally deletes merged branches, then removes the
-// package directory and index entry. Source repos' working trees and
-// checked-out branches are never touched.
-func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
+// session directory. Source repos' working trees and checked-out branches
+// are never touched, and the package and its other sessions are left alone.
+func (c *Core) DeleteSession(s *Session, opts DeleteOptions) (DeleteResult, error) {
 	var res DeleteResult
-	if bad := unsafeOf(c.SafetyCheck(p)); len(bad) > 0 && !opts.Force {
+	if bad := unsafeOf(c.SafetyCheck(s)); len(bad) > 0 && !opts.Force {
 		return res, &RefusedError{Unsafe: bad}
 	}
+	steps, err := c.sessionSteps(s, opts, &res, false)
+	if err != nil {
+		return res, err
+	}
+	if err := (&apply.Runner{Events: c.Events}).Run(steps); err != nil {
+		return res, err
+	}
+	c.Idx.RemoveSession(s.Pkg.Name, s.Name)
+	_ = c.Idx.Save()
+	return res, nil
+}
 
+// Delete tears a package down, every session first: it checks every member
+// of every session for lost work (returning a *RefusedError unless forced),
+// removes the worktrees, optionally deletes merged branches, then removes the
+// package directory and index entry.
+func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
+	var res DeleteResult
+	sessions, err := c.LoadSessions(p)
+	if err != nil {
+		return res, err
+	}
+	if bad := unsafeOf(c.safetyAcross(sessions, p.M.Members)); len(bad) > 0 && !opts.Force {
+		return res, &RefusedError{Unsafe: bad}
+	}
 	var steps []apply.Step
-	for _, mem := range p.M.Members {
-		ms, err := c.removeMemberSteps(p, mem, opts.Force, opts.DeleteBranches, &res)
+	for _, s := range sessions {
+		ss, err := c.sessionSteps(s, opts, &res, true)
 		if err != nil {
 			return res, err
 		}
-		steps = append(steps, ms...)
+		steps = append(steps, ss...)
 	}
 	steps = append(steps, apply.Step{Name: "remove package", Run: func(func(string)) error {
 		return os.RemoveAll(p.Dir)
 	}})
-
 	if err := (&apply.Runner{Events: c.Events}).Run(steps); err != nil {
 		return res, err
 	}
@@ -163,16 +249,16 @@ func deleteMergedBranch(src, branch, base string) (keptReason string, deleted bo
 }
 
 // removeMemberSteps returns the apply steps that take one member out of a
-// package: remove its worktree (forcibly only when force is set), prune the
-// source, and optionally delete the package branch if it is merged into its
+// session: remove its worktree (forcibly only when force is set), prune the
+// source, and optionally delete the session branch if it is merged into its
 // base. Outcomes for branches are recorded into res. Safety checks are the
 // caller's job.
-func (c *Core) removeMemberSteps(p *Package, mem manifest.Member, force, deleteBranch bool, res *DeleteResult) ([]apply.Step, error) {
+func (c *Core) removeMemberSteps(s *Session, mem manifest.Member, force, deleteBranch bool, res *DeleteResult) ([]apply.Step, error) {
 	src, err := paths.Abs(mem.Source)
 	if err != nil {
 		return nil, err
 	}
-	dir := p.MemberDir(mem)
+	dir := s.MemberDir(mem)
 	steps := []apply.Step{{Member: mem.Name, Name: "worktree remove", Run: func(warn func(string)) error {
 		if _, err := os.Stat(dir); err == nil {
 			if err := gitx.WorktreeRemove(src, dir, force); err != nil {
@@ -187,12 +273,12 @@ func (c *Core) removeMemberSteps(p *Package, mem manifest.Member, force, deleteB
 	}}}
 	if deleteBranch && mem.Mode == manifest.ModeActive {
 		steps = append(steps, apply.Step{Member: mem.Name, Name: "delete branch", Run: func(warn func(string)) error {
-			kept, deleted := deleteMergedBranch(src, p.M.Branch, mem.Base)
+			kept, deleted := deleteMergedBranch(src, s.S.Branch, mem.Base)
 			if deleted {
-				res.BranchesDeleted = append(res.BranchesDeleted, mem.Name+":"+p.M.Branch)
+				res.BranchesDeleted = append(res.BranchesDeleted, mem.Name+":"+s.S.Branch)
 			} else if kept != "" {
-				res.BranchesKept = append(res.BranchesKept, mem.Name+":"+p.M.Branch)
-				warn("kept branch " + p.M.Branch + ": " + kept)
+				res.BranchesKept = append(res.BranchesKept, mem.Name+":"+s.S.Branch)
+				warn("kept branch " + s.S.Branch + ": " + kept)
 			}
 			return nil
 		}})

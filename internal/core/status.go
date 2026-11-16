@@ -25,28 +25,30 @@ type MemberStatus struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// PackageStatus is the live state of a whole package.
-type PackageStatus struct {
-	Name    string         `json:"name"`
+// SessionStatus is the live state of one session of a package.
+type SessionStatus struct {
+	Package string         `json:"package"`
+	Session string         `json:"session"`
 	Path    string         `json:"path"`
 	Branch  string         `json:"branch"`
 	Members []MemberStatus `json:"members"`
 }
 
-// Status inspects every member's worktree. A member whose directory is
-// missing is reported as Missing rather than failing the whole call.
-func (c *Core) Status(p *Package) PackageStatus {
-	out := PackageStatus{Name: p.Name, Path: p.Dir, Branch: p.M.Branch, Members: []MemberStatus{}}
-	for _, mem := range p.M.Members {
-		out.Members = append(out.Members, memberStatus(p, mem))
+// Status inspects every member's worktree in a session. A member whose
+// directory is missing is reported as Missing rather than failing the whole
+// call.
+func (c *Core) Status(s *Session) SessionStatus {
+	out := SessionStatus{Package: s.Pkg.Name, Session: s.Name, Path: s.Dir, Branch: s.S.Branch, Members: []MemberStatus{}}
+	for _, mem := range s.Pkg.M.Members {
+		out.Members = append(out.Members, memberStatus(s, mem))
 	}
 	return out
 }
 
 // memberStatus gathers one member's state.
-func memberStatus(p *Package, mem manifest.Member) MemberStatus {
+func memberStatus(s *Session, mem manifest.Member) MemberStatus {
 	ms := MemberStatus{Name: mem.Name, Mode: mem.Mode, Path: mem.Path, Role: mem.Role}
-	dir := p.MemberDir(mem)
+	dir := s.MemberDir(mem)
 	if _, err := os.Stat(dir); err != nil {
 		ms.Missing = true
 		return ms
