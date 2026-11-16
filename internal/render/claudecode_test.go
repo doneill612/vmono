@@ -88,7 +88,7 @@ func pkgWithMembers(t *testing.T, hooks bool) (string, *manifest.Manifest) {
 		{Name: "sdk", Source: "/s/sdk", Mode: manifest.ModeActive},
 		{Name: "ref", Source: "/s/ref", Mode: manifest.ModeReference},
 	}}
-	m.ApplyDefaults("vmono/")
+	m.ApplyDefaults()
 	return dir, m
 }
 
@@ -116,7 +116,7 @@ func contains(list []string, s string) bool {
 
 func TestClaudeAdapterMergesMemberPermissions(t *testing.T) {
 	dir, m := pkgWithMembers(t, false)
-	if _, err := Render(dir, m, Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
 		t.Fatal(err)
 	}
 	f := readClaudeSettings(t, dir)
@@ -149,7 +149,7 @@ func TestClaudeAdapterMergesMemberPermissions(t *testing.T) {
 
 func TestClaudeAdapterHooksOptIn(t *testing.T) {
 	dir, m := pkgWithMembers(t, true)
-	if _, err := Render(dir, m, Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
 		t.Fatal(err)
 	}
 	f := readClaudeSettings(t, dir)
@@ -169,7 +169,7 @@ func TestClaudeAdapterHooksOptIn(t *testing.T) {
 func TestClaudeAdapterSkillsCopiedRenamedAndPruned(t *testing.T) {
 	dir, m := pkgWithMembers(t, false)
 	opts := Options{Adapters: []string{AdapterClaudeCode}}
-	if _, err := Render(dir, m, opts); err != nil {
+	if _, err := Render(dir, m, testSession(m), opts); err != nil {
 		t.Fatal(err)
 	}
 	skill, err := os.ReadFile(filepath.Join(dir, ".claude/skills/api-deploy/SKILL.md"))
@@ -184,7 +184,7 @@ func TestClaudeAdapterSkillsCopiedRenamedAndPruned(t *testing.T) {
 		t.Error("sdk skill missing")
 	}
 
-	if changed, err := Render(dir, m, opts); err != nil || len(changed) != 0 {
+	if changed, err := Render(dir, m, testSession(m), opts); err != nil || len(changed) != 0 {
 		t.Errorf("second render should be a no-op: %v, %v", changed, err)
 	}
 
@@ -192,7 +192,7 @@ func TestClaudeAdapterSkillsCopiedRenamedAndPruned(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(dir, "sdk/.claude/skills/lint")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Render(dir, m, opts); err != nil {
+	if _, err := Render(dir, m, testSession(m), opts); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".claude/skills/sdk-lint")); !os.IsNotExist(err) {
@@ -215,7 +215,7 @@ func TestRewriteSkillName(t *testing.T) {
 
 func TestBundledSkillWrittenForBothAdapters(t *testing.T) {
 	dir, m := pkgWithMembers(t, false)
-	if _, err := Render(dir, m, Options{Adapters: []string{AdapterClaudeCode, AdapterOpenCode}}); err != nil {
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode, AdapterOpenCode}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, rel := range []string{".claude/skills/vmono/SKILL.md", ".opencode/skills/vmono/SKILL.md"} {
@@ -231,7 +231,7 @@ func TestBundledSkillWrittenForBothAdapters(t *testing.T) {
 		}
 	}
 	// The bundled skill is not a member copy and must survive pruning.
-	if _, err := Render(dir, m, Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".claude/skills/vmono/SKILL.md")); err != nil {
@@ -239,7 +239,7 @@ func TestBundledSkillWrittenForBothAdapters(t *testing.T) {
 	}
 	// Without adapters no harness config is written.
 	bare := t.TempDir()
-	if _, err := Render(bare, m, Options{}); err != nil {
+	if _, err := Render(bare, m, testSession(m), Options{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(bare, ".claude")); !os.IsNotExist(err) {

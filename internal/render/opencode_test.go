@@ -54,7 +54,7 @@ func ocPackage(t *testing.T, memberConfig string) string {
 func TestOpenCodeV1Output(t *testing.T) {
 	dir := ocPackage(t, `{"permission": {"edit": {"*": "allow", "secrets/**": "deny"}, "bash": {"npm test *": "allow", "*": "allow"}, "webfetch": "allow"}}`)
 	_, m := pkgWithMembers(t, false)
-	if _, err := Render(dir, m, Options{Adapters: []string{AdapterOpenCode}}); err != nil {
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterOpenCode}}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "opencode.json"))
@@ -96,7 +96,7 @@ func TestOpenCodeV1Output(t *testing.T) {
 func TestOpenCodeV2Output(t *testing.T) {
 	dir := ocPackage(t, `{"permissions": [{"action": "shell", "resource": "make *", "effect": "allow"}, {"action": "edit", "resource": "gen/**", "effect": "deny"}]}`)
 	_, m := pkgWithMembers(t, false)
-	if _, err := Render(dir, m, Options{Adapters: []string{AdapterOpenCode}, OpenCodeV2: true}); err != nil {
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterOpenCode}, OpenCodeV2: true}); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
@@ -137,14 +137,14 @@ func TestOpenCodeV2Output(t *testing.T) {
 func TestOpenCodeSkillsAndIdempotence(t *testing.T) {
 	dir, m := pkgWithMembers(t, false)
 	opts := Options{Adapters: []string{AdapterOpenCode}}
-	if _, err := Render(dir, m, opts); err != nil {
+	if _, err := Render(dir, m, testSession(m), opts); err != nil {
 		t.Fatal(err)
 	}
 	// OpenCode copies draw from member .claude/skills too.
 	if _, err := os.Stat(filepath.Join(dir, ".opencode/skills/api-deploy/SKILL.md")); err != nil {
 		t.Errorf("skill not copied for opencode: %v", err)
 	}
-	if changed, err := Render(dir, m, opts); err != nil || len(changed) != 0 {
+	if changed, err := Render(dir, m, testSession(m), opts); err != nil || len(changed) != 0 {
 		t.Errorf("second render should be a no-op: %v %v", changed, err)
 	}
 }

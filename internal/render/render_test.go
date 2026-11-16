@@ -21,15 +21,22 @@ func sample() *manifest.Manifest {
 			{Name: "contracts", Source: "/s/c", Mode: manifest.ModeReference, Role: "Specs."},
 		},
 	}
-	m.ApplyDefaults("vmono/")
+	m.ApplyDefaults()
 	return m
 }
 
+// testSession returns the session the render tests render a package into.
+func testSession(m *manifest.Manifest) *manifest.Session {
+	s := &manifest.Session{Package: m.Name, Name: "work", Created: time.Now()}
+	s.ApplyDefaults("vmono/")
+	return s
+}
+
 func TestAgentsBlockContents(t *testing.T) {
-	got := AgentsBlock(sample())
+	got := AgentsBlock(sample(), testSession(sample()))
 	for _, want := range []string{
-		BeginMarker, EndMarker, "# Package: platform-auth", "Move token refresh",
-		"## Context", "Ticket PLAT-412.", "| `api-gateway/` | active | `vmono/platform-auth` |",
+		BeginMarker, EndMarker, "# Package: platform-auth · session work", "Move token refresh",
+		"## Context", "Ticket PLAT-412.", "| `api-gateway/` | active | `vmono/platform-auth/work` |",
 		`Owns \| refresh endpoint.`, "| `_ref/contracts/` | reference | `origin/HEAD` |", "Never edit anything under `_ref/`",
 	} {
 		if !strings.Contains(got, want) {
@@ -46,7 +53,7 @@ func TestNotesNewestFirstAndCapped(t *testing.T) {
 	for i := 0; i < 25; i++ {
 		m.Notes = append(m.Notes, manifest.Note{At: time.Date(2026, 11, 1, 0, i, 0, 0, time.UTC), By: "user", Text: "note"})
 	}
-	got := AgentsBlock(m)
+	got := AgentsBlock(m, testSession(m))
 	if n := strings.Count(got, "- 2026-11-01"); n != manifest.MaxNotesRendered {
 		t.Errorf("rendered %d notes, want %d", n, manifest.MaxNotesRendered)
 	}
@@ -56,7 +63,7 @@ func TestNotesNewestFirstAndCapped(t *testing.T) {
 }
 
 func TestMergeAgents(t *testing.T) {
-	block := AgentsBlock(sample())
+	block := AgentsBlock(sample(), testSession(sample()))
 
 	if got, err := MergeAgents("", block); err != nil || got != block {
 		t.Errorf("empty merge = %v", err)
@@ -91,7 +98,7 @@ func TestMergeAgents(t *testing.T) {
 func TestRenderWritesOnlyChanges(t *testing.T) {
 	dir := t.TempDir()
 	m := sample()
-	changed, err := Render(dir, m, Options{})
+	changed, err := Render(dir, m, testSession(m), Options{})
 	if err != nil || len(changed) != 3 {
 		t.Fatalf("first render = %v, %v", changed, err)
 	}
@@ -104,7 +111,7 @@ func TestRenderWritesOnlyChanges(t *testing.T) {
 		t.Errorf(".gitignore = %q", ign)
 	}
 
-	if changed, err = Render(dir, m, Options{}); err != nil || len(changed) != 0 {
+	if changed, err = Render(dir, m, testSession(m), Options{}); err != nil || len(changed) != 0 {
 		t.Errorf("second render should change nothing: %v, %v", changed, err)
 	}
 
@@ -114,11 +121,40 @@ func TestRenderWritesOnlyChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Purpose = "new purpose"
-	if changed, err = Render(dir, m, Options{}); err != nil || len(changed) != 1 || changed[0] != "AGENTS.md" {
+	if changed, err = Render(dir, m, testSession(m), Options{}); err != nil || len(changed) != 1 || changed[0] != "AGENTS.md" {
 		t.Fatalf("purpose change should rewrite only AGENTS.md: %v, %v", changed, err)
 	}
 	data, _ = os.ReadFile(agents)
 	if !strings.Contains(string(data), "USER TEXT") || !strings.Contains(string(data), "new purpose") {
 		t.Errorf("user text lost or purpose not updated:\n%s", data)
+	}
+}
+
+func TestRenderPackageWritesOnlyTheGitignore(t *testing.T) {
+	dir := t.TempDir()
+	changed, err := RenderPackage(dir)
+	if err != nil || len(changed) != 1 || changed[0] != ".gitignore" {
+		t.Fatalf("RenderPackage = %v, %v", changed, err)
+	}
+	ign, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if !strings.Contains(string(ign), "/*/\n") || !strings.Contains(string(ign), "!/.vmono/\n") {
+		t.Errorf("package .gitignore = %q", ign)
+	}
+	if changed, err := RenderPackage(dir); err != nil || len(changed) != 0 {
+		t.Errorf("second RenderPackage should change nothing: %v, %v", changed, err)
+	}
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			t.Errorf("%s must not be written in a package directory", name)
+		}
+	}
+}
+
+func TestSkillExplainsSessions(t *testing.T) {
+	body := SkillMarkdown()
+	for _, want := range []string{"VMONO_SESSION", "session", "every session", "vmono session rm"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("skill missing %q", want)
+		}
 	}
 }

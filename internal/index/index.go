@@ -21,15 +21,19 @@ const MaxLaunches = 1000
 // the relationship graph by use and recency.
 type Launch struct {
 	Package string    `json:"package"`
+	Session string    `json:"session,omitempty"`
 	Harness string    `json:"harness"`
 	At      time.Time `json:"at"`
 }
 
-// Package is the cached summary of a known package.
+// Package is the cached summary of a known package. LastOpened is the most
+// recent launch of any of its sessions; Sessions holds each session's own
+// last-opened time.
 type Package struct {
-	Name       string    `json:"name"`
-	Path       string    `json:"path"`
-	LastOpened time.Time `json:"last_opened,omitempty"`
+	Name       string               `json:"name"`
+	Path       string               `json:"path"`
+	LastOpened time.Time            `json:"last_opened,omitempty"`
+	Sessions   map[string]time.Time `json:"sessions,omitempty"`
 }
 
 // Repo is a repo known to vmono outside config: added by path, or found by
@@ -110,14 +114,37 @@ func (i *Index) SetPackage(name, path string) {
 // RemovePackage forgets a package.
 func (i *Index) RemovePackage(name string) { delete(i.Packages, name) }
 
-// RecordLaunch appends a launch record and updates the package's
-// last-opened time.
-func (i *Index) RecordLaunch(pkg, harness string, at time.Time) {
-	i.Launches = append(i.Launches, Launch{Package: pkg, Harness: harness, At: at})
+// RecordLaunch appends a launch record and updates the last-opened time of
+// the session and of its package.
+func (i *Index) RecordLaunch(pkg, session, harness string, at time.Time) {
+	i.Launches = append(i.Launches, Launch{Package: pkg, Session: session, Harness: harness, At: at})
 	p := i.Packages[pkg]
 	p.Name = pkg
 	p.LastOpened = at
+	if session != "" {
+		if p.Sessions == nil {
+			p.Sessions = map[string]time.Time{}
+		}
+		p.Sessions[session] = at
+	}
 	i.Packages[pkg] = p
+}
+
+// RemoveSession forgets a session's last-opened time. The package's own
+// last-opened time is left alone: it records when the package was last used,
+// not which session was.
+func (i *Index) RemoveSession(pkg, session string) {
+	p, ok := i.Packages[pkg]
+	if !ok {
+		return
+	}
+	delete(p.Sessions, session)
+	i.Packages[pkg] = p
+}
+
+// SessionOpened returns when a session was last launched, or the zero time.
+func (i *Index) SessionOpened(pkg, session string) time.Time {
+	return i.Packages[pkg].Sessions[session]
 }
 
 // AddRepo remembers a repo added by path. It reports whether it was new.

@@ -103,12 +103,26 @@ func (w *writer) remove(rel string) error {
 	return nil
 }
 
-// Render writes every generated file for the package into pkgDir and
-// returns the relative paths whose content changed. It never touches git.
-func Render(pkgDir string, m *manifest.Manifest, opts Options) ([]string, error) {
+// RenderPackage writes the package directory's own generated file, its
+// .gitignore, and returns the relative paths that changed. Harnesses open a
+// session, never the package directory, so nothing else is generated here.
+// It never touches git.
+func RenderPackage(pkgDir string) ([]string, error) {
 	w := &writer{dir: pkgDir}
+	if err := w.file(".gitignore", PackageGitignore()); err != nil {
+		return w.changed, err
+	}
+	return w.changed, nil
+}
 
-	block := AgentsBlock(m)
+// Render writes every generated file for a session into sessionDir and
+// returns the relative paths whose content changed. The package manifest m
+// supplies the text and members; the session supplies the branch. It never
+// touches git.
+func Render(sessionDir string, m *manifest.Manifest, s *manifest.Session, opts Options) ([]string, error) {
+	w := &writer{dir: sessionDir}
+
+	block := AgentsBlock(m, s)
 	if err := w.fileWith("AGENTS.md", 0o644, func(existing string) (string, error) {
 		return MergeAgents(existing, block)
 	}); err != nil {
