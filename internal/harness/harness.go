@@ -1,4 +1,4 @@
-// Package harness resolves and launches coding agent CLIs at a package
+// Package harness resolves and launches coding agent CLIs at a session
 // root. Harnesses never integrate with vmono: vmono builds a directory they
 // already know how to use, so launching one is just a working directory, an
 // environment and an exec.
@@ -62,10 +62,11 @@ func Available(h config.Harness) bool {
 }
 
 // Prepare performs launch steps 1 to 4: resolve the harness, quick-sync the
-// generated files (never touching git), append a launch record to the
-// index, and build the working directory and environment.
-func Prepare(c *core.Core, p *core.Package, harnessFlag string, extraArgs []string) (*Launch, error) {
-	name, h, err := Resolve(c.Cfg, p.M, harnessFlag)
+// session's generated files (never touching git), append a launch record to
+// the index, and build the working directory, the session root, and the
+// environment.
+func Prepare(c *core.Core, s *core.Session, harnessFlag string, extraArgs []string) (*Launch, error) {
+	name, h, err := Resolve(c.Cfg, s.Pkg.M, harnessFlag)
 	if err != nil {
 		return nil, err
 	}
@@ -73,29 +74,30 @@ func Prepare(c *core.Core, p *core.Package, harnessFlag string, extraArgs []stri
 	if err != nil {
 		return nil, fmt.Errorf("harness %q: command %q not found on PATH", name, h.Command)
 	}
-	if _, err := c.Render(p); err != nil {
+	if _, err := c.Render(s); err != nil {
 		return nil, fmt.Errorf("refresh generated files: %w", err)
 	}
-	c.Idx.RecordLaunch(p.Name, name, time.Now())
+	c.Idx.RecordLaunch(s.Pkg.Name, s.Name, name, time.Now())
 	_ = c.Idx.Save()
 
 	args := append(append([]string(nil), h.Args...), extraArgs...)
 	return &Launch{
 		Name:    name,
 		Harness: h,
-		Dir:     p.Dir,
+		Dir:     s.Dir,
 		Path:    path,
 		Args:    args,
-		Env:     buildEnv(os.Environ(), p, name, h),
+		Env:     buildEnv(os.Environ(), s, name, h),
 	}, nil
 }
 
 // buildEnv layers vmono's variables and the harness's own env over base.
 // Later entries win, and duplicates of overridden keys are dropped.
-func buildEnv(base []string, p *core.Package, name string, h config.Harness) []string {
+func buildEnv(base []string, s *core.Session, name string, h config.Harness) []string {
 	overrides := map[string]string{
-		"VMONO_PACKAGE": p.Name,
-		"VMONO_ROOT":    p.Dir,
+		"VMONO_PACKAGE": s.Pkg.Name,
+		"VMONO_SESSION": s.Name,
+		"VMONO_ROOT":    s.Dir,
 		"VMONO_AUTHOR":  "agent:" + name,
 	}
 	for k, v := range h.Env {
