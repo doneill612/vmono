@@ -87,7 +87,8 @@ func RewriteOpenCodeResource(memberPath, action, resource string, e Effect) (str
 // renderOpenCode writes opencode.json, member skills and nothing else.
 // Member permission rules come first in manifest order, then vmono's own so
 // that, with OpenCode's last-match-wins, the `_ref/**` edit deny and the
-// ask rules for `vmono rm` / `vmono delete` cannot be overridden.
+// ask rules for `vmono rm` / `vmono delete` / `vmono session rm` cannot be
+// overridden.
 //
 // Unlike the spec's illustrative `"*": "allow"`, no catch-all edit allow is
 // written: it would silently override a user's own stricter edit setting.
@@ -136,6 +137,7 @@ func vmonoOpenCodeRules(pkgDir string, v2 bool) []ocRule {
 	return append(rules,
 		ocRule{"bash", "vmono rm *", EffectAsk},
 		ocRule{"bash", "vmono delete *", EffectAsk},
+		ocRule{"bash", "vmono session rm *", EffectAsk},
 	)
 }
 
