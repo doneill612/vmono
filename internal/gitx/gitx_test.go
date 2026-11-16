@@ -286,3 +286,70 @@ func samePath(a, b string) bool {
 	rb, errB := filepath.EvalSymlinks(filepath.Dir(b))
 	return errA == nil && errB == nil && filepath.Join(ra, filepath.Base(a)) == filepath.Join(rb, filepath.Base(b))
 }
+
+func TestBranchRefConflict(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "gamma")
+
+	if c, found := BranchRefConflict(src, "vmono/pkg/one"); found {
+		t.Fatalf("no branches yet, got conflict %q", c)
+	}
+
+	testutil.Git(t, src, "branch", "vmono/pkg")
+	if c, found := BranchRefConflict(src, "vmono/pkg/one"); !found || c != "vmono/pkg" {
+		t.Errorf("parent branch should conflict, got %q, %v", c, found)
+	}
+	if _, found := BranchRefConflict(src, "vmono/pkg"); found {
+		t.Error("an exact match is BranchExists' business, not a ref conflict")
+	}
+	if _, found := BranchRefConflict(src, "vmono/other/one"); found {
+		t.Error("unrelated branch must not conflict")
+	}
+
+	testutil.Git(t, src, "branch", "-D", "vmono/pkg")
+	testutil.Git(t, src, "branch", "vmono/pkg/deep/one")
+	if c, found := BranchRefConflict(src, "vmono/pkg"); !found || c != "vmono/pkg/deep/one" {
+		t.Errorf("child branch should conflict, got %q, %v", c, found)
+	}
+}
+
+func TestWorktreeRepairAfterMove(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "delta")
+	from := filepath.Join(env.Root, "wt", "delta")
+	to := filepath.Join(env.Root, "moved", "delta")
+	if err := WorktreeAddBranch(src, from, "vmono/x", "origin/HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(from, to); err != nil {
+		t.Fatal(err)
+	}
+	if err := WorktreeRepair(src, to); err != nil {
+		t.Fatalf("repair: %v", err)
+	}
+	list, err := WorktreeList(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, w := range list {
+		if w.Branch == "vmono/x" {
+			found = true
+			if w.Prunable {
+				t.Error("repaired worktree must not be prunable")
+			}
+			if filepath.Base(filepath.Dir(w.Path)) != "moved" {
+				t.Errorf("worktree still registered at %s", w.Path)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("worktree for vmono/x missing from %+v", list)
+	}
+	if st, err := StatusOf(to); err != nil || st.Branch != "vmono/x" {
+		t.Errorf("status of moved worktree = %+v, %v", st, err)
+	}
+}

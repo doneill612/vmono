@@ -291,6 +291,26 @@ func BranchExists(repo, branch string) bool {
 	return err == nil
 }
 
+// BranchRefConflict reports an existing local branch that stops branch from
+// being created. Git stores branches as files under refs/heads, so a branch
+// named "vmono/pkg" blocks "vmono/pkg/session" (a file cannot also be a
+// directory), and the reverse. An exact match is not a conflict here;
+// BranchExists covers that case. The returned name is the branch in the way.
+func BranchRefConflict(repo, branch string) (conflict string, found bool) {
+	parts := strings.Split(branch, "/")
+	for i := 1; i < len(parts); i++ {
+		prefix := strings.Join(parts[:i], "/")
+		if BranchExists(repo, prefix) {
+			return prefix, true
+		}
+	}
+	out, err := run(repo, "for-each-ref", "--count=1", "--format=%(refname:short)", "refs/heads/"+branch+"/")
+	if err == nil && strings.TrimSpace(out) != "" {
+		return strings.TrimSpace(out), true
+	}
+	return "", false
+}
+
 // CurrentBranch returns the checked-out branch name, or "" when detached.
 func CurrentBranch(repo string) string {
 	out, err := run(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
@@ -407,6 +427,16 @@ func WorktreeRemove(repo, path string, force bool) error {
 // WorktreePrune drops stale worktree entries from repo.
 func WorktreePrune(repo string) error {
 	_, err := run(repo, "worktree", "prune")
+	return err
+}
+
+// WorktreeRepair tells repo that the worktree at path now lives there, after
+// its directory was moved on disk. Unlike `git worktree move` it works on
+// worktrees containing submodules, and it only rewrites the link files
+// between the source repo and the worktree. It needs git 2.29, below vmono's
+// minimum.
+func WorktreeRepair(repo, path string) error {
+	_, err := run(repo, "worktree", "repair", path)
 	return err
 }
 
