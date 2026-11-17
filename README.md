@@ -77,8 +77,8 @@ Navigation is by drilling down: `enter` goes in, `esc` goes back. `:` opens a co
 | --- | --- |
 | `enter` / `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
-| `n` | Start a new session: a name, and optionally a branch (default `vmono/<package>/<session>`) and an `into` branch to land on |
-| `F` | Finish the session: shows what would land on which branch, or what blocks it, then `y` lands it. `c` also removes the session afterward. A conflict offers to launch the harness in the session to resolve it |
+| `n` | Start a new session: a name, optionally a branch (default `vmono/<package>/<session>`), and one `into` row per active member, filled in with the branch its source has checked out |
+| `F` | Finish the session: shows what would land on which branch, or what blocks it, then `y` lands it. `i` changes the members' landing branches, `c` also removes the session afterward. A conflict offers to launch the harness in the session to resolve it |
 | `m` / `d` | Members of the session / describe it |
 | `s` / `f` | Sync the session / fetch every member's source |
 | `e` | Edit the package |
@@ -98,7 +98,7 @@ Repos that are not under a source root, or every repo when no source root is set
 | Member | A source repo included in a package. Every session has a worktree of every member. |
 | Active member | Checked out on the session branch (default `vmono/<package>/<session>`). The agent may edit it and commit to it. |
 | Reference member | Checked out detached at a fixed ref under `_ref/`. Read-only context. |
-| Landing branch | The branch in each member's source repo that a session's work lands on when it is finished: the session's `--into`, else the branch the member's base names (`origin/main` lands on `main`). |
+| Landing branch | The branch in a member's source repo that the session's work lands on when it is finished. Each member has its own, recorded in the session when it is created: by default the branch that member's source repo has checked out. |
 | Purpose / Context / Notes / Role | Free text that belongs to the package: what the work is, what to know, a dated log, and what each member contributes. Sessions share it; they have none of their own. |
 
 A package with two sessions looks like this:
@@ -130,7 +130,9 @@ A session is done when its work has landed on a branch in each member's source r
 1. For each active member, the session's own commits (on the session branch, but on neither the member's base nor its landing branch) are rebased onto the landing branch, inside the session's worktree.
 2. The landing branch in the source repo then moves to the result: fast-forwarded when it is checked out in a clean worktree, updated in place when nothing has it checked out, and created when it does not exist yet.
 
-Members with no commits of their own are skipped. The landing branch is chosen when the session is created (`vmono session new pay work --into feature/x`, or the `into` field of the TUI prompt), and otherwise comes from each member's base. When it already exists the session starts from it, so several sessions can build on one feature branch. `finish --into B` overrides it for that finish and is recorded in the session.
+Members with no commits of their own are skipped. Landing branches are per member, since repos need not share a branch name. When a session is created, each member's is recorded as the branch its source repo has checked out at that moment (a source on a detached HEAD falls back to the branch its base names). Override them at create with `--into BRANCH` for every member or `--into MEMBER=BRANCH` for one (repeatable), or in the `into` rows of the TUI prompt, which start filled in. Change them later with `vmono session into [pkg/session] --all B --member NAME=B`, with `i` in the TUI finish dialog, or with `--into` on `finish`; `vmono session into` with no flags lists them. A branch that does not exist yet is created when the session lands.
+
+When a member's landing branch is not the branch its base names (a feature branch, say) and it exists in the source, the session starts from it, so the work builds on that branch and lands back on it. When it is the base's branch, the session starts from the base (`origin/main`) as usual, so a stale local `main` is never the start point. A session started with the source on a stray branch lands there, so check the `into` rows before starting; the finish dialog shows each member's target too.
 
 Nothing moves unless every member can land. Uncommitted or untracked files, a landing branch checked out with uncommitted changes, or a rebase already in progress each refuse the finish (exit code `2`, with the reasons; `--json` lists them per member). If a rebase stops on conflicts, they stay in that member's worktree: resolve them, `git add`, `git rebase --continue`, and run `vmono session finish` again. Members already rebased are found up to date. If moving the branches fails partway, the ones already moved are put back.
 
@@ -151,10 +153,11 @@ Every read command takes `--json`. Anything that could discard work refuses unle
 | `vmono` | Open the TUI |
 | `vmono init [--source-root P]... [--package-root P]` | Write the global config without prompts |
 | `vmono ls` / `vmono repos` | List packages / known repos |
-| `vmono new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--branch B] [--into B] [--reuse-branch]]` | Define a package, and optionally start its first session |
-| `vmono session new [pkg] <name> [--branch B] [--into B] [--reuse-branch]` | Start a session: a worktree of every member on a new branch, cut from `--into` when that branch exists |
+| `vmono new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--branch B] [--into [MEMBER=]B]... [--reuse-branch]]` | Define a package, and optionally start its first session |
+| `vmono session new [pkg] <name> [--branch B] [--into [MEMBER=]B]... [--reuse-branch]` | Start a session: a worktree of every member on a new branch. Records each member's landing branch (default: its source's checked-out branch) |
+| `vmono session into [pkg/session] [--all B] [--member NAME=B]...` | Show each member's landing branch, or change them |
 | `vmono session ls [pkg]` | List a package's sessions and whether each is finished |
-| `vmono session finish [pkg/session] [--into B] [--close] [--dry-run]` | Land the session's commits on each member's branch in its source repo. Nothing is pushed; see Finishing a session |
+| `vmono session finish [pkg/session] [--into [MEMBER=]B]... [--close] [--dry-run]` | Land the session's commits on each member's branch in its source repo. Nothing is pushed; see Finishing a session |
 | `vmono session rm <pkg>/<session> [--force] [--delete-branches]` | Remove a session; the package and its other sessions stay |
 | `vmono add [pkg] <repo> [--ref] [--role R]` | Add a member to the package, and so to every session (a known repo name or any path) |
 | `vmono rm [pkg] <member> [--force] [--delete-branch]` | Remove a member from every session |
