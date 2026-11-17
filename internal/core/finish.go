@@ -205,15 +205,9 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 		l.block("%v", err)
 		return
 	}
-	exists := gitx.BranchExists(src, l.Into)
-	switch {
-	case exists:
-		l.target = "refs/heads/" + l.Into
-	case gitx.RefExists(src, "refs/remotes/origin/"+l.Into):
-		l.target, l.Create = "refs/remotes/origin/"+l.Into, true
-	default:
-		l.target, l.Create = base, true
-	}
+	var exists bool
+	l.target, exists = landingTarget(src, l.Into, base)
+	l.Create = !exists
 	if !exists {
 		if other, clash := gitx.BranchRefConflict(src, l.Into); clash {
 			l.block("branch %q conflicts with existing branch %q (git cannot hold both)", l.Into, other)
@@ -221,7 +215,7 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 		}
 	}
 
-	if l.Commits, err = gitx.RevCount(l.wt, "HEAD", "--not", base, l.target); err != nil {
+	if l.Commits, err = ownCommits(l.wt, base, l.target); err != nil {
 		l.block("cannot count its commits: %v", err)
 		return
 	}
@@ -258,6 +252,27 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 			l.Notes = append(l.Notes, fmt.Sprintf("%s is %d commit(s) behind its upstream; `git -C %s pull --ff-only` first if you want them", l.Into, behind, src))
 		}
 	}
+}
+
+// landingTarget returns the ref a member's work is measured and rebased
+// against, and whether the landing branch exists as a local branch. A branch
+// that exists only on origin stands in for it, and one that exists nowhere
+// is measured against the member's base, since finish will create it there.
+func landingTarget(src, into, base string) (target string, exists bool) {
+	switch {
+	case gitx.BranchExists(src, into):
+		return "refs/heads/" + into, true
+	case gitx.RefExists(src, "refs/remotes/origin/"+into):
+		return "refs/remotes/origin/" + into, false
+	}
+	return base, false
+}
+
+// ownCommits counts the commits in the worktree that are reachable from HEAD
+// but from neither the member's base nor the landing target: the session's own
+// work still to land.
+func ownCommits(wt, base, target string) (int, error) {
+	return gitx.RevCount(wt, "HEAD", "--not", base, target)
 }
 
 // firstNonEmpty returns the first argument that is not empty.

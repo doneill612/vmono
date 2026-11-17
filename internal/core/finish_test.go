@@ -350,3 +350,83 @@ func TestFinishIntoOverrideIsRecorded(t *testing.T) {
 		t.Error("an invalid override must be rejected")
 	}
 }
+
+func TestSessionStateFollowsTheWork(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	p, s := newWork(t, c, request("state", []string{a}, nil))
+	wt := filepath.Join(s.Dir, "alpha")
+
+	stateOf := func() string {
+		t.Helper()
+		rows, err := c.ListSessions(p, false)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("ListSessions = %+v, %v", rows, err)
+		}
+		fresh, err := c.LoadSession(p, s.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.SessionState(fresh); got != rows[0].State {
+			t.Errorf("SessionState %q disagrees with the list row %q", got, rows[0].State)
+		}
+		return rows[0].State
+	}
+
+	if got := stateOf(); got != SessionInProgress {
+		t.Errorf("a new session is %q", got)
+	}
+	commitIn(t, wt, "one.txt")
+	st := c.Status(s)
+	if m := st.Members[0]; m.Into != "main" || m.ToLand != 1 {
+		t.Errorf("before finishing: into=%q to_land=%d", m.Into, m.ToLand)
+	}
+
+	if _, err := c.Finish(s, FinishOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stateOf(); got != SessionFinished {
+		t.Errorf("after finish the session is %q", got)
+	}
+	fresh, _ := c.LoadSession(p, s.Name)
+	st = c.Status(fresh)
+	if st.State != SessionFinished || st.FinishedAt == "" || st.Members[0].ToLand != 0 {
+		t.Errorf("status after finish = %+v", st)
+	}
+	rows, _ := c.ListSessions(p, false)
+	if rows[0].FinishedAt == "" {
+		t.Error("the list row should carry the finish time")
+	}
+
+	// Relaunching and working again reopens the session without any command.
+	commitIn(t, wt, "two.txt")
+	if got := stateOf(); got != SessionInProgress {
+		t.Errorf("a new commit leaves the session %q", got)
+	}
+	if _, err := c.Finish(s, FinishOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stateOf(); got != SessionFinished {
+		t.Errorf("finishing again leaves the session %q", got)
+	}
+	testutil.WriteFile(t, filepath.Join(wt, "README.md"), "edited\n")
+	if got := stateOf(); got != SessionInProgress {
+		t.Errorf("an uncommitted edit leaves the session %q", got)
+	}
+}
+
+func TestMovingTheLandingBranchDoesNotReopenAFinishedSession(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	p, s := newWork(t, c, request("moved", []string{a}, nil))
+	commitIn(t, filepath.Join(s.Dir, "alpha"), "one.txt")
+	if _, err := c.Finish(s, FinishOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	commitIn(t, a, "elsewhere.txt")
+
+	fresh, _ := c.LoadSession(p, s.Name)
+	if got := c.SessionState(fresh); got != SessionFinished {
+		t.Errorf("state = %q; other work landing on main must not reopen it", got)
+	}
+}

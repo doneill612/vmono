@@ -349,6 +349,10 @@ type SessionSummary struct {
 	Branch     string `json:"branch"`
 	Dirty      bool   `json:"dirty"`
 	LastOpened string `json:"last_opened,omitempty"`
+	// State is SessionFinished or SessionInProgress.
+	State string `json:"state"`
+	// FinishedAt is when the session was last finished, if it ever was.
+	FinishedAt string `json:"finished_at,omitempty"`
 }
 
 // timeFormat is how last-opened times are reported.
@@ -437,7 +441,10 @@ func (c *Core) ListSessions(p *Package, withStatus bool) ([]SessionSummary, erro
 	}
 	out := make([]SessionSummary, 0, len(sessions))
 	for _, s := range sessions {
-		row := SessionSummary{Package: p.Name, Name: s.Name, Path: s.Dir, Branch: s.S.Branch}
+		row := SessionSummary{Package: p.Name, Name: s.Name, Path: s.Dir, Branch: s.S.Branch, State: c.SessionState(s)}
+		if !s.S.Finished.IsZero() {
+			row.FinishedAt = s.S.Finished.Format(timeFormat)
+		}
 		if at := c.Idx.SessionOpened(p.Name, s.Name); !at.IsZero() {
 			row.LastOpened = at.Format(timeFormat)
 		}
