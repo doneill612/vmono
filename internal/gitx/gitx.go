@@ -575,6 +575,15 @@ func MergeFFOnly(worktree, ref string) error {
 	return err
 }
 
+// ResetKeep moves the worktree's checked-out branch to ref and updates its
+// working tree, refusing when that would overwrite local changes. It undoes
+// a MergeFFOnly: git keeps uncommitted changes that do not conflict and
+// aborts when any would be lost, so it never discards work.
+func ResetKeep(worktree, ref string) error {
+	_, err := run(worktree, "reset", "--keep", "--quiet", ref)
+	return err
+}
+
 // Status is the parsed state of one worktree.
 type Status struct {
 	Branch    string // empty when detached
