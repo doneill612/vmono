@@ -460,3 +460,54 @@ func TestFinishOverridesOneMembersLandingBranch(t *testing.T) {
 		t.Errorf("recorded landing branches = %v", loaded.S.Into)
 	}
 }
+
+func TestSetIntoChangesLandingBranchesAcrossMembers(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	p, s := newWork(t, c, request("retarget", []string{a, b}, nil))
+	testutil.Git(t, a, "branch", "feat")
+	commitIn(t, filepath.Join(s.Dir, "alpha"), "a.txt")
+
+	if err := c.SetInto(s, "", nil); err == nil {
+		t.Error("naming nothing must be rejected")
+	}
+	if err := c.SetInto(s, "", map[string]string{"ghost": "x"}); err == nil {
+		t.Error("an unknown member must be rejected")
+	}
+	if err := c.SetInto(s, "bad name", nil); err == nil {
+		t.Error("an invalid branch name must be rejected")
+	}
+	if err := c.SetInto(s, "", map[string]string{"alpha": "feat/x"}); err == nil {
+		t.Error("a branch git cannot hold next to the existing feat must be rejected")
+	}
+	loaded, _ := c.LoadSession(p, s.Name)
+	if loaded.S.Into["alpha"] != "main" {
+		t.Fatalf("a refused change must leave the file alone: %v", loaded.S.Into)
+	}
+
+	if err := c.SetInto(s, "release", map[string]string{"beta": "develop"}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _ = c.LoadSession(p, s.Name)
+	if loaded.S.Into["alpha"] != "release" || loaded.S.Into["beta"] != "develop" {
+		t.Errorf("into = %v", loaded.S.Into)
+	}
+	if st := c.Status(loaded); st.Members[0].Into != "release" || st.Members[1].Into != "develop" {
+		t.Errorf("status = %q %q", st.Members[0].Into, st.Members[1].Into)
+	}
+	if out := testutil.Git(t, s.Dir, "log", "--format=%s", "-1"); !strings.Contains(out, "set landing branches") {
+		t.Errorf("the change should be committed to the session repo, last commit %q", out)
+	}
+
+	res, err := c.Finish(loaded, FinishOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := member(t, res, "alpha"); m.Into != "release" || m.Status != LandLanded || !m.Create {
+		t.Errorf("alpha = %+v", m)
+	}
+	if sha(t, a, "main") == sha(t, a, s.S.Branch) {
+		t.Error("main must not move once the session lands on release")
+	}
+}

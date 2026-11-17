@@ -555,3 +555,39 @@ func (c *Core) markFinished(s *Session, opts FinishOptions) error {
 	}
 	return nil
 }
+
+// SetInto changes the landing branches recorded for a session, for every
+// active member (all) and for the members named in byMember, which wins over
+// all. Members it does not reach keep theirs. It applies the same checks as
+// creating a session with them: valid names, no collision with another
+// branch's ref path in the member's source. Work already committed in the
+// session is unaffected; the next finish rebases it onto the new branches,
+// and a session that was finished reads as in progress again if its commits
+// are not on the new branch. The file is committed to the session repo when
+// auto_commit is on.
+func (c *Core) SetInto(s *Session, all string, byMember map[string]string) error {
+	opts := FinishOptions{Into: all, IntoByMember: byMember}
+	if all == "" && len(byMember) == 0 {
+		return errors.New("name a landing branch: for every member, or as member=branch")
+	}
+	if err := opts.checkInto(s); err != nil {
+		return err
+	}
+	srcs, err := memberSources(s.Pkg.M)
+	if err != nil {
+		return err
+	}
+	next := *s.S
+	next.Into = opts.withInto(s)
+	if err := preflightInto(&next, s.Pkg.M.Members, srcs); err != nil {
+		return err
+	}
+	s.S.Into = next.Into
+	if err := manifest.SaveSession(s.Dir, s.S); err != nil {
+		return err
+	}
+	if c.Cfg.AutoCommit {
+		_, err = gitx.CommitAll(s.Dir, fmt.Sprintf("vmono: set landing branches (%s)", c.Author), "")
+	}
+	return err
+}
