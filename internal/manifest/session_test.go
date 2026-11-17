@@ -94,3 +94,80 @@ func TestSaveLoadAndFindSession(t *testing.T) {
 		t.Error("expected not-found outside a session")
 	}
 }
+
+func TestSessionIntoAndFinishedRoundTrip(t *testing.T) {
+	s := sampleSession()
+	s.Into = "feature/PLAT-412"
+	s.Finished = time.Date(2026, 11, 17, 15, 4, 5, 0, time.UTC)
+	got, err := ParseSession(EncodeSession(s))
+	if err != nil {
+		t.Fatalf("parse: %v\n%s", err, EncodeSession(s))
+	}
+	if got.Into != s.Into || !got.Finished.Equal(s.Finished) {
+		t.Errorf("round trip mismatch: into=%q finished=%v", got.Into, got.Finished)
+	}
+
+	plain, err := ParseSession(EncodeSession(sampleSession()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Into != "" || !plain.Finished.IsZero() {
+		t.Errorf("unset fields must stay unset: %+v", plain)
+	}
+	body := string(EncodeSession(sampleSession()))
+	if strings.Contains(body, "into") || strings.Contains(body, "finished") {
+		t.Errorf("unset fields must not be written:\n%s", body)
+	}
+}
+
+func TestSessionFileWithoutNewFieldsStillLoads(t *testing.T) {
+	old := "schema  = 1\npackage = \"p\"\nname    = \"s\"\ncreated = 2026-11-16T09:00:00Z\nbranch  = \"vmono/p/s\"\n"
+	s, err := ParseSession([]byte(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Into != "" || !s.Finished.IsZero() {
+		t.Errorf("old file gained values: %+v", s)
+	}
+}
+
+func TestSessionValidateInto(t *testing.T) {
+	for _, bad := range []string{"-x", "a b", "a..b", "/x", "x/", "x.lock", "a~1", "a:b", "vmono/platform-auth/token-refresh"} {
+		s := sampleSession()
+		s.Into = bad
+		if err := s.Validate(); err == nil {
+			t.Errorf("into %q accepted", bad)
+		}
+	}
+	for _, good := range []string{"main", "feature/PLAT-412", "release/1.0"} {
+		s := sampleSession()
+		s.Into = good
+		if err := s.Validate(); err != nil {
+			t.Errorf("into %q rejected: %v", good, err)
+		}
+	}
+}
+
+func TestIntoFor(t *testing.T) {
+	cases := []struct {
+		into, base string
+		want       string
+		explicit   bool
+	}{
+		{"", "origin/main", "main", false},
+		{"", "origin/release/1.0", "release/1.0", false},
+		{"", "main", "main", false},
+		{"", "origin/HEAD", "", false},
+		{"", "HEAD", "", false},
+		{"", "", "", false},
+		{"feature/x", "origin/main", "feature/x", true},
+	}
+	for _, c := range cases {
+		s := sampleSession()
+		s.Into = c.into
+		got, explicit := s.IntoFor(Member{Base: c.base})
+		if got != c.want || explicit != c.explicit {
+			t.Errorf("into=%q base=%q: got (%q, %v), want (%q, %v)", c.into, c.base, got, explicit, c.want, c.explicit)
+		}
+	}
+}

@@ -29,6 +29,38 @@ type Session struct {
 	Created time.Time `toml:"created"`
 	// Branch is checked out by every active member of the session.
 	Branch string `toml:"branch"`
+	// Into is the branch the session's work lands on in each member's source
+	// repo when the session is finished. Empty means each member's own base
+	// branch (see IntoFor).
+	Into string `toml:"into,omitempty"`
+	// Finished is when the session's work last landed. The zero time means it
+	// has never been finished. Whether the session still reads as finished
+	// also depends on its members' live git state; see core.SessionState.
+	Finished time.Time `toml:"finished,omitempty"`
+}
+
+// IntoFor returns the branch mem's work lands on when the session is finished,
+// and whether the session named it explicitly. An explicit branch that does
+// not exist yet is created at finish. Without one, the branch is read from
+// the member's base: "origin/main" lands on "main", "origin/release/1.0" on
+// "release/1.0", and a bare "main" on "main". It returns "" when the base
+// names no branch ("origin/HEAD", "HEAD"); the caller then resolves the
+// source repo's default branch with git.
+func (s *Session) IntoFor(mem Member) (branch string, explicit bool) {
+	if s.Into != "" {
+		return s.Into, true
+	}
+	base := strings.TrimSpace(mem.Base)
+	if base == "" || base == "HEAD" || base == "origin/HEAD" {
+		return "", false
+	}
+	if _, rest, ok := strings.Cut(base, "/"); ok {
+		if rest == "HEAD" {
+			return "", false
+		}
+		return rest, false
+	}
+	return base, false
 }
 
 // DefaultBranch returns the branch a session of pkg is cut on when none is
@@ -65,6 +97,27 @@ func (s *Session) Validate() error {
 	if strings.TrimSpace(s.Branch) == "" {
 		return fmt.Errorf("session %s: branch is empty", s.Name)
 	}
+	if err := validateInto(s.Into); err != nil {
+		return fmt.Errorf("session %s: into: %w", s.Name, err)
+	}
+	if s.Into != "" && s.Into == s.Branch {
+		return fmt.Errorf("session %s: into %q is the session's own branch", s.Name, s.Into)
+	}
+	return nil
+}
+
+// validateInto rejects the landing branch names that can never be valid git
+// branches or would be read as options. Full ref-format validation is git's
+// job and happens when a session is created.
+func validateInto(into string) error {
+	switch {
+	case into == "":
+		return nil
+	case strings.TrimSpace(into) != into || strings.ContainsAny(into, " \t\r\n~^:?*[\\"):
+		return fmt.Errorf("%q is not a valid branch name", into)
+	case strings.HasPrefix(into, "-") || strings.HasPrefix(into, "/") || strings.HasSuffix(into, "/") || strings.HasSuffix(into, ".lock") || strings.Contains(into, ".."):
+		return fmt.Errorf("%q is not a valid branch name", into)
+	}
 	return nil
 }
 
@@ -79,6 +132,12 @@ func EncodeSession(s *Session) []byte {
 	fmt.Fprintf(&b, "name    = %s\n", quote(s.Name))
 	fmt.Fprintf(&b, "created = %s\n", s.Created.Format(time.RFC3339))
 	fmt.Fprintf(&b, "branch  = %s\n", quote(s.Branch))
+	if s.Into != "" {
+		fmt.Fprintf(&b, "into    = %s\n", quote(s.Into))
+	}
+	if !s.Finished.IsZero() {
+		fmt.Fprintf(&b, "finished = %s\n", s.Finished.Format(time.RFC3339))
+	}
 	return []byte(b.String())
 }
 
