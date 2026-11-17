@@ -126,7 +126,7 @@ func TestClaudeAdapterMergesMemberPermissions(t *testing.T) {
 			t.Errorf("deny missing %q: %v", want, f.Permissions.Deny)
 		}
 	}
-	for _, want := range []string{"Bash(vmono rm:*)", "Bash(vmono delete:*)", "Bash(vmono session rm:*)", "Bash(npm test:*)"} {
+	for _, want := range []string{"Bash(vmono rm:*)", "Bash(vmono delete:*)", "Bash(vmono session rm:*)", "Bash(vmono session finish:*)", "Bash(npm test:*)"} {
 		if !contains(f.Permissions.Ask, want) {
 			t.Errorf("ask missing %q: %v", want, f.Permissions.Ask)
 		}

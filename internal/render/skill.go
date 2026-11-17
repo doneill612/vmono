@@ -67,6 +67,38 @@ Add ` + "`--ref`" + ` for a read-only reference member. The member is added to e
 session of the package, and its worktree in your session exists on disk
 immediately.
 
+## Finishing the session
+
+Finishing lands the session's commits on a branch in each member's source repo.
+Do it only when the user says the work is done or asks to land or merge it back.
+
+1. Commit your work in every member, from inside the member's directory.
+   ` + "`vmono session finish`" + ` refuses uncommitted changes and untracked files.
+2. Preview with ` + "`vmono session finish --dry-run --json`" + ` if you are unsure, then run
+   ` + "`vmono session finish --json`" + `. It asks the user for permission by design.
+3. Read the result. Each member is one of:
+   - ` + "`landed`" + `: its commits are now on the branch in ` + "`into`" + `.
+   - ` + "`nothing`" + `: it had no commits of its own.
+   - ` + "`blocked`" + `: ` + "`reason`" + ` says why. Fix what is in your session (commit, finish a
+     rebase) and run it again. If the cause is in the source repo, such as
+     uncommitted changes where the branch is checked out, tell the user; do not
+     touch the source repo yourself.
+   - ` + "`conflict`" + `: the rebase onto the landing branch stopped. ` + "`conflicts`" + ` lists the
+     files, inside that member's directory. Resolve them keeping both sides'
+     intent, run ` + "`git add`" + ` on them, then ` + "`git -c core.editor=true rebase --continue`" + `,
+     and run ` + "`vmono session finish`" + ` again. Nothing has moved while any member is
+     blocked or conflicted, so it is safe to stop and ask the user.
+4. Tell the user which branch each member landed on and how many commits.
+
+The session stays in place afterward, marked finished (` + "`vmono show --json`" + ` reports
+its ` + "`state`" + `). New commits reopen it, and finishing again lands only those.
+
+- Never pass ` + "`--close`" + `: you are running inside the session. Tell the user they can
+  remove it from the vmono TUI or with ` + "`vmono session rm`" + `.
+- Never push, and never delete branches. Landing is local; pushing and pull
+  requests are the user's.
+- Pass ` + "`--into BRANCH`" + ` only if the user names a different branch to land on.
+
 ## What you must not do
 
 - Never remove a member, delete a session, or delete the package. Point the

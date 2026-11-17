@@ -65,6 +65,7 @@ func AgentsBlock(m *manifest.Manifest, s *manifest.Session) string {
 	fmt.Fprintf(&b, "- Active members are git worktrees on branch `%s`. Edit and commit in them.\n", s.Branch)
 	b.WriteString("- Run git commands from inside the member's directory, never from the package root.\n")
 	b.WriteString("- Commit per member; each member is its own repository.\n")
+	b.WriteString("- When the user says the work is done, commit in every member and run `vmono session finish`: it lands the commits on each member's own branch in its source repo, locally, and asks first. Never push.\n")
 	b.WriteString("- Never edit anything under `_ref/`. Reference members are read-only context.\n")
 	b.WriteString("- Each member's own `AGENTS.md` / `CLAUDE.md` still applies inside that member.\n\n")
 

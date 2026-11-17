@@ -150,6 +150,15 @@ func TestRenderPackageWritesOnlyTheGitignore(t *testing.T) {
 	}
 }
 
+func TestSkillTeachesFinishing(t *testing.T) {
+	body := SkillMarkdown()
+	for _, want := range []string{"vmono session finish --json", "--dry-run", "git -c core.editor=true rebase --continue", "Never pass `--close`", "Never push"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("skill missing %q", want)
+		}
+	}
+}
+
 func TestSkillExplainsSessions(t *testing.T) {
 	body := SkillMarkdown()
 	for _, want := range []string{"VMONO_SESSION", "session", "every session", "vmono session rm"} {
