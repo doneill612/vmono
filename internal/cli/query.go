@@ -114,10 +114,10 @@ func newStatusCmd() *cobra.Command {
 			if asJSON {
 				return printJSON(out, st)
 			}
-			fprintf(out, "%s/%s  (%s)\n", st.Package, st.Session, st.Branch)
+			fprintf(out, "%s/%s  (%s)  %s\n", st.Package, st.Session, st.Branch, st.State)
 			tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 			for _, m := range st.Members {
-				fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n", m.Name, m.Mode, where(m), cleanliness(m), aheadBehind(m))
+				fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n", m.Name, m.Mode, where(m), cleanliness(m), aheadBehind(m), toLand(m))
 			}
 			return tw.Flush()
 		},
@@ -157,6 +157,18 @@ func cleanliness(m core.MemberStatus) string {
 		return "clean"
 	}
 	return strings.Join(parts, ", ")
+}
+
+// toLand says where an active member's work lands and how much of it is
+// still to land, empty for a member with no landing branch.
+func toLand(m core.MemberStatus) string {
+	if m.Into == "" {
+		return ""
+	}
+	if m.ToLand == 0 {
+		return "→ " + m.Into + ": nothing to land"
+	}
+	return fmt.Sprintf("→ %s: %d to land", m.Into, m.ToLand)
 }
 
 // aheadBehind formats upstream divergence, empty when there is no upstream.

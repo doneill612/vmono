@@ -15,18 +15,18 @@ import (
 // starts its first session.
 func newNewCmd() *cobra.Command {
 	var active, refs []string
-	var purposeFile, contextFile, branch, harness, session string
+	var purposeFile, contextFile, branch, into, harness, session string
 	var reuse bool
 	cmd := &cobra.Command{
-		Use:   "new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--branch B]]",
+		Use:   "new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--branch B] [--into B]]",
 		Short: "Define a package, and optionally start its first session",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(active)+len(refs) == 0 {
 				return errors.New("a package needs at least one member: pass --active and/or --ref")
 			}
-			if session == "" && (branch != "" || reuse) {
-				return errors.New("--branch and --reuse-branch belong to a session: pass --session NAME, or use `vmono session new`")
+			if session == "" && (branch != "" || into != "" || reuse) {
+				return errors.New("--branch, --into and --reuse-branch belong to a session: pass --session NAME, or use `vmono session new`")
 			}
 			c, err := loadCore()
 			if err != nil {
@@ -67,7 +67,7 @@ func newNewCmd() *cobra.Command {
 					return cerr
 				}
 				if session != "" {
-					s, cerr = c.CreateSession(p, session, core.SessionOptions{Branch: branch, ReuseBranch: reuse})
+					s, cerr = c.CreateSession(p, session, core.SessionOptions{Branch: branch, Into: into, ReuseBranch: reuse})
 				}
 				return cerr
 			})
@@ -93,6 +93,7 @@ func newNewCmd() *cobra.Command {
 	f.StringVar(&harness, "harness", "", "default harness for this package")
 	f.StringVar(&session, "session", "", "also start a first session with this name")
 	f.StringVar(&branch, "branch", "", "with --session: the session branch (default: <branch_prefix><pkg>/<session>)")
+	f.StringVar(&into, "into", "", "with --session: the branch the work lands on when the session is finished (default: each member's base branch)")
 	f.BoolVar(&reuse, "reuse-branch", false, "with --session: check out the branch if it already exists in a source repo")
 	return cmd
 }

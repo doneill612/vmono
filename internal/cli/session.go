@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"text/tabwriter"
 
@@ -10,24 +12,24 @@ import (
 	"github.com/doneill612/vmono/internal/core"
 )
 
-// newSessionCmd builds `vmono session`, the commands that start, list and
-// remove the sessions of a package. A session is one piece of work on a
+// newSessionCmd builds `vmono session`, the commands that start, list, finish
+// and remove the sessions of a package. A session is one piece of work on a
 // package: its own branch, and its own worktree of every member.
 func newSessionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "session",
-		Short: "Start, list and remove the sessions of a package",
+		Short: "Start, list, finish and remove the sessions of a package",
 	}
-	cmd.AddCommand(newSessionNewCmd(), newSessionLsCmd(), newSessionRmCmd())
+	cmd.AddCommand(newSessionNewCmd(), newSessionLsCmd(), newSessionFinishCmd(), newSessionRmCmd())
 	return cmd
 }
 
 // newSessionNewCmd builds `vmono session new`.
 func newSessionNewCmd() *cobra.Command {
-	var branch string
+	var branch, into string
 	var reuse bool
 	cmd := &cobra.Command{
-		Use:   "new [pkg] <name> [--branch B] [--reuse-branch]",
+		Use:   "new [pkg] <name> [--branch B] [--into B] [--reuse-branch]",
 		Short: "Start a session: a worktree of every member on a new branch",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -39,7 +41,7 @@ func newSessionNewCmd() *cobra.Command {
 			var s *core.Session
 			err = withEvents(cmd.ErrOrStderr(), c, func() error {
 				var cerr error
-				s, cerr = c.CreateSession(p, rest[0], core.SessionOptions{Branch: branch, ReuseBranch: reuse})
+				s, cerr = c.CreateSession(p, rest[0], core.SessionOptions{Branch: branch, Into: into, ReuseBranch: reuse})
 				return cerr
 			})
 			if err != nil {
@@ -50,6 +52,7 @@ func newSessionNewCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "session branch (default: <branch_prefix><pkg>/<session>)")
+	cmd.Flags().StringVar(&into, "into", "", "the branch the work lands on when the session is finished (default: each member's base branch); the session starts from it when it exists")
 	cmd.Flags().BoolVar(&reuse, "reuse-branch", false, "check out the branch if it already exists in a source repo")
 	return cmd
 }
@@ -79,7 +82,7 @@ func newSessionLsCmd() *cobra.Command {
 				return nil
 			}
 			tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "SESSION\tBRANCH\tDIRTY\tLAST OPENED")
+			fmt.Fprintln(tw, "SESSION\tBRANCH\tSTATE\tDIRTY\tLAST OPENED")
 			for _, r := range rows {
 				dirty := ""
 				if r.Dirty {
@@ -89,13 +92,115 @@ func newSessionLsCmd() *cobra.Command {
 				if opened == "" {
 					opened = "-"
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.Name, r.Branch, dirty, opened)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Name, r.Branch, r.State, dirty, opened)
 			}
 			return tw.Flush()
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
 	return cmd
+}
+
+// newSessionFinishCmd builds `vmono session finish`.
+func newSessionFinishCmd() *cobra.Command {
+	var into string
+	var closeAfter, dryRun, asJSON bool
+	cmd := &cobra.Command{
+		Use:   "finish [pkg/session] [--into B] [--close] [--dry-run] [--json]",
+		Short: "Land the session's commits on each member's branch in its source repo",
+		Long: `Land the session's work. Each active member's own commits are rebased onto its
+landing branch inside the session, then the landing branch in the member's source
+repo is moved to the result: fast-forwarded when it is checked out in a clean
+worktree, otherwise updated in place, and created when it does not exist yet.
+Members with no commits of their own are skipped.
+
+The landing branch is the session's --into, else each member's base branch
+(origin/main lands on main). Nothing moves unless every member can land: commit
+or stash uncommitted work first. If a rebase stops on conflicts, resolve them in
+that member, run git add and git rebase --continue, then run this command again.
+
+The session, its worktrees and its branch stay in place and the session is marked
+finished; remove it with ` + "`vmono session rm`" + ` or pass --close. Nothing is pushed.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := loadCore()
+			if err != nil {
+				return err
+			}
+			s, err := c.ResolveSession(packageArg(args))
+			if err != nil {
+				return err
+			}
+			var res core.FinishResult
+			err = withEvents(cmd.ErrOrStderr(), c, func() error {
+				var ferr error
+				res, ferr = c.Finish(s, core.FinishOptions{Into: into, Close: closeAfter, DryRun: dryRun})
+				return ferr
+			})
+			out := cmd.OutOrStdout()
+			switch {
+			case asJSON && (err == nil || errors.Is(err, core.ErrRefused)):
+				if perr := printJSON(out, res); perr != nil {
+					return perr
+				}
+			case err == nil || errors.Is(err, core.ErrRefused):
+				printFinish(out, res, dryRun)
+			}
+			return err
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&into, "into", "", "land on this branch instead of the session's own or each member's base branch (recorded in the session)")
+	f.BoolVar(&closeAfter, "close", false, "remove the session once its work has landed")
+	f.BoolVar(&dryRun, "dry-run", false, "show what would land without changing anything")
+	f.BoolVar(&asJSON, "json", false, "output JSON")
+	return cmd
+}
+
+// printFinish writes one line per member for a finish, or a dry run of one,
+// then a summary line. Refused finishes print the same lines with the reason
+// each member is stopped.
+func printFinish(w io.Writer, res core.FinishResult, dryRun bool) {
+	label := res.Package + "/" + res.Session
+	for _, m := range res.Members {
+		fprintf(w, "%-16s %s\n", m.Name, describeLanding(m, dryRun))
+		for _, n := range m.Notes {
+			fprintf(w, "%-16s note: %s\n", "", n)
+		}
+	}
+	switch {
+	case res.Closed:
+		fprintf(w, "finished and removed session %s\n", label)
+	case res.Finished:
+		fprintf(w, "finished session %s; remove it with `vmono session rm %s` when you are done\n", label, label)
+	case dryRun:
+		fprintf(w, "dry run: nothing changed\n")
+	}
+}
+
+// describeLanding words one member's outcome.
+func describeLanding(m core.MemberLanding, dryRun bool) string {
+	commits := fmt.Sprintf("%d commit", m.Commits)
+	if m.Commits != 1 {
+		commits += "s"
+	}
+	verb := "landed"
+	if dryRun || m.Status == core.LandReady {
+		verb = "would land"
+	}
+	switch m.Status {
+	case core.LandNothing:
+		return "nothing to land"
+	case core.LandBlocked:
+		return "blocked: " + m.Reason
+	case core.LandConflict:
+		return fmt.Sprintf("conflict: rebase onto %s stopped in %s; %s", m.Into, strings.Join(m.Conflicts, ", "), m.Reason)
+	}
+	text := fmt.Sprintf("%s %s on %s (%s)", verb, commits, m.Into, m.Via)
+	if m.Create {
+		text += ", creating the branch"
+	}
+	return text
 }
 
 // newSessionRmCmd builds `vmono session rm`.

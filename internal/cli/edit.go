@@ -58,7 +58,7 @@ func newShowCmd() *cobra.Command {
 			}
 			title := s.Name
 			if s.Session != "" {
-				title += "/" + s.Session + "  (" + s.Branch + ")"
+				title += "/" + s.Session + "  (" + s.Branch + ", " + s.State + ")"
 			}
 			fprintf(out, "%s\n%s\n\n", title, s.Path)
 			section(out, "Purpose", s.Purpose)
@@ -70,7 +70,7 @@ func newShowCmd() *cobra.Command {
 					if ss.Name == s.Session {
 						mark = "*"
 					}
-					fprintf(out, "  %s %-16s %s\n", mark, ss.Name, ss.Branch)
+					fprintf(out, "  %s %-16s %-28s %s\n", mark, ss.Name, ss.Branch, ss.State)
 				}
 				fprintf(out, "\n")
 			}

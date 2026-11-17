@@ -689,3 +689,91 @@ func TestPackageChangesReachEverySessionFromTheCLI(t *testing.T) {
 		t.Error("package sync should rebuild every session")
 	}
 }
+
+func TestSessionFinish(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	out, stderr, err := run(t, "new", "demo", "--active", a, "--session", "work")
+	if err != nil {
+		t.Fatalf("new: %v\n%s", err, stderr)
+	}
+	wt := filepath.Join(strings.TrimSpace(out), "alpha")
+	commit := func(name string) {
+		testutil.WriteFile(t, filepath.Join(wt, name), name+"\n")
+		testutil.Git(t, wt, "add", "-A")
+		testutil.Git(t, wt, "commit", "--quiet", "-m", "add "+name)
+	}
+	commit("one.txt")
+
+	if text, _, err := run(t, "status", "demo/work"); err != nil || !strings.Contains(text, "in-progress") || !strings.Contains(text, "→ main: 1 to land") {
+		t.Errorf("status before finish = %q, %v", text, err)
+	}
+	text, _, err := run(t, "session", "finish", "demo/work", "--dry-run")
+	if err != nil || !strings.Contains(text, "would land 1 commit on main") || !strings.Contains(text, "dry run") {
+		t.Errorf("dry run = %q, %v", text, err)
+	}
+	if got := testutil.Git(t, a, "rev-parse", "main"); got == testutil.Git(t, wt, "rev-parse", "HEAD") {
+		t.Fatal("a dry run must not move main")
+	}
+
+	out, _, err = run(t, "session", "finish", "demo/work", "--json")
+	if err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	var res core.FinishResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("finish --json: %v\n%s", err, out)
+	}
+	if !res.Finished || len(res.Members) != 1 || res.Members[0].Status != core.LandLanded || res.Members[0].Into != "main" {
+		t.Errorf("result = %+v", res)
+	}
+	if testutil.Git(t, a, "rev-parse", "main") != testutil.Git(t, wt, "rev-parse", "HEAD") {
+		t.Error("main should be at the session tip")
+	}
+	if text, _, _ := run(t, "session", "ls", "demo"); !strings.Contains(text, "finished") {
+		t.Errorf("session ls should show the state: %q", text)
+	}
+
+	// A finished session stays listed, and new work reopens it.
+	commit("two.txt")
+	if text, _, _ := run(t, "session", "ls", "demo"); !strings.Contains(text, "in-progress") {
+		t.Errorf("new work should reopen the session: %q", text)
+	}
+
+	// Inside the session no argument is needed; uncommitted work is refused
+	// with exit code 2 and the reasons on stdout as JSON.
+	t.Chdir(wt)
+	testutil.WriteFile(t, filepath.Join(wt, "forgotten.txt"), "x")
+	out, _, err = run(t, "session", "finish", "--json")
+	if ExitCode(err) != ExitRefused {
+		t.Fatalf("exit code = %d (%v), want %d", ExitCode(err), err, ExitRefused)
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil || res.Members[0].Status != core.LandBlocked || res.Finished {
+		t.Errorf("refused result = %+v (%v)\n%s", res, err, out)
+	}
+	if err := os.Remove(filepath.Join(wt, "forgotten.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if text, _, err := run(t, "session", "finish", "--close"); err != nil || !strings.Contains(text, "removed session demo/work") {
+		t.Errorf("finish --close = %q, %v", text, err)
+	}
+}
+
+func TestIntoBelongsToASession(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	if _, _, err := run(t, "new", "demo", "--active", a, "--into", "feature"); err == nil {
+		t.Error("--into without --session must be rejected")
+	}
+	if _, stderr, err := run(t, "new", "demo", "--active", a, "--session", "work", "--into", "feature"); err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	out, _, _ := run(t, "session", "ls", "demo", "--json")
+	if !strings.Contains(out, `"state": "in-progress"`) {
+		t.Errorf("ls --json = %s", out)
+	}
+	data, err := os.ReadFile(filepath.Join(env.PackageRoot, "demo", "work", ".vmono", "session.toml"))
+	if err != nil || !strings.Contains(string(data), `into    = "feature"`) {
+		t.Errorf("session.toml = %q, %v", data, err)
+	}
+}

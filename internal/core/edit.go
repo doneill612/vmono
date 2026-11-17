@@ -258,6 +258,8 @@ type ShowSession struct {
 	Name   string `json:"name"`
 	Path   string `json:"path"`
 	Branch string `json:"branch"`
+	// State is SessionFinished or SessionInProgress.
+	State string `json:"state"`
 }
 
 // ShowResult is everything an agent needs to know about its package and, when
@@ -268,8 +270,10 @@ type ShowResult struct {
 	// package directory.
 	Path string `json:"path"`
 	// Session and Branch are set only when Show was given a session.
-	Session  string        `json:"session,omitempty"`
-	Branch   string        `json:"branch,omitempty"`
+	Session string `json:"session,omitempty"`
+	Branch  string `json:"branch,omitempty"`
+	// State is SessionFinished or SessionInProgress; set with Session.
+	State    string        `json:"state,omitempty"`
 	Harness  string        `json:"harness,omitempty"`
 	Purpose  string        `json:"purpose"`
 	Context  string        `json:"context"`
@@ -296,7 +300,7 @@ func (c *Core) Show(p *Package, s *Session) ShowResult {
 	}
 	if sessions, err := c.LoadSessions(p); err == nil {
 		for _, sess := range sessions {
-			out.Sessions = append(out.Sessions, ShowSession{Name: sess.Name, Path: sess.Dir, Branch: sess.S.Branch})
+			out.Sessions = append(out.Sessions, ShowSession{Name: sess.Name, Path: sess.Dir, Branch: sess.S.Branch, State: c.SessionState(sess)})
 		}
 	}
 	for _, mem := range p.M.Members {
@@ -311,6 +315,13 @@ func (c *Core) Show(p *Package, s *Session) ShowResult {
 			sm.MemberStatus = MemberStatus{Name: mem.Name, Mode: mem.Mode, Path: mem.Path, Role: mem.Role}
 		}
 		out.Members = append(out.Members, sm)
+	}
+	if s != nil {
+		statuses := make([]MemberStatus, len(out.Members))
+		for i, m := range out.Members {
+			statuses[i] = m.MemberStatus
+		}
+		out.State = stateOf(s, statuses)
 	}
 	return out
 }
