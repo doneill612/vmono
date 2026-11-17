@@ -291,6 +291,14 @@ func BranchExists(repo, branch string) bool {
 	return err == nil
 }
 
+// ValidBranchName reports whether name is a valid local branch name under
+// git's ref-format rules, run from repo so `@{-1}` style shorthands are not
+// mistaken for plain names.
+func ValidBranchName(repo, name string) bool {
+	out, err := run(repo, "check-ref-format", "--branch", name)
+	return err == nil && out == name
+}
+
 // BranchRefConflict reports an existing local branch that stops branch from
 // being created. Git stores branches as files under refs/heads, so a branch
 // named "vmono/pkg" blocks "vmono/pkg/session" (a file cannot also be a

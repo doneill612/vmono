@@ -24,6 +24,13 @@ type SessionOptions struct {
 	// source repo instead of failing. The CLI requires --reuse-branch; the
 	// TUI asks and retries on BranchExistsError.
 	ReuseBranch bool
+	// Into is the branch the session's work lands on when it is finished. It
+	// is recorded in the session file. When it already exists in a member's
+	// source repo the session branch is cut from it, so several sessions can
+	// build on one feature branch; when it does not, it is created at finish.
+	// Empty means each member's own base branch, and sessions are cut from
+	// base as usual.
+	Into string
 }
 
 // BranchExistsError reports that the session branch already exists in a
@@ -185,6 +192,51 @@ func preflightMembers(m *manifest.Manifest, branch string, srcs map[string]strin
 	return existing, nil
 }
 
+// preflightInto checks an explicit landing branch against every active
+// member's source before a session is created, so a finish never fails late
+// on a branch git could not hold. The name must be a valid branch name, and a
+// branch that does not exist yet must not collide with another branch's ref
+// path, since finish creates it. It does nothing when the session names no
+// landing branch.
+func preflightInto(ms *manifest.Session, members []manifest.Member, srcs map[string]string) error {
+	if ms.Into == "" {
+		return nil
+	}
+	for _, mem := range members {
+		if mem.Mode != manifest.ModeActive {
+			continue
+		}
+		src := srcs[mem.Name]
+		if !gitx.ValidBranchName(src, ms.Into) {
+			return fmt.Errorf("%s: %q is not a valid branch name", mem.Name, ms.Into)
+		}
+		if gitx.BranchExists(src, ms.Into) {
+			continue
+		}
+		if other, clash := gitx.BranchRefConflict(src, ms.Into); clash {
+			return fmt.Errorf("%s: landing branch %q conflicts with existing branch %q (git cannot hold both); choose a different --into", mem.Name, ms.Into, other)
+		}
+	}
+	return nil
+}
+
+// cutPoint returns the ref a new session branch for mem is cut from. When the
+// session names a landing branch that exists in the source, either as a local
+// branch or as origin's, the session starts from it. Otherwise it starts from
+// the member's base. A landing branch derived from the base is deliberately
+// not used: the local copy of main can lag behind origin/main, and the
+// manifest's base already says where work starts.
+func cutPoint(src string, ms *manifest.Session, mem manifest.Member, warn func(string)) (string, error) {
+	if ms.Into != "" {
+		for _, ref := range []string{"refs/heads/" + ms.Into, "refs/remotes/origin/" + ms.Into} {
+			if gitx.RefExists(src, ref) {
+				return ref, nil
+			}
+		}
+	}
+	return resolveRef(src, mem.Base, warn)
+}
+
 // CreatePackage defines a new package from a manifest whose members name
 // their sources: it creates the package directory, its own git repo, the
 // manifest and a .gitignore, and commits them. It makes no worktrees; the
@@ -273,7 +325,7 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	if err := manifest.ValidateName(name); err != nil {
 		return nil, err
 	}
-	ms := &manifest.Session{Package: p.Name, Name: name, Branch: opts.Branch, Created: time.Now().Truncate(time.Second)}
+	ms := &manifest.Session{Package: p.Name, Name: name, Branch: opts.Branch, Into: opts.Into, Created: time.Now().Truncate(time.Second)}
 	ms.ApplyDefaults(c.Cfg.BranchPrefix)
 	if err := ms.Validate(); err != nil {
 		return nil, err
@@ -288,6 +340,9 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	}
 	existing, err := preflightMembers(p.M, ms.Branch, srcs, p.M.Members, opts.ReuseBranch, nil)
 	if err != nil {
+		return nil, err
+	}
+	if err := preflightInto(ms, p.M.Members, srcs); err != nil {
 		return nil, err
 	}
 
@@ -408,7 +463,7 @@ func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branc
 			if branchExists {
 				return gitx.WorktreeAddExisting(src, dst, branch)
 			}
-			base, err := resolveRef(src, mem.Base, warn)
+			base, err := cutPoint(src, s.S, mem, warn)
 			if err != nil {
 				return err
 			}
