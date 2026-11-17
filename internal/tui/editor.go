@@ -450,8 +450,8 @@ func (m *editorModel) save() (screen, tea.Cmd) {
 	return m.saveEdit()
 }
 
-// saveCreate defines the package through the progress screen, then asks for
-// its first session, so creating a package still ends at a harness.
+// saveCreate defines the package through the progress screen, then returns
+// to the packages screen. Starting a session is left to the user.
 func (m *editorModel) saveCreate() (screen, tea.Cmd) {
 	c := m.e.core
 	name := strings.TrimSpace(m.name.Value())
@@ -466,7 +466,7 @@ func (m *editorModel) saveCreate() (screen, tea.Cmd) {
 			_, err := c.CreatePackage(nm)
 			return err
 		},
-		next: func() screen { return newSessionPrompt(m.e, name) },
+		home: true,
 		back: func() screen { return m },
 	}))
 }

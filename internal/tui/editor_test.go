@@ -77,6 +77,10 @@ func TestCreateFlowEditorPickerProgressLaunch(t *testing.T) {
 	d.has("the gateway")
 
 	d.key("ctrl+s")
+	d.eventually(func() bool { return containsView(d, "shiny") && !containsView(d, "new package") }, "packages screen")
+	d.lacks("new session")
+	d.key("enter") // open the package's (empty) sessions view
+	d.key("n")
 	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
 	d.has("package shiny", "vmono/shiny/<session>")
 	d.typeText("task")
@@ -119,6 +123,9 @@ func TestCreateAsksBeforeReusingExistingBranch(t *testing.T) {
 	d.key("ctrl+s")
 	d.has("repos(select)")
 	d.key("space", "enter", "ctrl+s")
+	d.eventually(func() bool { return containsView(d, "reuse") && !containsView(d, "new package") }, "packages screen")
+	d.lacks("new session")
+	d.key("enter", "n")
 	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
 	d.typeText("work")
 	d.key("enter")
@@ -215,7 +222,8 @@ func TestPickerAddByPathWithCompletion(t *testing.T) {
 	d.key("enter")
 	d.has("added elsewhere", "[x]")
 	d.key("enter", "ctrl+s")
-	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
+	d.eventually(func() bool { return containsView(d, "bypath") && !containsView(d, "new package") }, "packages screen")
+	d.lacks("new session")
 	if p := loadPkg(t, "bypath"); len(p.M.Members) != 1 || p.M.Members[0].Name != "elsewhere" {
 		t.Errorf("members = %+v", p.M.Members)
 	}

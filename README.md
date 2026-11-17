@@ -84,7 +84,7 @@ Navigation is by drilling down: `enter` goes in, `esc` goes back. `:` opens a co
 | `ctrl+d` | Delete the session; the package and its other sessions stay |
 | `y` | Copy the session path |
 
-Creating a package ends at the new-session prompt, then the harness picker, so every path through the TUI still ends at a running harness except delete.
+Creating a package returns to the packages screen; start a session from there (`enter`, then `n`) when you want one.
 
 Repos that are not under a source root, or every repo when no source root is set, are found with the repo finder (`p` while choosing members, `a` in the repos view). Type a path and it lists the directories there, marks the git repos (`●`), and scans below a typed directory for repos nested deeper. `tab` completes, `enter` picks a repo or steps into a directory; picked repos are remembered.
 
