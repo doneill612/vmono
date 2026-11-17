@@ -85,7 +85,7 @@ func (m *sessionsModel) Hints() []hint {
 	return []hint{
 		{"enter", "Open"}, {"l", "Launch…"}, {"n", "New session"}, {"m", "Members"},
 		{"d", "Describe"}, {"y", "Copy path"}, {"e", "Edit package"}, {"s", "Sync"},
-		{"f", "Fetch"}, {"ctrl+d", "Delete"},
+		{"f", "Fetch"}, {"F", "Finish"}, {"ctrl+d", "Delete"},
 		{"N", "Sort name"}, {"O", "Sort opened"}, {"esc", "Back"},
 	}
 }
@@ -122,11 +122,22 @@ func (m *sessionsModel) selected() (core.SessionSummary, bool) {
 	return core.SessionSummary{}, false
 }
 
-// sessionRow builds one table row.
+// sessionRow builds one table row. A finished session is drawn dim, with
+// when it finished in place of its dirty marker, since a finished session is
+// clean by definition.
 func sessionRow(s core.SessionSummary) row {
 	state, stateKey := styled("clean", styleOK), "0"
+	name := plain(s.Name)
 	if s.Dirty {
 		state, stateKey = styled("dirty", styleWarn), "1"
+	}
+	if s.State == core.SessionFinished {
+		label := "finished"
+		if t, err := time.Parse(time.RFC3339, s.FinishedAt); err == nil {
+			label += " " + ago(t)
+		}
+		state, stateKey = styled(label, styleDim), "2"
+		name = styled(s.Name, styleDim)
 	}
 	state.key = stateKey
 	opened := styled("never", styleDim)
@@ -136,14 +147,28 @@ func sessionRow(s core.SessionSummary) row {
 	return row{
 		id:     s.Name,
 		search: s.Name + " " + s.Branch,
-		cells:  []cell{plain(s.Name), styled(s.Branch, styleDim), state, opened},
+		cells:  []cell{name, styled(s.Branch, styleDim), state, opened},
 	}
+}
+
+// inProgressFirst returns the sessions with finished ones moved below the
+// rest, each group keeping its order.
+func inProgressFirst(list []core.SessionSummary) []core.SessionSummary {
+	out := make([]core.SessionSummary, 0, len(list))
+	for _, finished := range []bool{false, true} {
+		for _, s := range list {
+			if (s.State == core.SessionFinished) == finished {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
 }
 
 // fill rebuilds the rows from the loaded list.
 func (m *sessionsModel) fill() {
 	var rows []row
-	for _, s := range m.list {
+	for _, s := range inProgressFirst(m.list) {
 		rows = append(rows, sessionRow(s))
 	}
 	switch {
@@ -239,8 +264,22 @@ func (m *sessionsModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		return m, flash("copied " + paths.Contract(sel.Path))
 	case "ctrl+d":
 		return m, m.startDelete(sel.Name)
+	case "F":
+		return m, m.startFinish(sel.Name)
 	}
 	return m, nil
+}
+
+// startFinish opens the finish confirmation for a session: what would land
+// on which branch, or why it cannot yet. Nothing changes until it is
+// confirmed.
+func (m *sessionsModel) startFinish(session string) tea.Cmd {
+	c := m.e.core
+	s, err := c.ResolveSession(m.name + "/" + session)
+	if err != nil {
+		return flashErr(err.Error())
+	}
+	return push(newFinishConfirm(m.e, m.name, session, c.PlanFinish(s, "")))
 }
 
 // syncSessionOp builds the sync operation for one session. Like create it

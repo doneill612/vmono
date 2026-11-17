@@ -30,6 +30,12 @@ type operation struct {
 	force, reuse bool
 	// back builds the screen to return to when the operation fails.
 	back func() screen
+	// done builds the screen to show once the user acknowledges success. Nil
+	// means Home.
+	done func() screen
+	// fixIn, when set, is the session where a failure can be fixed: the
+	// failed screen offers l to launch the default harness there.
+	fixIn *LaunchRequest
 }
 
 // progressState is where the progress screen is in its life.
@@ -138,7 +144,12 @@ func (m *progressModel) Hints() []hint {
 	switch m.state {
 	case progAskReuse:
 		return []hint{{"y", "Reuse branch"}, {"n", "Cancel"}}
-	case progDone, progFailed:
+	case progFailed:
+		if m.op.fixIn != nil {
+			return []hint{{"enter", "Back"}, {"l", "Launch harness in the session"}}
+		}
+		return []hint{{"enter", "Back"}}
+	case progDone:
 		return []hint{{"enter", "Back"}}
 	}
 	return nil
@@ -224,10 +235,18 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		switch k.String() {
 		case "enter", "esc", "q":
 			return m.leave()
+		case "l":
+			if m.op.fixIn != nil {
+				req := *m.op.fixIn
+				return m, func() tea.Msg { return launchMsg{req} }
+			}
 		}
 	case progDone:
 		switch k.String() {
 		case "enter", "esc", "q":
+			if m.op.done != nil {
+				return m, goTo(m.op.done())
+			}
 			return m, goHome(m.op.title + " done")
 		}
 	}
@@ -266,9 +285,17 @@ func (m *progressModel) View(w, h int) string {
 	case progRunning:
 		foot = []string{" " + m.spin.View() + styleDim.Render(" working…")}
 	case progDone:
-		foot = []string{" " + styleOK.Render("done") + "  " + keyHelp("enter", "back to packages")}
+		back := "back to packages"
+		if m.op.done != nil {
+			back = "back"
+		}
+		foot = []string{" " + styleOK.Render("done") + "  " + keyHelp("enter", back)}
 	case progFailed:
-		foot = []string{" " + styleErr.Render(m.fail.Error()), " " + keyHelp("enter", "go back")}
+		help := keyHelp("enter", "go back")
+		if m.op.fixIn != nil {
+			help = keyHelp("enter", "go back", "l", "launch a harness in the session to fix it")
+		}
+		foot = []string{" " + styleErr.Render(m.fail.Error()), " " + help}
 	case progAskReuse:
 		var be *core.BranchExistsError
 		errors.As(m.fail, &be)

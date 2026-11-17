@@ -108,7 +108,7 @@ func (e *FinishBlockedError) Error() string {
 			parts = append(parts, fmt.Sprintf("%s (rebase onto %s stopped on conflicts in %s)", m.Name, m.Into, strings.Join(m.Conflicts, ", ")))
 		}
 	}
-	return ErrRefused.Error() + ": cannot finish " + e.Result.Package + "/" + e.Result.Session + ": " + strings.Join(parts, "; ")
+	return "refused: cannot finish " + e.Result.Package + "/" + e.Result.Session + ": " + strings.Join(parts, "; ")
 }
 
 // Is makes errors.Is(err, ErrRefused) true.
