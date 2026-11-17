@@ -51,6 +51,8 @@ Add `eval "$(vmono shell-init zsh)"` (or `bash`, `fish`, `pwsh`) to your shell r
 
 `vmono` with no arguments opens a full-screen console in the spirit of k9s: a header with your config and the keys for the current view, a framed table with its title in the border, breadcrumbs and notices along the bottom.
 
+![The vmono TUI showing the packages view](docs/vmono-ex.png)
+
 | View | Opened by | Shows |
 | --- | --- | --- |
 | packages | start, `:packages` | Every package: members (`2A 1R` = two active, one reference), session count, harness, clean or dirty (any session), last opened. A package from before sessions shows `migrate` |
