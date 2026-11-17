@@ -511,3 +511,41 @@ func TestSetIntoChangesLandingBranchesAcrossMembers(t *testing.T) {
 		t.Error("main must not move once the session lands on release")
 	}
 }
+
+// TestSessionOnARepoWithNoOriginHeadCountsItsOwnCommits covers a source whose
+// origin/HEAD was never set, so the member's base falls back to what the
+// source has checked out. That fallback once resolved to the literal "HEAD",
+// which inside the session worktree is the session branch, so status and
+// finish saw nothing to land however much work the session held.
+func TestSessionOnARepoWithNoOriginHeadCountsItsOwnCommits(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	testutil.Git(t, a, "remote", "set-head", "origin", "--delete")
+	if gitx.RefExists(a, "origin/HEAD") {
+		t.Fatal("origin/HEAD should be gone for this test")
+	}
+	_, s := newWork(t, c, request("nohead", []string{a}, nil))
+	wt := filepath.Join(s.Dir, "alpha")
+	commitIn(t, wt, "one.txt")
+	commitIn(t, wt, "two.txt")
+
+	status := c.Status(s)
+	if got := status.Members[0]; got.Into != "main" || got.ToLand != 2 {
+		t.Errorf("status = into %q, to land %d; want main, 2", got.Into, got.ToLand)
+	}
+	plan := c.PlanFinish(s, FinishOptions{})
+	if m := member(t, FinishResult{Members: plan.Members}, "alpha"); m.Status != LandReady || m.Commits != 2 {
+		t.Errorf("plan = %+v", m)
+	}
+
+	res, err := c.Finish(s, FinishOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := member(t, res, "alpha"); m.Status != LandLanded || m.Commits != 2 {
+		t.Errorf("row = %+v", m)
+	}
+	if got, want := sha(t, a, "main"), sha(t, a, s.S.Branch); got != want {
+		t.Errorf("main = %s, want the session tip %s", got, want)
+	}
+}

@@ -107,9 +107,15 @@ func TestFallbackWithoutRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref, fell := ResolveDefaultRef(dir, "origin/HEAD")
-	if ref != "HEAD" || !fell {
+	if ref != "refs/heads/main" || !fell {
 		t.Errorf("fallback = %q, %v", ref, fell)
 	}
+	testutil.Git(t, dir, "checkout", "--quiet", "--detach")
+	ref, fell = ResolveDefaultRef(dir, "origin/HEAD")
+	if want, _ := ResolveRef(dir, "HEAD"); ref != want || !fell {
+		t.Errorf("detached fallback = %q, %v, want the commit %s", ref, fell, want)
+	}
+	testutil.Git(t, dir, "checkout", "--quiet", "main")
 	if err := Fetch(dir); err != nil {
 		t.Errorf("Fetch without remotes should be a no-op: %v", err)
 	}

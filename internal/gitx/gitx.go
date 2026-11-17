@@ -280,7 +280,17 @@ func ResolveRef(repo, ref string) (string, error) {
 
 // ResolveDefaultRef returns the ref to use when a manifest says
 // "origin/HEAD". If origin/HEAD does not exist (for example the repo has no
-// remote), it falls back to HEAD and reports fellBack=true.
+// remote, or a clone whose origin/HEAD was never set), it falls back to what
+// the repo has checked out and reports fellBack=true.
+//
+// The fallback is never the literal "HEAD". A ref returned here is also
+// evaluated inside session worktrees, where "HEAD" is the session branch
+// itself: a base of "HEAD" there makes every one of the session's own commits
+// look like they are already on the base, so status and finish see nothing to
+// land. The fallback is therefore pinned to the source's checked-out branch
+// as a full ref name (refs/heads/<branch>, which every worktree of the repo
+// resolves the same way), or to a commit id when the source has a detached
+// HEAD or the checkout cannot be named.
 func ResolveDefaultRef(repo, ref string) (resolved string, fellBack bool) {
 	if ref == "" {
 		ref = "origin/HEAD"
@@ -288,10 +298,16 @@ func ResolveDefaultRef(repo, ref string) (resolved string, fellBack bool) {
 	if RefExists(repo, ref) {
 		return ref, false
 	}
-	if ref == "origin/HEAD" {
-		return "HEAD", true
+	if ref != "origin/HEAD" {
+		return ref, false
 	}
-	return ref, false
+	if out, err := run(repo, "symbolic-ref", "--quiet", "HEAD"); err == nil && out != "" && RefExists(repo, out) {
+		return out, true
+	}
+	if id, err := ResolveRef(repo, "HEAD"); err == nil {
+		return id, true
+	}
+	return "HEAD", true
 }
 
 // BranchExists reports whether a local branch exists.
