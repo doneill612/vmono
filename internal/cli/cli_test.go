@@ -777,3 +777,65 @@ func TestIntoBelongsToASession(t *testing.T) {
 		t.Errorf("session.toml = %q, %v", data, err)
 	}
 }
+
+func TestSessionIntoIsPerMember(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	testutil.Git(t, b, "checkout", "--quiet", "-b", "develop")
+	if _, stderr, err := run(t, "new", "demo", "--active", a+","+b, "--session", "work"); err != nil {
+		t.Fatalf("new: %v\n%s", err, stderr)
+	}
+
+	read := func() map[string]string {
+		t.Helper()
+		out, _, err := run(t, "session", "into", "demo/work", "--json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rows []struct {
+			Member string `json:"member"`
+			Into   string `json:"into"`
+		}
+		if err := json.Unmarshal([]byte(out), &rows); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		got := map[string]string{}
+		for _, r := range rows {
+			got[r.Member] = r.Into
+		}
+		return got
+	}
+	if got := read(); got["alpha"] != "main" || got["beta"] != "develop" || len(got) != 2 {
+		t.Errorf("each member should land where its source was checked out: %v", got)
+	}
+
+	text, _, err := run(t, "session", "into", "demo/work", "--all", "release", "--member", "beta=hotfix")
+	if err != nil || !strings.Contains(text, "alpha") || !strings.Contains(text, "release") || !strings.Contains(text, "hotfix") {
+		t.Errorf("session into = %q, %v", text, err)
+	}
+	if got := read(); got["alpha"] != "release" || got["beta"] != "hotfix" {
+		t.Errorf("after the change: %v", got)
+	}
+
+	for name, args := range map[string][]string{
+		"unknown member":       {"session", "into", "demo/work", "--member", "ghost=x"},
+		"member without =":     {"session", "into", "demo/work", "--member", "beta"},
+		"two branches for all": {"session", "finish", "demo/work", "--dry-run", "--into", "a", "--into", "b"},
+		"empty member":         {"session", "finish", "demo/work", "--dry-run", "--into", "=x"},
+	} {
+		if _, _, err := run(t, args...); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if _, _, err := run(t, "new", "other", "--active", a, "--into", "alpha=x"); err == nil {
+		t.Error("--into without --session must still be rejected")
+	}
+	if _, stderr, err := run(t, "session", "new", "demo", "second", "--into", "beta=feature/y"); err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	out, _, _ := run(t, "session", "into", "demo/second", "--json")
+	if !strings.Contains(out, "feature/y") || !strings.Contains(out, "main") {
+		t.Errorf("per-member --into at create: %s", out)
+	}
+}

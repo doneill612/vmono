@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -90,6 +91,33 @@ func printEvent(w io.Writer, ev apply.Event) {
 	case apply.StatusUndone:
 		fprintf(w, "  undo  %-14s %s\n", who, ev.Step)
 	}
+}
+
+// intoHelp describes the repeatable --into flag.
+const intoHelp = "landing branch: BRANCH for every member, or MEMBER=BRANCH for one (repeatable)"
+
+// parseInto splits --into values into the branch for every member and the
+// branches for individual members. A value is MEMBER=BRANCH when it has an
+// "=" with a member name before it, and otherwise a branch for every member.
+func parseInto(vals []string) (all string, byMember map[string]string, err error) {
+	for _, v := range vals {
+		member, branch, ok := strings.Cut(v, "=")
+		if !ok {
+			if all != "" {
+				return "", nil, fmt.Errorf("--into names two branches for every member (%q and %q); use MEMBER=BRANCH for one member", all, v)
+			}
+			all = v
+			continue
+		}
+		if member == "" || branch == "" {
+			return "", nil, fmt.Errorf("--into %q: expected MEMBER=BRANCH", v)
+		}
+		if byMember == nil {
+			byMember = map[string]string{}
+		}
+		byMember[member] = branch
+	}
+	return all, byMember, nil
 }
 
 // packageArg returns the optional package argument.
