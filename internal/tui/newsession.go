@@ -12,26 +12,29 @@ import (
 )
 
 // sessionPrompt is the dialog that starts a session of a package: a name,
-// and optionally a branch and a landing branch. The branch field shows the
-// default it will use, <branch_prefix><package>/<session>, as its
-// placeholder; the into field is the branch the work lands on when the
-// session is finished, and the session starts from it when it exists. Enter runs the
-// create on the progress screen, which ends at the harness picker, so
-// creating a package and starting its first session still ends at a
-// running harness.
+// optionally a branch, and a landing branch for each active member. The
+// branch field shows the default it will use,
+// <branch_prefix><package>/<session>, as its placeholder. Each member's into
+// field starts as the branch its source repo has checked out, which is where
+// its work lands when the session is finished; a landing branch other than
+// the member's base branch is also where the session starts from, when it
+// exists. Enter runs the create on the progress screen, which ends at the
+// harness picker, so creating a package and starting its first session
+// still ends at a running harness.
 type sessionPrompt struct {
 	e      *env
 	pkg    string
 	name   textinput.Model
 	branch textinput.Model
-	into   textinput.Model
-	// focus is the field with the keyboard: 0 name, 1 branch, 2 into.
+	into   intoFields
+	// focus is the field with the keyboard: 0 name, 1 branch, then one per
+	// member in into.
 	focus int
 	msg   string
 }
 
-// promptFields is the number of text fields in the prompt.
-const promptFields = 3
+// promptFields is the number of fields in the prompt.
+func (m *sessionPrompt) promptFields() int { return 2 + m.into.count() }
 
 // newSessionPrompt builds the prompt for a new session of pkg.
 func newSessionPrompt(e *env, pkg string) *sessionPrompt {
@@ -45,12 +48,17 @@ func newSessionPrompt(e *env, pkg string) *sessionPrompt {
 	b.Prompt = "branch:  "
 	b.CharLimit = 200
 	b.Width = 48
-	i := newTextInput()
-	i.Prompt = "into:    "
-	i.CharLimit = 200
-	i.Width = 48
-	i.Placeholder = "each member's base branch, usually main"
-	m := &sessionPrompt{e: e, pkg: pkg, name: n, branch: b, into: i}
+	var members []string
+	var defaults map[string]string
+	if p, err := e.core.Load(pkg); err == nil {
+		for _, mem := range p.M.Members {
+			if mem.Mode == manifest.ModeActive {
+				members = append(members, mem.Name)
+			}
+		}
+		defaults = e.core.DefaultLanding(p)
+	}
+	m := &sessionPrompt{e: e, pkg: pkg, name: n, branch: b, into: newIntoFields(members, defaults)}
 	m.syncPlaceholder()
 	return m
 }
@@ -85,19 +93,22 @@ func (m *sessionPrompt) Crumb() string { return "" }
 // Hints implements screen.
 func (m *sessionPrompt) Hints() []hint { return nil }
 
-// setFocus gives the keyboard to field i, taking it from the others.
+// setFocus gives the keyboard to field i, wrapping around at either end, and
+// takes it from the others.
 func (m *sessionPrompt) setFocus(i int) tea.Cmd {
-	m.focus = (i + promptFields) % promptFields
+	n := m.promptFields()
+	m.focus = (i + n) % n
 	m.name.Blur()
 	m.branch.Blur()
-	m.into.Blur()
 	switch m.focus {
 	case 0:
+		m.into.focus(-1)
 		return m.name.Focus()
 	case 1:
+		m.into.focus(-1)
 		return m.branch.Focus()
 	}
-	return m.into.Focus()
+	return m.into.focus(m.focus - 2)
 }
 
 // Update implements screen.
@@ -125,7 +136,7 @@ func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
 	case 1:
 		m.branch, cmd = m.branch.Update(msg)
 	default:
-		m.into, cmd = m.into.Update(msg)
+		cmd = m.into.update(m.focus-2, msg)
 	}
 	return m, cmd
 }
@@ -147,13 +158,13 @@ func (m *sessionPrompt) submit() (screen, tea.Cmd) {
 		m.msg = fmt.Sprintf("%s already has a session named %q", pkg, name)
 		return m, m.setFocus(0)
 	}
-	branch, into := strings.TrimSpace(m.branch.Value()), strings.TrimSpace(m.into.Value())
+	branch, into := strings.TrimSpace(m.branch.Value()), m.into.values()
 	return m, goTo(newProgress(m.e, operation{
 		title:   "Start " + pkg + "/" + name,
 		pkg:     pkg,
 		session: name,
 		run: func(force, reuse bool) error {
-			_, err := c.CreateSession(p, name, core.SessionOptions{Branch: branch, Into: into, ReuseBranch: reuse})
+			_, err := c.CreateSession(p, name, core.SessionOptions{Branch: branch, IntoByMember: into, ReuseBranch: reuse})
 			return err
 		},
 		back: func() screen { return m },
@@ -166,9 +177,9 @@ func (m *sessionPrompt) View(w, h int) string {
 	b.WriteString(" " + styleDim.Render("package ") + styleLabel.Render(m.pkg) + "\n\n")
 	b.WriteString(" " + m.name.View() + "\n")
 	b.WriteString(" " + m.branch.View() + "\n")
-	b.WriteString(" " + m.into.View() + "\n")
-	b.WriteString("\n " + styleDim.Render("Every member of the package gets a worktree on the branch.") + "\n")
-	b.WriteString(" " + styleDim.Render("Finishing the session lands its work on the into branch.") + "\n")
+	b.WriteString(m.into.view())
+	b.WriteString("\n " + styleDim.Render("Every member gets a worktree on the branch. Finishing the session lands") + "\n")
+	b.WriteString(" " + styleDim.Render("each member's work on its into branch, which starts as its checked-out branch.") + "\n")
 	if m.msg != "" {
 		b.WriteString(" " + styleErr.Render(m.msg) + "\n")
 	}

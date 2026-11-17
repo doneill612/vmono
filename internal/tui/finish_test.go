@@ -155,31 +155,113 @@ func TestFinishedSessionsSortBelowTheRest(t *testing.T) {
 	}
 }
 
-func TestSessionPromptTakesALandingBranch(t *testing.T) {
+func TestSessionPromptPrefillsEachMembersCheckedOutBranch(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
-	seed(t, env, "pay", a)
-	testutil.Git(t, a, "branch", "feature")
+	b := env.NewSource(t, "beta")
+	seed(t, env, "pay", a, b)
+	testutil.Git(t, b, "checkout", "--quiet", "-b", "develop")
 	d := newDriver(t, env, "")
 
 	d.key("enter", "n")
-	d.has("into:", "each member's base branch")
+	d.has("into alpha", "main", "into beta", "develop")
 	d.typeText("stacked")
-	d.key("tab", "tab") // name -> branch -> into
-	d.typeText("feature")
-	d.key("shift+tab", "shift+tab") // back to name
-	d.key("tab", "tab")             // forward to into again, which must still hold its text
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 
 	data, err := os.ReadFile(filepath.Join(env.PackageRoot, "pay", "stacked", ".vmono", "session.toml"))
-	if err != nil || !containsText(string(data), "alpha = \"feature\"") {
+	if err != nil || !containsText(string(data), "alpha = \"main\"") || !containsText(string(data), "beta = \"develop\"") {
 		t.Errorf("session.toml = %q, %v", data, err)
+	}
+}
+
+func TestSessionPromptLandingBranchCanBeEditedPerMember(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	seed(t, env, "pay", a, b)
+	testutil.Git(t, a, "branch", "feature")
+	d := newDriver(t, env, "")
+
+	d.key("enter", "n")
+	d.typeText("stacked")
+	d.key("tab", "tab") // name -> branch -> alpha's into
+	for range "main" {
+		d.key("backspace")
+	}
+	d.typeText("feature")
+	d.key("tab", "shift+tab") // to beta's field and back: the text stays
+	d.has("feature")
+	d.key("enter")
+	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+
+	data, _ := os.ReadFile(filepath.Join(env.PackageRoot, "pay", "stacked", ".vmono", "session.toml"))
+	if !containsText(string(data), "alpha = \"feature\"") || !containsText(string(data), "beta = \"main\"") {
+		t.Errorf("session.toml = %q", data)
 	}
 	want := testutil.Git(t, a, "rev-parse", "feature")
 	if got := testutil.Git(t, filepath.Join(env.PackageRoot, "pay", "stacked", "alpha"), "rev-parse", "HEAD"); got != want {
-		t.Errorf("the session should start at feature: %s, want %s", got, want)
+		t.Errorf("alpha should start at feature: %s, want %s", got, want)
 	}
+}
+
+func TestFinishDialogChangesLandingBranches(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	seed(t, env, "pay", a, b)
+	commitInSession(t, env, "pay", "work", "alpha", "one.txt")
+	commitInSession(t, env, "pay", "work", "beta", "two.txt")
+	d := newDriver(t, env, "")
+
+	d.key("enter", "F")
+	d.has("alpha", "1 commit → main", "beta")
+	d.key("i")
+	d.has("landing branches", "into alpha", "into beta")
+	d.key("tab") // beta's field
+	for range "main" {
+		d.key("backspace")
+	}
+	d.typeText("release")
+	d.key("enter")
+	d.has("finish session", "1 commit → release", "new branch")
+	d.has("1 commit → main") // alpha is unchanged
+	d.key("y")
+	d.eventually(func() bool { return containsView(d, "done") }, "finish to complete")
+	if !gitBranchExists(t, b, "release") {
+		t.Error("beta should have landed on the new release branch")
+	}
+	if testutil.Git(t, a, "rev-parse", "main") != testutil.Git(t, filepath.Join(env.PackageRoot, "pay", "work", "alpha"), "rev-parse", "HEAD") {
+		t.Error("alpha should still land on main")
+	}
+}
+
+func TestLandingBranchEditorRefusesBadNames(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	seed(t, env, "pay", a)
+	d := newDriver(t, env, "")
+
+	d.key("enter", "F", "i")
+	for range "main" {
+		d.key("backspace")
+	}
+	d.typeText("bad name")
+	d.key("enter")
+	d.has("landing branches", "not a valid branch name")
+	data, _ := os.ReadFile(filepath.Join(env.PackageRoot, "pay", "work", ".vmono", "session.toml"))
+	if containsText(string(data), "bad name") {
+		t.Errorf("a refused change must not be saved: %s", data)
+	}
+	d.key("esc")
+	d.has("finish session", "alpha")
+	d.lacks("into alpha", "not a valid branch name")
+}
+
+// gitBranchExists reports whether repo has a local branch of that name.
+func gitBranchExists(t *testing.T, repo, branch string) bool {
+	t.Helper()
+	return testutil.Git(t, repo, "branch", "--list", branch) != ""
 }
 
 // containsText reports whether s contains sub.

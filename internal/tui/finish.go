@@ -77,6 +77,10 @@ func (m *finishConfirm) Update(msg tea.Msg) (screen, tea.Cmd) {
 			req := LaunchRequest{Package: m.pkg, Session: m.session}
 			return m, func() tea.Msg { return launchMsg{req} }
 		}
+	case "i":
+		if len(m.plan.Members) > 0 {
+			return m, goTo(newIntoEditor(m.e, m.pkg, m.session, m.plan))
+		}
 	case "c":
 		if !m.blocked() {
 			m.closeAfter = !m.closeAfter
@@ -151,7 +155,7 @@ func (m *finishConfirm) View(w, h int) string {
 	switch {
 	case m.blocked():
 		b.WriteString(" " + styleWarn.Render("Nothing lands until every member above can.") + "\n ")
-		b.WriteString(keyHelp("l", "launch harness in the session", "esc", "back"))
+		b.WriteString(keyHelp("l", "launch harness in the session", "i", "change landing branches", "esc", "back"))
 	default:
 		if m.landable() == 0 {
 			b.WriteString(" No member has commits of its own to land. Finishing only marks\n the session finished.\n\n")
@@ -163,7 +167,7 @@ func (m *finishConfirm) View(w, h int) string {
 			box = "[x]"
 		}
 		b.WriteString(" " + box + " also remove the session once its work has landed\n\n ")
-		b.WriteString(keyHelp("y", "finish", "c", "toggle remove", "esc", "cancel"))
+		b.WriteString(keyHelp("y", "finish", "i", "change landing branches", "c", "toggle remove", "esc", "cancel"))
 	}
 	width := w - 8
 	if width > 84 {
