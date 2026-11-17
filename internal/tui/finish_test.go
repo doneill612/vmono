@@ -154,3 +154,33 @@ func TestFinishedSessionsSortBelowTheRest(t *testing.T) {
 		t.Errorf("a finished session belongs below the rest, got %+v", rows)
 	}
 }
+
+func TestSessionPromptTakesALandingBranch(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	seed(t, env, "pay", a)
+	testutil.Git(t, a, "branch", "feature")
+	d := newDriver(t, env, "")
+
+	d.key("enter", "n")
+	d.has("into:", "each member's base branch")
+	d.typeText("stacked")
+	d.key("tab", "tab") // name -> branch -> into
+	d.typeText("feature")
+	d.key("shift+tab", "shift+tab") // back to name
+	d.key("tab", "tab")             // forward to into again, which must still hold its text
+	d.key("enter")
+	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+
+	data, err := os.ReadFile(filepath.Join(env.PackageRoot, "pay", "stacked", ".vmono", "session.toml"))
+	if err != nil || !containsText(string(data), `into    = "feature"`) {
+		t.Errorf("session.toml = %q, %v", data, err)
+	}
+	want := testutil.Git(t, a, "rev-parse", "feature")
+	if got := testutil.Git(t, filepath.Join(env.PackageRoot, "pay", "stacked", "alpha"), "rev-parse", "HEAD"); got != want {
+		t.Errorf("the session should start at feature: %s, want %s", got, want)
+	}
+}
+
+// containsText reports whether s contains sub.
+func containsText(s, sub string) bool { return indexOf(s, sub) >= 0 }

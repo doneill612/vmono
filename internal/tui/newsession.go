@@ -12,8 +12,10 @@ import (
 )
 
 // sessionPrompt is the dialog that starts a session of a package: a name,
-// and optionally a branch. The branch field shows the default it will use,
-// <branch_prefix><package>/<session>, as its placeholder. Enter runs the
+// and optionally a branch and a landing branch. The branch field shows the
+// default it will use, <branch_prefix><package>/<session>, as its
+// placeholder; the into field is the branch the work lands on when the
+// session is finished, and the session starts from it when it exists. Enter runs the
 // create on the progress screen, which ends at the harness picker, so
 // creating a package and starting its first session still ends at a
 // running harness.
@@ -22,10 +24,14 @@ type sessionPrompt struct {
 	pkg    string
 	name   textinput.Model
 	branch textinput.Model
-	// focus is 0 for the name field and 1 for the branch field.
+	into   textinput.Model
+	// focus is the field with the keyboard: 0 name, 1 branch, 2 into.
 	focus int
 	msg   string
 }
+
+// promptFields is the number of text fields in the prompt.
+const promptFields = 3
 
 // newSessionPrompt builds the prompt for a new session of pkg.
 func newSessionPrompt(e *env, pkg string) *sessionPrompt {
@@ -39,7 +45,12 @@ func newSessionPrompt(e *env, pkg string) *sessionPrompt {
 	b.Prompt = "branch:  "
 	b.CharLimit = 200
 	b.Width = 48
-	m := &sessionPrompt{e: e, pkg: pkg, name: n, branch: b}
+	i := newTextInput()
+	i.Prompt = "into:    "
+	i.CharLimit = 200
+	i.Width = 48
+	i.Placeholder = "each member's base branch, usually main"
+	m := &sessionPrompt{e: e, pkg: pkg, name: n, branch: b, into: i}
 	m.syncPlaceholder()
 	return m
 }
@@ -74,15 +85,19 @@ func (m *sessionPrompt) Crumb() string { return "" }
 // Hints implements screen.
 func (m *sessionPrompt) Hints() []hint { return nil }
 
-// setFocus moves the focus between the two fields.
+// setFocus gives the keyboard to field i, taking it from the others.
 func (m *sessionPrompt) setFocus(i int) tea.Cmd {
-	m.focus = i
-	if i == 0 {
-		m.branch.Blur()
-		return m.name.Focus()
-	}
+	m.focus = (i + promptFields) % promptFields
 	m.name.Blur()
-	return m.branch.Focus()
+	m.branch.Blur()
+	m.into.Blur()
+	switch m.focus {
+	case 0:
+		return m.name.Focus()
+	case 1:
+		return m.branch.Focus()
+	}
+	return m.into.Focus()
 }
 
 // Update implements screen.
@@ -94,18 +109,23 @@ func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch k.String() {
 	case "esc":
 		return m, pop()
-	case "tab", "shift+tab", "down", "up":
-		return m, m.setFocus(1 - m.focus)
+	case "tab", "down":
+		return m, m.setFocus(m.focus + 1)
+	case "shift+tab", "up":
+		return m, m.setFocus(m.focus - 1)
 	case "enter":
 		return m.submit()
 	}
 	m.msg = ""
 	var cmd tea.Cmd
-	if m.focus == 0 {
+	switch m.focus {
+	case 0:
 		m.name, cmd = m.name.Update(msg)
 		m.syncPlaceholder()
-	} else {
+	case 1:
 		m.branch, cmd = m.branch.Update(msg)
+	default:
+		m.into, cmd = m.into.Update(msg)
 	}
 	return m, cmd
 }
@@ -127,13 +147,13 @@ func (m *sessionPrompt) submit() (screen, tea.Cmd) {
 		m.msg = fmt.Sprintf("%s already has a session named %q", pkg, name)
 		return m, m.setFocus(0)
 	}
-	branch := strings.TrimSpace(m.branch.Value())
+	branch, into := strings.TrimSpace(m.branch.Value()), strings.TrimSpace(m.into.Value())
 	return m, goTo(newProgress(m.e, operation{
 		title:   "Start " + pkg + "/" + name,
 		pkg:     pkg,
 		session: name,
 		run: func(force, reuse bool) error {
-			_, err := c.CreateSession(p, name, core.SessionOptions{Branch: branch, ReuseBranch: reuse})
+			_, err := c.CreateSession(p, name, core.SessionOptions{Branch: branch, Into: into, ReuseBranch: reuse})
 			return err
 		},
 		back: func() screen { return m },
@@ -146,7 +166,9 @@ func (m *sessionPrompt) View(w, h int) string {
 	b.WriteString(" " + styleDim.Render("package ") + styleLabel.Render(m.pkg) + "\n\n")
 	b.WriteString(" " + m.name.View() + "\n")
 	b.WriteString(" " + m.branch.View() + "\n")
+	b.WriteString(" " + m.into.View() + "\n")
 	b.WriteString("\n " + styleDim.Render("Every member of the package gets a worktree on the branch.") + "\n")
+	b.WriteString(" " + styleDim.Render("Finishing the session lands its work on the into branch.") + "\n")
 	if m.msg != "" {
 		b.WriteString(" " + styleErr.Render(m.msg) + "\n")
 	}
