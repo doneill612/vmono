@@ -628,20 +628,39 @@ func StatusOf(path string) (Status, error) {
 // Unpushed counts commits in the worktree that exist on no remote. With an
 // upstream it is the commits ahead of it; without one it is commits
 // reachable from HEAD but from no remote-tracking ref, so a branch with
-// nothing new beyond its base counts zero.
-func Unpushed(path string) (int, error) {
+// nothing new beyond its base counts zero. Commits already on one of the
+// local branches in landedOn are not counted either: they have landed in the
+// source repo, which outlives the worktree. Names of branches that do not
+// exist are ignored.
+func Unpushed(path string, landedOn ...string) (int, error) {
+	args := []string{"rev-list", "--count", "HEAD", "--not"}
 	if _, err := run(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil {
-		out, err := run(path, "rev-list", "--count", "@{upstream}..HEAD")
-		if err != nil {
-			return 0, err
-		}
-		return strconv.Atoi(out)
+		args = append(args, "@{upstream}")
+	} else {
+		args = append(args, "--remotes")
 	}
-	out, err := run(path, "rev-list", "--count", "HEAD", "--not", "--remotes")
+	for _, b := range landedOn {
+		if b != "" && BranchExists(path, b) {
+			args = append(args, "refs/heads/"+b)
+		}
+	}
+	out, err := run(path, args...)
 	if err != nil {
 		return 0, err
 	}
 	return strconv.Atoi(out)
+}
+
+// DefaultBranch returns the name of the branch a repo's work normally lands
+// on: the one origin/HEAD points at, or, for a repo with no remote HEAD, the
+// branch it has checked out. It returns "" when neither is known.
+func DefaultBranch(repo string) string {
+	if out, err := run(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		if _, branch, ok := strings.Cut(out, "/"); ok && branch != "" {
+			return branch
+		}
+	}
+	return CurrentBranch(repo)
 }
 
 // Init creates a repository at path (creating the directory) on branch.

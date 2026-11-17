@@ -118,3 +118,75 @@ func TestCreateSessionRejectsBadInto(t *testing.T) {
 		}
 	}
 }
+
+// commitIn writes a file in dir and commits it.
+func commitIn(t *testing.T, dir, name string) {
+	t.Helper()
+	testutil.WriteFile(t, filepath.Join(dir, name), name+"\n")
+	testutil.Git(t, dir, "add", "-A")
+	testutil.Git(t, dir, "commit", "--quiet", "-m", "add "+name)
+}
+
+func TestCommitsOnTheLandingBranchAreSafeToDelete(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	p, s := newWork(t, c, request("landed", []string{a}, nil))
+	wt := filepath.Join(s.Dir, "alpha")
+
+	commitIn(t, wt, "work.txt")
+	rows := c.SafetyCheck(s)
+	if len(rows) != 1 || rows[0].Unpushed != 1 {
+		t.Fatalf("a commit on no remote and no landing branch must count: %+v", rows)
+	}
+
+	// Land it by hand on the source's local main, which is not pushed anywhere.
+	testutil.Git(t, a, "merge", "--ff-only", "--quiet", s.S.Branch)
+	rows = c.SafetyCheck(s)
+	if bad := unsafeOf(rows); len(bad) != 0 {
+		t.Fatalf("work that landed on main must not block removal: %+v", bad)
+	}
+
+	res, err := c.DeleteSession(s, DeleteOptions{DeleteBranches: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gitx.BranchExists(a, s.S.Branch) {
+		t.Errorf("a branch merged into the landing branch should be deleted: %+v", res)
+	}
+	if !gitx.BranchExists(a, "main") {
+		t.Fatal("the landing branch itself must survive")
+	}
+	if _, err := c.Load(p.Name); err != nil {
+		t.Errorf("deleting a session must keep its package: %v", err)
+	}
+}
+
+func TestExplicitIntoDecidesWhatCountsAsLanded(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	featureBranch(t, a, "feature")
+	p := mustPackage(t, c, request("explicit", []string{a}, nil))
+	s, err := c.CreateSession(p, "work", SessionOptions{Into: "feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitIn(t, filepath.Join(s.Dir, "alpha"), "work.txt")
+
+	// main is not where this session lands, so landing there proves nothing
+	// about feature; the session still has work only its own branch holds.
+	if rows := c.SafetyCheck(s); rows[0].Unpushed != 1 {
+		t.Fatalf("before landing: %+v", rows)
+	}
+	// Move feature itself to the session's tip, without touching main.
+	tip, _ := gitx.ResolveRef(a, s.S.Branch)
+	if err := gitx.UpdateRefCAS(a, "refs/heads/feature", tip, "", "test"); err == nil {
+		t.Fatal("feature exists already; creating it must fail")
+	}
+	old, _ := gitx.ResolveRef(a, "feature")
+	if err := gitx.UpdateRefCAS(a, "refs/heads/feature", tip, old, "test: land"); err != nil {
+		t.Fatal(err)
+	}
+	if bad := unsafeOf(c.SafetyCheck(s)); len(bad) != 0 {
+		t.Fatalf("work on the explicit landing branch must be safe: %+v", bad)
+	}
+}

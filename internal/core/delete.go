@@ -11,6 +11,21 @@ import (
 	"github.com/doneill612/vmono/internal/paths"
 )
 
+// landingBranch returns the local branch in a member's source repo that the
+// session's work lands on: the session's explicit landing branch, else the
+// branch named by the member's base, else the source's default branch. The
+// second result is true when the session named the branch itself. It is ""
+// for a reference member, which has no work of its own to land.
+func landingBranch(s *Session, mem manifest.Member, src string) (branch string, explicit bool) {
+	if mem.Mode != manifest.ModeActive {
+		return "", false
+	}
+	if branch, explicit = s.S.IntoFor(mem); branch != "" {
+		return branch, explicit
+	}
+	return gitx.DefaultBranch(src), false
+}
+
 // MemberSafety is the result of the pre-delete check for one member of one
 // session: work that removing its worktree would discard.
 type MemberSafety struct {
@@ -65,7 +80,10 @@ func (e *RefusedError) Is(target error) bool { return target == ErrRefused }
 
 // Safety checks the given members of a session for work that would be lost
 // if their worktrees were removed: dirty files, untracked files, and commits
-// on no remote. Members whose directory is already gone are safe.
+// on no remote. Commits that have landed on the member's landing branch in
+// its source repo are not counted, since they stay in the repo after the
+// worktree goes, which is what finishing a session does. Members whose
+// directory is already gone are safe.
 func (c *Core) Safety(s *Session, members []manifest.Member) []MemberSafety {
 	out := make([]MemberSafety, 0, len(members))
 	for _, mem := range members {
@@ -83,7 +101,11 @@ func (c *Core) Safety(s *Session, members []manifest.Member) []MemberSafety {
 			continue
 		}
 		ms.Dirty, ms.Untracked = st.Dirty, st.Untracked
-		if n, err := gitx.Unpushed(dir); err != nil {
+		var landed string
+		if src, err := paths.Abs(mem.Source); err == nil {
+			landed, _ = landingBranch(s, mem, src)
+		}
+		if n, err := gitx.Unpushed(dir, landed); err != nil {
 			ms.Error = err.Error()
 		} else {
 			ms.Unpushed = n
@@ -233,13 +255,19 @@ func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
 }
 
 // deleteMergedBranch deletes branch from src only when it is fully merged
-// into base. It returns why a branch was kept, or "" if it did not exist.
-func deleteMergedBranch(src, branch, base string) (keptReason string, deleted bool) {
+// into base, or into the local landing branch into, which is where a finished
+// session's work goes. It returns why a branch was kept, or "" if it did not
+// exist.
+func deleteMergedBranch(src, branch, base, into string) (keptReason string, deleted bool) {
 	if !gitx.BranchExists(src, branch) {
 		return "", false
 	}
 	ref, _ := gitx.ResolveDefaultRef(src, base)
-	if !gitx.RefExists(src, ref) || !gitx.IsMerged(src, branch, ref) {
+	merged := gitx.RefExists(src, ref) && gitx.IsMerged(src, branch, ref)
+	if !merged && into != "" && gitx.BranchExists(src, into) && gitx.IsMerged(src, branch, into) {
+		merged = true
+	}
+	if !merged {
 		return "not merged into " + ref, false
 	}
 	if err := gitx.DeleteBranch(src, branch, true); err != nil {
@@ -273,7 +301,8 @@ func (c *Core) removeMemberSteps(s *Session, mem manifest.Member, force, deleteB
 	}}}
 	if deleteBranch && mem.Mode == manifest.ModeActive {
 		steps = append(steps, apply.Step{Member: mem.Name, Name: "delete branch", Run: func(warn func(string)) error {
-			kept, deleted := deleteMergedBranch(src, s.S.Branch, mem.Base)
+			into, _ := landingBranch(s, mem, src)
+			kept, deleted := deleteMergedBranch(src, s.S.Branch, mem.Base, into)
 			if deleted {
 				res.BranchesDeleted = append(res.BranchesDeleted, mem.Name+":"+s.S.Branch)
 			} else if kept != "" {

@@ -447,3 +447,39 @@ func TestRebaseOntoStopsOnConflict(t *testing.T) {
 		t.Error("aborted rebase must not read as in progress")
 	}
 }
+
+func TestUnpushedIgnoresCommitsOnLandedBranches(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "epsilon")
+	wt := filepath.Join(env.Root, "wt", "epsilon")
+	if err := WorktreeAddBranch(src, wt, "vmono/x", "origin/main"); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, wt, "a.txt", "a\n", "work")
+	if n, _ := Unpushed(wt); n != 1 {
+		t.Fatalf("Unpushed = %d, want 1", n)
+	}
+	if n, _ := Unpushed(wt, "", "no-such-branch", "main"); n != 1 {
+		t.Errorf("empty, missing and unrelated branches must not hide commits: %d", n)
+	}
+	testutil.Git(t, src, "merge", "--ff-only", "--quiet", "vmono/x")
+	if n, _ := Unpushed(wt, "main"); n != 0 {
+		t.Errorf("commits on a landed branch must not count: %d", n)
+	}
+	if n, _ := Unpushed(wt); n != 1 {
+		t.Errorf("without naming it, the commit still counts: %d", n)
+	}
+}
+
+func TestDefaultBranch(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "zeta")
+	if got := DefaultBranch(src); got != "main" {
+		t.Errorf("DefaultBranch with origin/HEAD = %q", got)
+	}
+	testutil.Git(t, src, "remote", "remove", "origin")
+	testutil.Git(t, src, "checkout", "--quiet", "-b", "dev")
+	if got := DefaultBranch(src); got != "dev" {
+		t.Errorf("DefaultBranch without a remote falls back to the checked-out branch, got %q", got)
+	}
+}
