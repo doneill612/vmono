@@ -340,8 +340,8 @@ func TestFinishIntoOverrideIsRecorded(t *testing.T) {
 		t.Error("the override branch should be created")
 	}
 	loaded, _ := c.LoadSession(p, s.Name)
-	if loaded.S.Into != "release" {
-		t.Errorf("the override should be recorded, got %q", loaded.S.Into)
+	if loaded.S.Into["alpha"] != "release" {
+		t.Errorf("the override should be recorded, got %v", loaded.S.Into)
 	}
 	if bad := unsafeOf(c.SafetyCheck(loaded)); len(bad) != 0 {
 		t.Errorf("work landed on the recorded branch must count as safe: %+v", bad)
@@ -428,5 +428,35 @@ func TestMovingTheLandingBranchDoesNotReopenAFinishedSession(t *testing.T) {
 	fresh, _ := c.LoadSession(p, s.Name)
 	if got := c.SessionState(fresh); got != SessionFinished {
 		t.Errorf("state = %q; other work landing on main must not reopen it", got)
+	}
+}
+
+func TestFinishOverridesOneMembersLandingBranch(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	p, s := newWork(t, c, request("per-member", []string{a, b}, nil))
+	commitIn(t, filepath.Join(s.Dir, "alpha"), "a.txt")
+	commitIn(t, filepath.Join(s.Dir, "beta"), "b.txt")
+
+	if _, err := c.Finish(s, FinishOptions{IntoByMember: map[string]string{"ghost": "x"}}); err == nil {
+		t.Fatal("a member that is not in the package must be rejected")
+	}
+	res, err := c.Finish(s, FinishOptions{IntoByMember: map[string]string{"beta": "release"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := member(t, res, "alpha"); m.Into != "main" || m.Status != LandLanded {
+		t.Errorf("alpha = %+v", m)
+	}
+	if m := member(t, res, "beta"); m.Into != "release" || !m.Create {
+		t.Errorf("beta = %+v", m)
+	}
+	if !gitx.BranchExists(b, "release") || sha(t, b, "main") == sha(t, b, s.S.Branch) {
+		t.Error("beta should land on release and leave main alone")
+	}
+	loaded, _ := c.LoadSession(p, s.Name)
+	if loaded.S.Into["beta"] != "release" || loaded.S.Into["alpha"] != "main" {
+		t.Errorf("recorded landing branches = %v", loaded.S.Into)
 	}
 }

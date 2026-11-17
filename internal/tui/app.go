@@ -178,7 +178,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case gotoMsg:
 		a.stack[len(a.stack)-1] = m.s
-		return a, m.s.Init()
+		return a, tea.Batch(m.s.Init(), a.refreshBeneath(m.s))
 	case pushMsg:
 		a.stack = append(a.stack, m.s)
 		return a, m.s.Init()
@@ -214,6 +214,25 @@ func (a *App) broadcast(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
 	for i, s := range a.stack {
 		ns, cmd := s.Update(msg)
+		a.stack[i] = ns
+		cmds = append(cmds, cmd)
+	}
+	return tea.Batch(cmds...)
+}
+
+// refreshBeneath tells every screen under the top one to reload when the top
+// screen is a dialog. A goto that ends an operation, such as the "Launch
+// now?" picker replacing the create progress screen, bypasses pop, which is
+// what normally refreshes a revealed screen. Without this the view drawn
+// behind the dialog keeps the data it loaded before the operation ran, for
+// example "No sessions yet" for a session that was just created.
+func (a *App) refreshBeneath(top screen) tea.Cmd {
+	if _, isModal := top.(modalScreen); !isModal {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for i, s := range a.stack[:len(a.stack)-1] {
+		ns, cmd := s.Update(refreshMsg{})
 		a.stack[i] = ns
 		cmds = append(cmds, cmd)
 	}

@@ -24,13 +24,73 @@ type SessionOptions struct {
 	// source repo instead of failing. The CLI requires --reuse-branch; the
 	// TUI asks and retries on BranchExistsError.
 	ReuseBranch bool
-	// Into is the branch the session's work lands on when it is finished. It
-	// is recorded in the session file. When it already exists in a member's
-	// source repo the session branch is cut from it, so several sessions can
-	// build on one feature branch; when it does not, it is created at finish.
-	// Empty means each member's own base branch, and sessions are cut from
-	// base as usual.
-	Into string
+	// Into sets the landing branch of every active member. IntoByMember sets
+	// individual members' and wins over Into. A member given neither lands on
+	// the branch its source repo has checked out when the session is created
+	// (see DefaultLanding). The choices are recorded in the session file.
+	//
+	// A landing branch other than the one the member's base names is also the
+	// session's starting point when it exists in the source, so a session can
+	// build on a feature branch and land back on it. When it does not exist it
+	// is created at finish.
+	Into         string
+	IntoByMember map[string]string
+}
+
+// DefaultLanding returns, for each active member of p, the branch its source
+// repo has checked out: where the user was working, and so where the work
+// most likely belongs. A source on a detached HEAD has no entry, and its
+// member lands on the branch its base names instead.
+func (c *Core) DefaultLanding(p *Package) map[string]string {
+	out := map[string]string{}
+	for _, mem := range p.M.Members {
+		if mem.Mode != manifest.ModeActive {
+			continue
+		}
+		src, err := paths.Abs(mem.Source)
+		if err != nil {
+			continue
+		}
+		if br := gitx.CurrentBranch(src); br != "" {
+			out[mem.Name] = br
+		}
+	}
+	return out
+}
+
+// landingFor builds the landing branches recorded in a new session: the
+// checked-out branch of each active member's source, replaced by opts.Into
+// for all members when given, and by opts.IntoByMember for the members it
+// names. A checked-out branch that is the session's own branch is not a
+// landing branch and is left out; an explicit one is kept, for validation to
+// refuse. It rejects a member that is not an active
+// member of the package.
+func (c *Core) landingFor(p *Package, branch string, opts SessionOptions) (map[string]string, error) {
+	into := c.DefaultLanding(p)
+	for name, b := range into {
+		if b == branch {
+			delete(into, name)
+		}
+	}
+	active := map[string]bool{}
+	for _, mem := range p.M.Members {
+		if mem.Mode == manifest.ModeActive {
+			active[mem.Name] = true
+			if opts.Into != "" {
+				into[mem.Name] = opts.Into
+			}
+		}
+	}
+	for name, b := range opts.IntoByMember {
+		if !active[name] {
+			return nil, fmt.Errorf("--into names %q, which is not an active member of %s", name, p.Name)
+		}
+		into[name] = b
+	}
+	if len(into) == 0 {
+		return nil, nil
+	}
+	return into, nil
 }
 
 // BranchExistsError reports that the session branch already exists in a
@@ -192,49 +252,57 @@ func preflightMembers(m *manifest.Manifest, branch string, srcs map[string]strin
 	return existing, nil
 }
 
-// preflightInto checks an explicit landing branch against every active
-// member's source before a session is created, so a finish never fails late
-// on a branch git could not hold. The name must be a valid branch name, and a
-// branch that does not exist yet must not collide with another branch's ref
-// path, since finish creates it. It does nothing when the session names no
-// landing branch.
+// preflightInto checks each member's recorded landing branch against its
+// source before a session is created, or its landing branches change, so a
+// finish never fails late on a branch git could not hold. The name must be a
+// valid branch name, and a branch that does not exist yet must not collide
+// with another branch's ref path, since finish creates it. Members with no
+// recorded landing branch are skipped.
 func preflightInto(ms *manifest.Session, members []manifest.Member, srcs map[string]string) error {
-	if ms.Into == "" {
-		return nil
-	}
 	for _, mem := range members {
-		if mem.Mode != manifest.ModeActive {
+		into := ms.Into[mem.Name]
+		if mem.Mode != manifest.ModeActive || into == "" {
 			continue
 		}
 		src := srcs[mem.Name]
-		if !gitx.ValidBranchName(src, ms.Into) {
-			return fmt.Errorf("%s: %q is not a valid branch name", mem.Name, ms.Into)
+		if !gitx.ValidBranchName(src, into) {
+			return fmt.Errorf("%s: %q is not a valid branch name", mem.Name, into)
 		}
-		if gitx.BranchExists(src, ms.Into) {
+		if gitx.BranchExists(src, into) {
 			continue
 		}
-		if other, clash := gitx.BranchRefConflict(src, ms.Into); clash {
-			return fmt.Errorf("%s: landing branch %q conflicts with existing branch %q (git cannot hold both); choose a different --into", mem.Name, ms.Into, other)
+		if other, clash := gitx.BranchRefConflict(src, into); clash {
+			return fmt.Errorf("%s: landing branch %q conflicts with existing branch %q (git cannot hold both); choose a different --into", mem.Name, into, other)
 		}
 	}
 	return nil
 }
 
 // cutPoint returns the ref a new session branch for mem is cut from. When the
-// session names a landing branch that exists in the source, either as a local
-// branch or as origin's, the session starts from it. Otherwise it starts from
-// the member's base. A landing branch derived from the base is deliberately
-// not used: the local copy of main can lag behind origin/main, and the
-// manifest's base already says where work starts.
+// member's recorded landing branch is not the branch its base names, and it
+// exists in the source as a local branch or on origin, the session starts
+// from it: the work is meant to build on that branch and land back on it.
+// Otherwise it starts from the member's base. The branch the base names is
+// deliberately not used: the local copy can lag behind origin/main, and the
+// manifest's base already says where ordinary work starts.
 func cutPoint(src string, ms *manifest.Session, mem manifest.Member, warn func(string)) (string, error) {
-	if ms.Into != "" {
-		for _, ref := range []string{"refs/heads/" + ms.Into, "refs/remotes/origin/" + ms.Into} {
+	if into := ms.Into[mem.Name]; into != "" && into != baseBranchOf(src, mem) {
+		for _, ref := range []string{"refs/heads/" + into, "refs/remotes/origin/" + into} {
 			if gitx.RefExists(src, ref) {
 				return ref, nil
 			}
 		}
 	}
 	return resolveRef(src, mem.Base, warn)
+}
+
+// baseBranchOf returns the name of the branch mem's base stands for: the one
+// the base names, else the source's default branch.
+func baseBranchOf(src string, mem manifest.Member) string {
+	if b := manifest.BaseBranch(mem); b != "" {
+		return b
+	}
+	return gitx.DefaultBranch(src)
 }
 
 // CreatePackage defines a new package from a manifest whose members name
@@ -325,8 +393,13 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	if err := manifest.ValidateName(name); err != nil {
 		return nil, err
 	}
-	ms := &manifest.Session{Package: p.Name, Name: name, Branch: opts.Branch, Into: opts.Into, Created: time.Now().Truncate(time.Second)}
+	ms := &manifest.Session{Package: p.Name, Name: name, Branch: opts.Branch, Created: time.Now().Truncate(time.Second)}
 	ms.ApplyDefaults(c.Cfg.BranchPrefix)
+	into, err := c.landingFor(p, ms.Branch, opts)
+	if err != nil {
+		return nil, err
+	}
+	ms.Into = into
 	if err := ms.Validate(); err != nil {
 		return nil, err
 	}

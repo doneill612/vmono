@@ -33,6 +33,25 @@ func TestPackageWithNoSessionsOpensThePromptOnO(t *testing.T) {
 	}
 }
 
+// TestLaunchPickerBackdropShowsTheNewSession guards the view drawn behind the
+// "Launch now?" dialog: it must list the session that was just created, not
+// the empty list loaded before the create ran.
+func TestLaunchPickerBackdropShowsTheNewSession(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	seedPackage(t, env, "bare", env.NewSource(t, "alpha"))
+	d := newDriver(t, env, "")
+
+	d.key("enter") // open the package's empty sessions view
+	d.has("No sessions yet")
+	d.key("n")
+	d.typeText("first")
+	d.key("enter")
+	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+	d.eventually(func() bool { return containsView(d, "clean") }, "backdrop to list the new session")
+	d.lacks("No sessions yet")
+}
+
 func TestSessionPromptValidatesAndOverridesBranch(t *testing.T) {
 	env := testutil.NewEnv(t)
 	seed(t, env, "pay", env.NewSource(t, "alpha"))

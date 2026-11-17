@@ -279,7 +279,7 @@ func (m *sessionsModel) startFinish(session string) tea.Cmd {
 	if err != nil {
 		return flashErr(err.Error())
 	}
-	return push(newFinishConfirm(m.e, m.name, session, c.PlanFinish(s, "")))
+	return push(newFinishConfirm(m.e, m.name, session, c.PlanFinish(s, core.FinishOptions{})))
 }
 
 // syncSessionOp builds the sync operation for one session. Like create it

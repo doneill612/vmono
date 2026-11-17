@@ -173,7 +173,7 @@ func TestSessionPromptTakesALandingBranch(t *testing.T) {
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 
 	data, err := os.ReadFile(filepath.Join(env.PackageRoot, "pay", "stacked", ".vmono", "session.toml"))
-	if err != nil || !containsText(string(data), `into    = "feature"`) {
+	if err != nil || !containsText(string(data), "alpha = \"feature\"") {
 		t.Errorf("session.toml = %q, %v", data, err)
 	}
 	want := testutil.Git(t, a, "rev-parse", "feature")

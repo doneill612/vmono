@@ -34,15 +34,15 @@ func TestCreateSessionRecordsInto(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.S.Into != "feature/x" {
-		t.Errorf("into = %q", s.S.Into)
+	if s.S.Into["alpha"] != "feature/x" {
+		t.Errorf("into = %v", s.S.Into)
 	}
 	loaded, err := c.LoadSession(p, "work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.S.Into != "feature/x" {
-		t.Errorf("into not persisted: %q", loaded.S.Into)
+	if loaded.S.Into["alpha"] != "feature/x" {
+		t.Errorf("into not persisted: %v", loaded.S.Into)
 	}
 	main, _ := gitx.ResolveRef(a, "origin/main")
 	if tip, _ := gitx.ResolveRef(filepath.Join(s.Dir, "alpha"), "HEAD"); tip != main {
@@ -188,5 +188,75 @@ func TestExplicitIntoDecidesWhatCountsAsLanded(t *testing.T) {
 	}
 	if bad := unsafeOf(c.SafetyCheck(s)); len(bad) != 0 {
 		t.Fatalf("work on the explicit landing branch must be safe: %+v", bad)
+	}
+}
+
+func TestSessionRecordsEachMembersCheckedOutBranch(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	g := env.NewSource(t, "gamma")
+	// beta is checked out on a branch with work of its own; gamma is detached.
+	devTip := featureBranch(t, b, "develop")
+	testutil.Git(t, b, "checkout", "--quiet", "develop")
+	testutil.Git(t, g, "checkout", "--quiet", "--detach")
+	p := mustPackage(t, c, request("capture", []string{a, b, g}, nil))
+
+	s, err := c.CreateSession(p, "work", SessionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.S.Into["alpha"] != "main" || s.S.Into["beta"] != "develop" {
+		t.Errorf("into = %v, want each member's checked-out branch", s.S.Into)
+	}
+	if _, ok := s.S.Into["gamma"]; ok {
+		t.Errorf("a detached source has no checked-out branch to record: %v", s.S.Into)
+	}
+	// beta lands on a branch other than its base's, so the session builds on it;
+	// alpha lands on its base's branch, so it starts from origin/main as usual.
+	if got := sha(t, filepath.Join(s.Dir, "beta"), "HEAD"); got != devTip {
+		t.Errorf("beta session starts at %s, want develop's tip %s", got, devTip)
+	}
+	if got, want := sha(t, filepath.Join(s.Dir, "alpha"), "HEAD"), sha(t, a, "origin/main"); got != want {
+		t.Errorf("alpha session starts at %s, want origin/main %s", got, want)
+	}
+	if st := c.Status(s); st.Members[1].Into != "develop" || st.Members[0].Into != "main" || st.Members[2].Into != "main" {
+		t.Errorf("status landing branches = %q %q %q", st.Members[0].Into, st.Members[1].Into, st.Members[2].Into)
+	}
+}
+
+func TestLandingOnTheBaseBranchStillStartsFromBase(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	// A local commit on main that origin lacks must not become the start point.
+	commitIn(t, a, "local-only.txt")
+	p := mustPackage(t, c, request("lag", []string{a}, nil))
+	s, err := c.CreateSession(p, "work", SessionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := sha(t, filepath.Join(s.Dir, "alpha"), "HEAD"), sha(t, a, "origin/main"); got != want {
+		t.Errorf("session starts at %s, want origin/main %s", got, want)
+	}
+}
+
+func TestIntoByMemberOverridesTheCheckedOutBranch(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	p := mustPackage(t, c, request("override", []string{a, b}, nil))
+
+	s, err := c.CreateSession(p, "work", SessionOptions{Into: "release", IntoByMember: map[string]string{"beta": "hotfix"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.S.Into["alpha"] != "release" || s.S.Into["beta"] != "hotfix" {
+		t.Errorf("into = %v", s.S.Into)
+	}
+	if _, err := c.CreateSession(p, "other", SessionOptions{IntoByMember: map[string]string{"ghost": "main"}}); err == nil {
+		t.Error("a member that is not in the package must be rejected")
+	}
+	if _, err := os.Stat(p.SessionDir("other")); !os.IsNotExist(err) {
+		t.Error("a refused session must leave no directory")
 	}
 }

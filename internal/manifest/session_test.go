@@ -97,24 +97,31 @@ func TestSaveLoadAndFindSession(t *testing.T) {
 
 func TestSessionIntoAndFinishedRoundTrip(t *testing.T) {
 	s := sampleSession()
-	s.Into = "feature/PLAT-412"
+	s.Into = map[string]string{"sdk-go": "develop", "api-gateway": "feature/PLAT-412"}
 	s.Finished = time.Date(2026, 11, 17, 15, 4, 5, 0, time.UTC)
-	got, err := ParseSession(EncodeSession(s))
-	if err != nil {
-		t.Fatalf("parse: %v\n%s", err, EncodeSession(s))
+	body := string(EncodeSession(s))
+	if strings.Index(body, "finished") > strings.Index(body, "[into]") {
+		t.Errorf("scalars must come before the [into] table or they would belong to it:\n%s", body)
 	}
-	if got.Into != s.Into || !got.Finished.Equal(s.Finished) {
-		t.Errorf("round trip mismatch: into=%q finished=%v", got.Into, got.Finished)
+	if strings.Index(body, "api-gateway") > strings.Index(body, "sdk-go") {
+		t.Errorf("members should be written in a stable order:\n%s", body)
+	}
+	got, err := ParseSession([]byte(body))
+	if err != nil {
+		t.Fatalf("parse: %v\n%s", err, body)
+	}
+	if got.Into["api-gateway"] != "feature/PLAT-412" || got.Into["sdk-go"] != "develop" || len(got.Into) != 2 || !got.Finished.Equal(s.Finished) {
+		t.Errorf("round trip mismatch: into=%v finished=%v", got.Into, got.Finished)
 	}
 
 	plain, err := ParseSession(EncodeSession(sampleSession()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plain.Into != "" || !plain.Finished.IsZero() {
+	if len(plain.Into) != 0 || !plain.Finished.IsZero() {
 		t.Errorf("unset fields must stay unset: %+v", plain)
 	}
-	body := string(EncodeSession(sampleSession()))
+	body = string(EncodeSession(sampleSession()))
 	if strings.Contains(body, "into") || strings.Contains(body, "finished") {
 		t.Errorf("unset fields must not be written:\n%s", body)
 	}
@@ -126,22 +133,27 @@ func TestSessionFileWithoutNewFieldsStillLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Into != "" || !s.Finished.IsZero() {
+	if len(s.Into) != 0 || !s.Finished.IsZero() {
 		t.Errorf("old file gained values: %+v", s)
 	}
 }
 
 func TestSessionValidateInto(t *testing.T) {
-	for _, bad := range []string{"-x", "a b", "a..b", "/x", "x/", "x.lock", "a~1", "a:b", "vmono/platform-auth/token-refresh"} {
+	for _, bad := range []string{"-x", "a b", "a..b", "/x", "x/", "x.lock", "a~1", "a:b", "vmono/platform-auth/token-refresh", ""} {
 		s := sampleSession()
-		s.Into = bad
+		s.Into = map[string]string{"api": bad}
 		if err := s.Validate(); err == nil {
 			t.Errorf("into %q accepted", bad)
 		}
 	}
+	s := sampleSession()
+	s.Into = map[string]string{"Bad Member": "main"}
+	if err := s.Validate(); err == nil {
+		t.Error("a member key that is not a slug was accepted")
+	}
 	for _, good := range []string{"main", "feature/PLAT-412", "release/1.0"} {
 		s := sampleSession()
-		s.Into = good
+		s.Into = map[string]string{"api": good}
 		if err := s.Validate(); err != nil {
 			t.Errorf("into %q rejected: %v", good, err)
 		}
@@ -150,24 +162,27 @@ func TestSessionValidateInto(t *testing.T) {
 
 func TestIntoFor(t *testing.T) {
 	cases := []struct {
-		into, base string
-		want       string
-		explicit   bool
+		into     map[string]string
+		member   string
+		base     string
+		want     string
+		recorded bool
 	}{
-		{"", "origin/main", "main", false},
-		{"", "origin/release/1.0", "release/1.0", false},
-		{"", "main", "main", false},
-		{"", "origin/HEAD", "", false},
-		{"", "HEAD", "", false},
-		{"", "", "", false},
-		{"feature/x", "origin/main", "feature/x", true},
+		{nil, "api", "origin/main", "main", false},
+		{nil, "api", "origin/release/1.0", "release/1.0", false},
+		{nil, "api", "main", "main", false},
+		{nil, "api", "origin/HEAD", "", false},
+		{nil, "api", "HEAD", "", false},
+		{nil, "api", "", "", false},
+		{map[string]string{"api": "feature/x"}, "api", "origin/main", "feature/x", true},
+		{map[string]string{"api": "feature/x"}, "sdk", "origin/main", "main", false}, // a member added later
 	}
 	for _, c := range cases {
 		s := sampleSession()
 		s.Into = c.into
-		got, explicit := s.IntoFor(Member{Base: c.base})
-		if got != c.want || explicit != c.explicit {
-			t.Errorf("into=%q base=%q: got (%q, %v), want (%q, %v)", c.into, c.base, got, explicit, c.want, c.explicit)
+		got, recorded := s.IntoFor(Member{Name: c.member, Base: c.base})
+		if got != c.want || recorded != c.recorded {
+			t.Errorf("into=%v member=%s base=%q: got (%q, %v), want (%q, %v)", c.into, c.member, c.base, got, recorded, c.want, c.recorded)
 		}
 	}
 }

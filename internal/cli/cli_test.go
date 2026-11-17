@@ -773,7 +773,7 @@ func TestIntoBelongsToASession(t *testing.T) {
 		t.Errorf("ls --json = %s", out)
 	}
 	data, err := os.ReadFile(filepath.Join(env.PackageRoot, "demo", "work", ".vmono", "session.toml"))
-	if err != nil || !strings.Contains(string(data), `into    = "feature"`) {
+	if err != nil || !strings.Contains(string(data), "[into]\nalpha = \"feature\"") {
 		t.Errorf("session.toml = %q, %v", data, err)
 	}
 }

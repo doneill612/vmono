@@ -66,10 +66,13 @@ type MemberLanding struct {
 
 // FinishOptions tunes Finish.
 type FinishOptions struct {
-	// Into overrides the landing branch for every member and is recorded in
-	// the session file, so later safety checks look at the same branch. Empty
-	// keeps the session's own, or each member's base branch.
-	Into string
+	// Into overrides the landing branch of every active member, and
+	// IntoByMember that of the members it names, which it wins over Into for.
+	// Overrides are recorded in the session file, so later safety checks
+	// look at the same branches. Members left alone keep the branch recorded
+	// for them, or the one their base names.
+	Into         string
+	IntoByMember map[string]string
 	// Close removes the session after its work has landed, deleting the
 	// session branches, which then count as merged.
 	Close bool
@@ -133,10 +136,58 @@ func (l *landing) block(format string, args ...any) {
 	l.Reason = fmt.Sprintf(format, args...)
 }
 
+// intoFor returns the landing branch override that applies to the member, or
+// "" when the options leave it alone.
+func (o FinishOptions) intoFor(member string) string {
+	if b := o.IntoByMember[member]; b != "" {
+		return b
+	}
+	return o.Into
+}
+
+// withInto returns the landing branches the session would record with the
+// options applied: the session's own, overridden for the active members the
+// options reach. It does not change the session.
+func (o FinishOptions) withInto(s *Session) map[string]string {
+	into := map[string]string{}
+	for member, b := range s.S.Into {
+		into[member] = b
+	}
+	for _, mem := range s.Pkg.M.Members {
+		if mem.Mode != manifest.ModeActive {
+			continue
+		}
+		if b := o.intoFor(mem.Name); b != "" {
+			into[mem.Name] = b
+		}
+	}
+	return into
+}
+
+// checkInto validates the overrides before anything moves: every member named
+// must be an active member of the package, and the resulting landing branches
+// must be acceptable to the session file.
+func (o FinishOptions) checkInto(s *Session) error {
+	active := map[string]bool{}
+	for _, mem := range s.Pkg.M.Members {
+		if mem.Mode == manifest.ModeActive {
+			active[mem.Name] = true
+		}
+	}
+	for member := range o.IntoByMember {
+		if !active[member] {
+			return fmt.Errorf("--into names %q, which is not an active member of %s", member, s.Pkg.Name)
+		}
+	}
+	probe := *s.S
+	probe.Into = o.withInto(s)
+	return probe.Validate()
+}
+
 // planFinish inspects every active member of the session and decides, without
-// changing anything, what finishing would do. into overrides the landing
-// branch when non-empty.
-func (c *Core) planFinish(s *Session, into string) []*landing {
+// changing anything, what finishing would do, with the options' landing
+// branch overrides applied.
+func (c *Core) planFinish(s *Session, opts FinishOptions) []*landing {
 	var out []*landing
 	for _, mem := range s.Pkg.M.Members {
 		if mem.Mode != manifest.ModeActive {
@@ -144,7 +195,7 @@ func (c *Core) planFinish(s *Session, into string) []*landing {
 		}
 		l := &landing{MemberLanding: MemberLanding{Name: mem.Name, Status: LandReady}}
 		out = append(out, l)
-		c.planMember(s, mem, into, l)
+		c.planMember(s, mem, opts.intoFor(mem.Name), l)
 	}
 	return out
 }
@@ -322,9 +373,9 @@ func blocked(plan []*landing) bool {
 
 // PlanFinish reports what finishing the session would do, member by member,
 // without changing anything. Members may come back blocked; that is the plan,
-// not an error. into overrides the landing branch like FinishOptions.Into.
-func (c *Core) PlanFinish(s *Session, into string) FinishResult {
-	return FinishResult{Package: s.Pkg.Name, Session: s.Name, Members: membersOf(c.planFinish(s, into))}
+// not an error. Only the landing branch overrides of opts are used.
+func (c *Core) PlanFinish(s *Session, opts FinishOptions) FinishResult {
+	return FinishResult{Package: s.Pkg.Name, Session: s.Name, Members: membersOf(c.planFinish(s, opts))}
 }
 
 // Finish lands the session's work: for every active member with commits of
@@ -348,15 +399,11 @@ func (c *Core) Finish(s *Session, opts FinishOptions) (FinishResult, error) {
 	if err := gitx.CheckVersion(); err != nil {
 		return res, err
 	}
-	if opts.Into != "" {
-		probe := *s.S
-		probe.Into = opts.Into
-		if err := probe.Validate(); err != nil {
-			return res, err
-		}
+	if err := opts.checkInto(s); err != nil {
+		return res, err
 	}
 
-	plan := c.planFinish(s, opts.Into)
+	plan := c.planFinish(s, opts)
 	res.Members = membersOf(plan)
 	if blocked(plan) {
 		return res, &FinishBlockedError{Result: res}
@@ -391,7 +438,7 @@ func (c *Core) Finish(s *Session, opts FinishOptions) (FinishResult, error) {
 	}
 	res.Members = membersOf(plan)
 
-	if err := c.markFinished(s, opts.Into); err != nil {
+	if err := c.markFinished(s, opts); err != nil {
 		return res, err
 	}
 	res.Finished = true
@@ -492,14 +539,12 @@ func (c *Core) advanceTargets(s *Session, touched []*landing, tips map[string]st
 	return (&apply.Runner{Events: c.Events, Rollback: true}).Run(steps)
 }
 
-// markFinished records the finish time, and a landing branch given at finish
-// time, in the session file, and commits the file to the session repo when
-// auto_commit is on.
-func (c *Core) markFinished(s *Session, into string) error {
+// markFinished records the finish time, and any landing branches given at
+// finish time, in the session file, and commits the file to the session repo
+// when auto_commit is on.
+func (c *Core) markFinished(s *Session, opts FinishOptions) error {
 	s.S.Finished = time.Now().Truncate(time.Second)
-	if into != "" {
-		s.S.Into = into
-	}
+	s.S.Into = opts.withInto(s)
 	if err := manifest.SaveSession(s.Dir, s.S); err != nil {
 		return fmt.Errorf("landed, but the session file could not be updated: %w", err)
 	}
