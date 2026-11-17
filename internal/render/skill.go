@@ -70,7 +70,10 @@ immediately.
 ## Finishing the session
 
 Finishing lands the session's commits on a branch in each member's source repo.
-Do it only when the user says the work is done or asks to land or merge it back.
+Each member has its own landing branch, by default the branch its source repo had
+checked out when the session began; ` + "`vmono show --json`" + ` lists it as ` + "`into`" + ` on every
+member, and ` + "`vmono session into`" + ` prints them. Do it only when the user says the work
+is done or asks to land or merge it back.
 
 1. Commit your work in every member, from inside the member's directory.
    ` + "`vmono session finish`" + ` refuses uncommitted changes and untracked files.
@@ -97,7 +100,8 @@ its ` + "`state`" + `). New commits reopen it, and finishing again lands only th
   remove it from the vmono TUI or with ` + "`vmono session rm`" + `.
 - Never push, and never delete branches. Landing is local; pushing and pull
   requests are the user's.
-- Pass ` + "`--into BRANCH`" + ` only if the user names a different branch to land on.
+- Change a landing branch only if the user names one: ` + "`vmono session into --member NAME=BRANCH`" + `
+  (or ` + "`--into NAME=BRANCH`" + ` on finish). Never pick a different branch yourself.
 
 ## What you must not do
 
