@@ -347,6 +347,24 @@ func TestSessionBranchRefConflictIsExplained(t *testing.T) {
 	}
 }
 
+func TestSessionOnRepoWithoutCommitsIsExplained(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	empty := filepath.Join(env.Root, "empty")
+	testutil.Git(t, env.Root, "init", "-b", "main", empty)
+	p, err := c.CreatePackage(request("fresh", []string{a, empty}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.CreateSession(p, "work", SessionOptions{})
+	if err == nil || !strings.Contains(err.Error(), "has no commits yet") || !strings.Contains(err.Error(), "initial commit") {
+		t.Fatalf("want a no-commits explanation, got %v", err)
+	}
+	if gitx.BranchExists(a, "vmono/fresh/work") {
+		t.Error("a failed preflight must not leave a branch behind")
+	}
+}
+
 func TestResolveSession(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")

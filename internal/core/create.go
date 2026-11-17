@@ -198,13 +198,18 @@ func realPath(p string) string {
 }
 
 // resolveRef returns the ref to use for a member's base or ref, falling
-// back to HEAD with a warning when origin/HEAD does not exist.
+// back to HEAD with a warning when origin/HEAD does not exist. A repo with no
+// commits at all gets its own error, since the generic "ref not found" gives
+// no hint that the fix is an initial commit rather than a different ref.
 func resolveRef(src, ref string, warn func(string)) (string, error) {
 	resolved, fell := gitx.ResolveDefaultRef(src, ref)
 	if fell && warn != nil {
 		warn("no origin/HEAD; using the source's current HEAD instead")
 	}
 	if !gitx.RefExists(src, resolved) {
+		if !gitx.HasAnyCommit(src) {
+			return "", fmt.Errorf("%s has no commits yet; make an initial commit there before starting a session on it", src)
+		}
 		return "", fmt.Errorf("ref %q not found in %s", resolved, src)
 	}
 	return resolved, nil

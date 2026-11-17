@@ -264,6 +264,15 @@ func RefExists(repo, ref string) bool {
 	return err == nil
 }
 
+// HasAnyCommit reports whether repo holds any commit at all, on any branch,
+// unlike HasCommits, which asks only about HEAD. A freshly `git init`ed repo
+// holds none: its HEAD names a branch that is not born yet, so no ref in it
+// resolves to a commit and nothing can be branched from.
+func HasAnyCommit(repo string) bool {
+	out, err := run(repo, "rev-list", "-n", "1", "--all")
+	return err == nil && out != ""
+}
+
 // ResolveRef returns the commit id for ref.
 func ResolveRef(repo, ref string) (string, error) {
 	return run(repo, "rev-parse", "--verify", ref+"^{commit}")
