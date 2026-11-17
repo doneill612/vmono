@@ -353,3 +353,97 @@ func TestWorktreeRepairAfterMove(t *testing.T) {
 		t.Errorf("status of moved worktree = %+v, %v", st, err)
 	}
 }
+
+// commitFile writes content to name inside dir and commits it.
+func commitFile(t *testing.T, dir, name, content, msg string) {
+	t.Helper()
+	testutil.WriteFile(t, filepath.Join(dir, name), content)
+	testutil.Git(t, dir, "add", "-A")
+	testutil.Git(t, dir, "commit", "--quiet", "-m", msg)
+}
+
+func TestRebaseOntoAndLandPrimitives(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "gamma")
+	wt := filepath.Join(env.Root, "wt", "gamma")
+	if err := WorktreeAddBranch(src, wt, "vmono/x", "main"); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, wt, "a.txt", "a\n", "session work")
+	commitFile(t, src, "b.txt", "b\n", "main moved")
+
+	fork, err := MergeBase(src, "vmono/x", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := RevCount(src, "vmono/x", "--not", "main"); n != 1 {
+		t.Fatalf("own commits before rebase = %d, want 1", n)
+	}
+	if err := RebaseOnto(wt, "main", fork); err != nil {
+		t.Fatal(err)
+	}
+	if RebaseInProgress(wt) {
+		t.Error("a finished rebase must not read as in progress")
+	}
+	if !IsMerged(src, "main", "vmono/x") {
+		t.Fatal("main should be an ancestor of the rebased branch")
+	}
+	if n, _ := RevCount(src, "main..vmono/x"); n != 1 {
+		t.Errorf("rebased branch is %d ahead of main, want 1", n)
+	}
+
+	tip, _ := ResolveRef(src, "vmono/x")
+	oldMain, _ := ResolveRef(src, "main")
+
+	// A branch that is not checked out moves by compare-and-swap.
+	if err := UpdateRefCAS(src, "refs/heads/feature", tip, "", "test: create"); err != nil {
+		t.Fatalf("create ref: %v", err)
+	}
+	if err := UpdateRefCAS(src, "refs/heads/feature", tip, "", "test: create again"); err == nil {
+		t.Error("creating a ref that exists must fail")
+	}
+	if err := UpdateRefCAS(src, "refs/heads/feature", oldMain, oldMain, "test: stale"); err == nil {
+		t.Error("a stale expected value must fail")
+	}
+
+	// A checked-out branch advances through its worktree.
+	if err := MergeFFOnly(src, "vmono/x"); err != nil {
+		t.Fatalf("ff-only: %v", err)
+	}
+	if got, _ := ResolveRef(src, "main"); got != tip {
+		t.Errorf("main = %s, want %s", got, tip)
+	}
+	if _, err := os.Stat(filepath.Join(src, "a.txt")); err != nil {
+		t.Errorf("working tree should have the landed file: %v", err)
+	}
+}
+
+func TestRebaseOntoStopsOnConflict(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "delta")
+	wt := filepath.Join(env.Root, "wt", "delta")
+	if err := WorktreeAddBranch(src, wt, "vmono/x", "main"); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, wt, "README.md", "session version\n", "session edit")
+	commitFile(t, src, "README.md", "main version\n", "main edit")
+
+	fork, _ := MergeBase(src, "vmono/x", "main")
+	if err := RebaseOnto(wt, "main", fork); err == nil {
+		t.Fatal("conflicting rebase must fail")
+	}
+	if !RebaseInProgress(wt) {
+		t.Error("rebase should be left in progress")
+	}
+	files, err := ConflictedFiles(wt)
+	if err != nil || len(files) != 1 || files[0] != "README.md" {
+		t.Errorf("ConflictedFiles = %v, %v", files, err)
+	}
+	if err := MergeFFOnly(src, "vmono/x"); err == nil {
+		t.Error("ff-only onto a branch with an unrebased commit must fail")
+	}
+	testutil.Git(t, wt, "rebase", "--abort")
+	if RebaseInProgress(wt) {
+		t.Error("aborted rebase must not read as in progress")
+	}
+}

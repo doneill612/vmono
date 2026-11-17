@@ -488,6 +488,85 @@ func IsMerged(repo, branch, base string) bool {
 	return err == nil
 }
 
+// MergeBase returns the best common ancestor commit of a and b. It fails
+// when the two share no history.
+func MergeBase(repo, a, b string) (string, error) {
+	return run(repo, "merge-base", a, b)
+}
+
+// RevCount counts the commits selected by a `git rev-list` revision
+// expression, for example RevCount(repo, "main..feature") or
+// RevCount(repo, "HEAD", "--not", "main", "origin/main").
+func RevCount(repo string, revs ...string) (int, error) {
+	out, err := run(repo, append([]string{"rev-list", "--count"}, revs...)...)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(out)
+}
+
+// RebaseOnto replays the commits of the worktree's checked-out branch that
+// are reachable from HEAD but not from upstream onto onto, equivalent to
+// `git rebase --onto <onto> <upstream>`. Git stops with an error on a
+// conflict and leaves the rebase in progress in the worktree, so the caller
+// can report ConflictedFiles and let the user or agent resolve them and run
+// `git rebase --continue`. A missing commit identity is filled in the same
+// way CommitAll fills it.
+func RebaseOnto(worktree, onto, upstream string) error {
+	args := append(identityArgs(worktree), "rebase", "--onto", onto, upstream)
+	_, err := run(worktree, args...)
+	return err
+}
+
+// RebaseInProgress reports whether the worktree is in the middle of a
+// rebase, stopped on a conflict or waiting on `git rebase --continue`.
+func RebaseInProgress(worktree string) bool {
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		out, err := run(worktree, "rev-parse", "--path-format=absolute", "--git-path", name)
+		if err != nil {
+			continue
+		}
+		if st, err := os.Stat(filepath.FromSlash(out)); err == nil && st.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// ConflictedFiles lists the paths with unresolved merge conflicts in the
+// worktree, relative to its root.
+func ConflictedFiles(worktree string) ([]string, error) {
+	out, err := run(worktree, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			files = append(files, filepath.FromSlash(line))
+		}
+	}
+	return files, nil
+}
+
+// UpdateRefCAS moves ref to newSHA only if it still points at oldSHA, a
+// compare-and-swap that keeps two writers from clobbering each other. An
+// empty oldSHA means the ref must not exist yet, so it creates the ref.
+// reason is recorded in the ref's reflog. It never touches a working tree,
+// so callers must not use it on a branch that is checked out anywhere.
+func UpdateRefCAS(repo, ref, newSHA, oldSHA, reason string) error {
+	_, err := run(repo, "update-ref", "-m", reason, ref, newSHA, oldSHA)
+	return err
+}
+
+// MergeFFOnly fast-forwards the branch checked out in worktree to ref and
+// updates the working tree with it. Git refuses unless the move is a pure
+// fast-forward, or the working tree has changes that would be overwritten.
+func MergeFFOnly(worktree, ref string) error {
+	_, err := run(worktree, "merge", "--ff-only", "--quiet", ref)
+	return err
+}
+
 // Status is the parsed state of one worktree.
 type Status struct {
 	Branch    string // empty when detached
