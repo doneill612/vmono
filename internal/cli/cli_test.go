@@ -742,7 +742,22 @@ func TestSessionFinish(t *testing.T) {
 
 	// Inside the session no argument is needed; uncommitted work is refused
 	// with exit code 2 and the reasons on stdout as JSON.
-	t.Chdir(wt)
+	// This uses os.Chdir rather than t.Chdir on purpose: t.Chdir keeps the
+	// directory it leaves open until the test ends, and on Windows that open
+	// handle stops the --close removal below from deleting the worktree.
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+	chdir := func(dir string) {
+		t.Helper()
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PWD", dir) // what t.Chdir does, so symlinked temp dirs resolve as before
+	}
+	chdir(wt)
 	testutil.WriteFile(t, filepath.Join(wt, "forgotten.txt"), "x")
 	out, _, err = run(t, "session", "finish", "--json")
 	if ExitCode(err) != ExitRefused {
@@ -754,7 +769,10 @@ func TestSessionFinish(t *testing.T) {
 	if err := os.Remove(filepath.Join(wt, "forgotten.txt")); err != nil {
 		t.Fatal(err)
 	}
-	if text, _, err := run(t, "session", "finish", "--close"); err != nil || !strings.Contains(text, "removed session demo/work") {
+	// Windows cannot delete the working directory, so step out and name the
+	// session explicitly.
+	chdir(env.Root)
+	if text, _, err := run(t, "session", "finish", "demo/work", "--close"); err != nil || !strings.Contains(text, "removed session demo/work") {
 		t.Errorf("finish --close = %q, %v", text, err)
 	}
 }
