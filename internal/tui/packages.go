@@ -19,6 +19,10 @@ type packagesMsg struct {
 	err  error
 }
 
+// packageRemovedMsg reports that a package was deleted, so the packages view
+// can drop it before its next reload.
+type packageRemovedMsg struct{ name string }
+
 // fetchedMsg reports a finished fetch-all.
 type fetchedMsg struct {
 	name string
@@ -236,6 +240,9 @@ func (m *packagesModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		m.e.setPackages(t.list)
 		m.fill()
 		return m, nil
+	case packageRemovedMsg:
+		m.drop(t.name)
+		return m, nil
 	case refreshMsg:
 		return m, m.loadPackages()
 	case fetchedMsg:
@@ -247,6 +254,22 @@ func (m *packagesModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		return m.key(t)
 	}
 	return m, nil
+}
+
+// drop removes a package from the loaded list and the table. A delete leaves
+// the packages view underneath the progress screen showing the old list until
+// the reload that follows returns; dropping the row first means the deleted
+// package never reappears when the user goes back.
+func (m *packagesModel) drop(name string) {
+	kept := m.all[:0:0]
+	for _, s := range m.all {
+		if s.Name != name {
+			kept = append(kept, s)
+		}
+	}
+	m.all = kept
+	m.e.setPackages(kept)
+	m.fill()
 }
 
 // key handles the packages key map.
@@ -372,7 +395,8 @@ func (m *packagesModel) startDelete(name string) tea.Cmd {
 	return push(newConfirm(m.e, "Delete package", name, rows, true,
 		func(force, deleteBranches bool) screen {
 			return newProgress(m.e, operation{
-				title: "Delete " + name,
+				title:   "Delete " + name,
+				removed: name,
 				run: func(_, _ bool) error {
 					_, err := c.Delete(p, core.DeleteOptions{Force: force, DeleteBranches: deleteBranches})
 					return err

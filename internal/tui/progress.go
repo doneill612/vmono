@@ -36,6 +36,10 @@ type operation struct {
 	// fixIn, when set, is the session where a failure can be fixed: the
 	// failed screen offers l to launch the default harness there.
 	fixIn *LaunchRequest
+	// removed, when set, names a package the operation deleted. On success
+	// the packages screen drops it at once instead of showing it until the
+	// reload that follows returns.
+	removed string
 }
 
 // progressState is where the progress screen is in its life.
@@ -205,6 +209,10 @@ func (m *progressModel) finish(err error) (screen, tea.Cmd) {
 	switch {
 	case err == nil:
 		m.state = progDone
+		if m.op.removed != "" {
+			name := m.op.removed
+			return m, func() tea.Msg { return packageRemovedMsg{name} }
+		}
 		if m.op.home {
 			return m, goHome(m.op.title + " done")
 		}

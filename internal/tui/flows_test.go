@@ -159,3 +159,33 @@ func indexOf(h, n string) int {
 	}
 	return -1
 }
+
+// TestDeletedPackageLeavesListBeforeReload deletes one of two packages and
+// checks the packages view beneath the progress screen has already dropped it
+// at "done", rather than showing it until the reload lands.
+func TestDeletedPackageLeavesListBeforeReload(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	seed(t, env, "doomed", a)
+	seed(t, env, "keeper", a)
+	d := newDriver(t, env, "")
+	d.has("doomed", "keeper")
+
+	d.key("ctrl+d")
+	d.key("y")
+	d.eventually(func() bool { _, err := os.Stat(filepath.Join(env.PackageRoot, "doomed")); return os.IsNotExist(err) }, "package removal")
+	d.has("done")
+
+	root, ok := d.app.stack[0].(*packagesModel)
+	if !ok {
+		t.Fatalf("root is %T, want *packagesModel", d.app.stack[0])
+	}
+	for _, s := range root.all {
+		if s.Name == "doomed" {
+			t.Fatal("deleted package still listed in the packages view")
+		}
+	}
+	if len(root.tb.rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(root.tb.rows))
+	}
+}
