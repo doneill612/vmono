@@ -402,6 +402,11 @@ func (c *Core) Finish(s *Session, opts FinishOptions) (FinishResult, error) {
 	if err := opts.checkInto(s); err != nil {
 		return res, err
 	}
+	if opts.Close {
+		if err := checkNotInside(s.Dir); err != nil {
+			return res, err
+		}
+	}
 
 	plan := c.planFinish(s, opts)
 	res.Members = membersOf(plan)

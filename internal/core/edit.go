@@ -211,6 +211,11 @@ func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (Delete
 	if bad := unsafeOf(c.safetyAcross(sessions, []manifest.Member{target})); len(bad) > 0 && !opts.Force {
 		return res, &RefusedError{Unsafe: bad}
 	}
+	for _, s := range sessions {
+		if err := checkNotInside(s.MemberDir(target)); err != nil {
+			return res, err
+		}
+	}
 	var steps []apply.Step
 	for _, s := range sessions {
 		ss, err := c.removeMemberSteps(s, target, opts.Force, opts.DeleteBranch, &res)

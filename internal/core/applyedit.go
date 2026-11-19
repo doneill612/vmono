@@ -86,6 +86,13 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 		adds = append(adds, s.New)
 	}
 	removals := plan.Removals()
+	for _, s := range ep.Sessions {
+		for _, r := range removals {
+			if err := checkNotInside(s.MemberDir(r)); err != nil {
+				return plan, err
+			}
+		}
+	}
 
 	removing := map[string]bool{}
 	removedPaths := map[string]bool{}

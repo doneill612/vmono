@@ -207,6 +207,9 @@ func labelSteps(steps []apply.Step, session string) {
 // are never touched, and the package and its other sessions are left alone.
 func (c *Core) DeleteSession(s *Session, opts DeleteOptions) (DeleteResult, error) {
 	var res DeleteResult
+	if err := checkNotInside(s.Dir); err != nil {
+		return res, err
+	}
 	if bad := unsafeOf(c.SafetyCheck(s)); len(bad) > 0 && !opts.Force {
 		return res, &RefusedError{Unsafe: bad}
 	}
@@ -228,6 +231,9 @@ func (c *Core) DeleteSession(s *Session, opts DeleteOptions) (DeleteResult, erro
 // package directory and index entry.
 func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
 	var res DeleteResult
+	if err := checkNotInside(p.Dir); err != nil {
+		return res, err
+	}
 	sessions, err := c.LoadSessions(p)
 	if err != nil {
 		return res, err
