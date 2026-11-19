@@ -37,7 +37,6 @@ func newConfirm(e *env, title, name string, rows []core.MemberSafety, showBranch
 	onConfirm func(force, deleteBranches bool) screen, onCancel func() screen) *confirmModel {
 	t := newTextInput()
 	t.Prompt = "> "
-	t.Placeholder = name
 	t.CharLimit = 128
 	m := &confirmModel{e: e, title: title, name: name, noun: "package", rows: rows, typed: t,
 		showBranches: showBranches, onConfirm: onConfirm, onCancel: onCancel}
