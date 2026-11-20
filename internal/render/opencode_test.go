@@ -148,3 +148,23 @@ func TestOpenCodeSkillsAndIdempotence(t *testing.T) {
 		t.Errorf("second render should be a no-op: %v %v", changed, err)
 	}
 }
+
+func TestOpenCodeKeepsThePlainSkill(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterOpenCode}}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".opencode/skills/vmono/SKILL.md"))
+	if err != nil || string(data) != SkillMarkdown() {
+		t.Fatalf("opencode should get the bundled skill: %v", err)
+	}
+	// A harness with no plugin strategy gets no plugin files.
+	if _, err := os.Stat(filepath.Join(dir, ".opencode/skills/vmono/.claude-plugin")); !os.IsNotExist(err) {
+		t.Error("opencode must not get Claude Code plugin files")
+	}
+	for _, rel := range []string{".claude/settings.json", ".claude/skills/vmono"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Errorf("an opencode-only render must not write %s", rel)
+		}
+	}
+}

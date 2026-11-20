@@ -37,6 +37,26 @@ func (o Options) has(name string) bool {
 	return false
 }
 
+// pluginWriters maps an adapter to the function that writes its harness's
+// full plugin. An adapter missing from it has no plugin strategy and gets
+// the bundled skill alone. Adding a plugin for another harness is adding an
+// entry here.
+var pluginWriters = map[string]func(*writer) error{
+	AdapterClaudeCode: writeClaudePlugin,
+}
+
+// writeIntegration puts vmono's guidance where the adapter's harness will
+// find it: the adapter's plugin when pluginWriters has one, and otherwise the
+// bundled skill under skillsDir. Both put the same SKILL.md at
+// skillsDir/vmono, so a harness can always read the skill whichever path was
+// taken.
+func writeIntegration(w *writer, adapter, skillsDir string) error {
+	if write, ok := pluginWriters[adapter]; ok {
+		return write(w)
+	}
+	return writeBundledSkill(w, skillsDir)
+}
+
 // writer records which generated files actually changed.
 type writer struct {
 	dir     string
@@ -84,6 +104,53 @@ func (w *writer) fileWith(rel string, perm fs.FileMode, build func(existing stri
 		return err
 	}
 	w.changed = append(w.changed, rel)
+	return nil
+}
+
+// tree makes the directory root hold exactly files, a map of paths relative
+// to root to their content. Each file is written only when it differs, and
+// every file or link already under root that is not in files is removed,
+// along with the directories that leaves empty. It is for directories vmono
+// owns outright; it must never be pointed at one that holds the user's own
+// files.
+func (w *writer) tree(root string, files map[string]string) error {
+	keep := make(map[string]bool, len(files))
+	for rel, content := range files {
+		if err := w.file(root+"/"+rel, content); err != nil {
+			return err
+		}
+		keep[filepath.ToSlash(filepath.Clean(rel))] = true
+	}
+
+	base := w.abs(root)
+	var dirs []string
+	err := filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			dirs = append(dirs, p)
+			return nil
+		}
+		rel, err := filepath.Rel(base, p)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if keep[rel] {
+			return nil
+		}
+		return w.remove(root + "/" + rel)
+	})
+	if err != nil {
+		return err
+	}
+	// Deepest first, so a directory is tried after the ones inside it. A
+	// directory that still holds something fails to remove, which is the
+	// intent, so the error is ignored.
+	for i := len(dirs) - 1; i > 0; i-- {
+		_ = os.Remove(dirs[i])
+	}
 	return nil
 }
 

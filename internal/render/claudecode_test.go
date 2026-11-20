@@ -48,6 +48,12 @@ func TestRewriteRule(t *testing.T) {
 		{"Edit", EffectAllow, "", false},
 		{"Edit", EffectDeny, "Edit(/api/**)", true},
 		{"Bash", EffectAllow, "Bash", true},
+		// Legacy wildcard tool names are not valid allow rules any more.
+		{"Edit:*", EffectAllow, "", false},
+		{"Write:*", EffectAllow, "", false},
+		{"Bash:*", EffectAllow, "", false},
+		{"Bash:*", EffectDeny, "Bash:*", true},
+		{"Edit:*", EffectAsk, "Edit:*", true},
 	}
 	for _, c := range cases {
 		got, keep := RewriteRule("api", c.rule, c.effect)
@@ -72,7 +78,7 @@ func pkgWithMembers(t *testing.T, hooks bool) (string, *manifest.Manifest) {
 	}
 	write("api/.claude/settings.json", `{
   "permissions": {
-    "allow": ["Edit(src/**)", "Bash(npm test:*)", "Edit", "Bash(vmono rm:*)"],
+    "allow": ["Edit(src/**)", "Bash(npm test:*)", "Edit", "Bash(vmono rm:*)", "Edit:*", "Bash:*"],
     "deny": ["Read(.env)"]
   },
   "hooks": {"PostToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "npm run lint"}]}]}
@@ -138,6 +144,11 @@ func TestClaudeAdapterMergesMemberPermissions(t *testing.T) {
 	}
 	if !contains(f.Permissions.Allow, "Edit(/api/src/**)") {
 		t.Errorf("rewritten allow missing: %v", f.Permissions.Allow)
+	}
+	for _, legacy := range []string{"Edit:*", "Bash:*"} {
+		if contains(f.Permissions.Allow, legacy) {
+			t.Errorf("legacy wildcard %q is rejected by Claude Code and must not be written", legacy)
+		}
 	}
 	if contains(f.Permissions.Allow, "Edit") {
 		t.Error("a bare Edit allow from a member would widen access and must be dropped")
@@ -244,5 +255,157 @@ func TestBundledSkillWrittenForBothAdapters(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(bare, ".claude")); !os.IsNotExist(err) {
 		t.Error("no adapter, no .claude directory")
+	}
+}
+
+func TestClaudePluginWrittenAndKeptExact(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	opts := Options{Adapters: []string{AdapterClaudeCode}}
+	if _, err := Render(dir, m, testSession(m), opts); err != nil {
+		t.Fatal(err)
+	}
+	read := func(rel string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("%s: %v", rel, err)
+		}
+		return string(data)
+	}
+
+	var manifest struct {
+		Name   string `json:"name"`
+		Author struct {
+			Name string `json:"name"`
+		} `json:"author"`
+	}
+	if err := json.Unmarshal([]byte(read(".claude/skills/vmono/.claude-plugin/plugin.json")), &manifest); err != nil {
+		t.Fatalf("plugin.json: %v", err)
+	}
+	if manifest.Name != "vmono" || manifest.Author.Name == "" {
+		t.Errorf("plugin.json = %+v", manifest)
+	}
+	if got := read(".claude/skills/vmono/SKILL.md"); got != SkillMarkdown() {
+		t.Error("the plugin's root SKILL.md must be the bundled skill, so a blocked plugin falls back to it")
+	}
+
+	// Anything else under the plugin directory is vmono's to remove, so a
+	// file from an older version cannot keep loading.
+	stray := filepath.Join(dir, ".claude/skills/vmono/old/nested/leftover.md")
+	if err := os.MkdirAll(filepath.Dir(stray), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stray, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := Render(dir, m, testSession(m), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".claude/skills/vmono/old")); !os.IsNotExist(err) {
+		t.Error("stray file and the directories it emptied should be removed")
+	}
+	if len(changed) != 1 || changed[0] != ".claude/skills/vmono/old/nested/leftover.md" {
+		t.Errorf("only the stray file should be reported, got %v", changed)
+	}
+
+	// With nothing stale, a render leaves the plugin untouched.
+	changed, err = Render(dir, m, testSession(m), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range changed {
+		if strings.HasPrefix(rel, ".claude/skills/vmono/") {
+			t.Errorf("unchanged plugin rewritten: %s", rel)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".claude/skills/mine/SKILL.md")); err != nil {
+		t.Error("the user's own skill must survive")
+	}
+}
+
+func TestClaudePluginCommands(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+		t.Fatal(err)
+	}
+	read := func(name string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(dir, ".claude/skills/vmono/skills", name, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return string(data)
+	}
+
+	finish := read("finish")
+	for _, want := range []string{"name: finish\n", "disable-model-invocation: true\n", finishSection, "vmono session finish --json"} {
+		if !strings.Contains(finish, want) {
+			t.Errorf("finish missing %q", want)
+		}
+	}
+	// A pre-approval here would silence the adapter's ask rule for
+	// `vmono session finish`.
+	if strings.Contains(finish, "allowed-tools") {
+		t.Error("finish must not pre-approve tools: the ask rule for vmono session finish has to keep prompting")
+	}
+
+	note := read("note")
+	for _, want := range []string{"name: note\n", `argument-hint: "[note text]"`, `allowed-tools: "Bash(vmono note:*)"`, "$ARGUMENTS", whatGoesWhere} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note missing %q", want)
+		}
+	}
+
+	status := read("status")
+	for _, want := range []string{"name: status\n", `allowed-tools: "Bash(vmono status:*)"`, "vmono status --json"} {
+		if !strings.Contains(status, want) {
+			t.Errorf("status missing %q", want)
+		}
+	}
+	if strings.Contains(status, "disable-model-invocation") {
+		t.Error("status is read-only and may be run by Claude")
+	}
+	for name, body := range map[string]string{"finish": finish, "note": note, "status": status} {
+		if !strings.HasPrefix(body, "---\nname: "+name+"\n") || !strings.Contains(body, "\n---\n<!-- "+GeneratedNote+" -->") {
+			t.Errorf("%s: frontmatter malformed:\n%s", name, body)
+		}
+	}
+}
+
+func TestClaudePluginSessionStartHook(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".claude/skills/vmono/hooks/hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Type    string   `json:"type"`
+				Command string   `json:"command"`
+				Args    []string `json:"args"`
+				Timeout int      `json:"timeout"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatalf("hooks.json: %v\n%s", err, data)
+	}
+	groups := f.Hooks["SessionStart"]
+	if len(f.Hooks) != 1 || len(groups) != 1 || len(groups[0].Hooks) != 1 {
+		t.Fatalf("want exactly one SessionStart hook, got %s", data)
+	}
+	if groups[0].Matcher != "" {
+		t.Errorf("no matcher, so it runs on startup, resume, clear, fork and compact: %q", groups[0].Matcher)
+	}
+	h := groups[0].Hooks[0]
+	// Exec form: args present, command a bare executable with no shell syntax.
+	if h.Type != "command" || h.Command != "vmono" || strings.Join(h.Args, " ") != "hook session-start" || h.Timeout <= 0 {
+		t.Errorf("hook = %+v", h)
 	}
 }

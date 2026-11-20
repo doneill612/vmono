@@ -8,7 +8,7 @@ vmono manages **packages** and their **sessions**. A package is a set of git rep
 - Members are **git worktrees** of repos already on your machine: no copies, no re-clones, shared object storage.
 - The package's purpose, context, notes and each member's role are written once and rendered into every session's `AGENTS.md` / `CLAUDE.md`.
 - A harness opened at a session root works with no changes. Claude Code, OpenCode, Codex and Pi work out of the box; Claude Code and OpenCode also get generated config.
-- A bundled skill teaches the harness running inside a session to read the package, and to write back to it only what every future session needs.
+- A skill teaches the harness running inside a session to read the package, and to write back to it only what every future session needs. Claude Code gets it as a [plugin](#the-claude-code-plugin) that also adds commands and live session state; other harnesses get the skill on its own.
 - Runs on macOS, Linux and Windows, without admin rights.
 
 ## Install
@@ -114,14 +114,14 @@ A package with two sessions looks like this:
 │   ├── .git/                the session's own repo (one harness project per session)
 │   ├── AGENTS.md            generated block + your own notes
 │   ├── CLAUDE.md            generated: @AGENTS.md
-│   ├── .claude/             generated: settings.json, skills
+│   ├── .claude/             generated: settings.json, skills/vmono (the Claude Code plugin)
 │   ├── opencode.json        generated
 │   ├── member-a/            active member (worktree on vmono/project/token-refresh)
 │   └── _ref/member-c/       reference member (detached worktree)
 └── spike/                   another session, with its own branch and worktrees
 ```
 
-Everything except the manifest, the session file and your own text in `AGENTS.md` (outside the `<!-- vmono:begin -->` / `<!-- vmono:end -->` markers) is rebuilt from the manifest. Changing the package (a note, a new member, an edit) applies to every session. Task details that belong to one piece of work stay in the harness conversation, and the bundled skill tells the agent to write to the package only what every future session will need. Packages and sessions cannot be renamed: harness session history is keyed by path.
+Everything except the manifest, the session file and your own text in `AGENTS.md` (outside the `<!-- vmono:begin -->` / `<!-- vmono:end -->` markers) is rebuilt from the manifest. Changing the package (a note, a new member, an edit) applies to every session. Task details that belong to one piece of work stay in the harness conversation, and the vmono skill tells the agent to write to the package only what every future session will need. Packages and sessions cannot be renamed: harness session history is keyed by path.
 
 A branch can be checked out in only one worktree at a time, and git cannot hold both `vmono/project` and `vmono/project/spike`, which is why session branches include the package name. If a branch name in the way already exists, vmono says so and suggests `--branch`; it never renames branches.
 
@@ -140,11 +140,29 @@ Nothing moves unless every member can land. Uncommitted or untracked files, a la
 
 A finished session is not a removed one. It stays in the package's session list, dimmed and sorted below the others, with its worktrees and branch, until you remove it (`ctrl+d` in the TUI, `vmono session rm`, or `finish --close` to do both at once). Its state is derived rather than stored: any new commit or uncommitted edit makes it `in-progress` again, relaunching it changes nothing, and finishing again lands only the new commits. `vmono session ls`, `status` and `show --json` report the state, and `status` shows what is left to land in each member.
 
-The bundled skill teaches the agent to do this when you say the work is done: commit in every member, run `vmono session finish`, resolve a conflict if one stops it, and report what landed where. The adapters ask for permission first, and the agent never passes `--close` or pushes.
+The vmono skill teaches the agent to do this when you say the work is done (in Claude Code, `/vmono:finish` says it for you): commit in every member, run `vmono session finish`, resolve a conflict if one stops it, and report what landed where. The adapters ask for permission first, and the agent never passes `--close` or pushes.
 
 ### Packages from before sessions
 
 Earlier versions kept a package's branch and worktrees in the package itself. Such a package lists as needing migration, and `vmono doctor --fix` converts it into a package with one session named `main` (or `main-2` and so on if a member is already called `main`). The members' worktrees move into the session and are repaired in the source repos, your own text in `AGENTS.md` comes along, the session keeps the old branch, and the package's git history is kept. Harness history keyed by the old path, which Claude Code uses, does not follow the move, and the kept branch `vmono/<package>` means a new session needs `--branch` or a renamed old branch.
+
+## The Claude Code plugin
+
+For Claude Code, vmono writes a plugin into every session at `.claude/skills/vmono/`. It is a skills-directory plugin: Claude Code loads a folder there that holds a `.claude-plugin/plugin.json` in place, with no marketplace and no install step, once you have trusted the session folder. It is rebuilt from the vmono binary on every launch and sync, so it never drifts from the version you run, and it is not meant to be edited.
+
+| Part | Does |
+| --- | --- |
+| `SKILL.md` (`/vmono`) | The skill every harness gets: how to recognize a session, read the package, and write back to it |
+| SessionStart hook | Runs `vmono hook session-start` when a conversation starts, resumes, is cleared, forked or compacted, and adds the session's live state to the context: each member's branch, uncommitted files, and commits left to land |
+| `/vmono:status` | Summarizes that state on request, including anything that would block finishing |
+| `/vmono:note [text]` | Records a package note from your text; with none, proposes one from the conversation and asks first |
+| `/vmono:finish` | Lands the session: commit in every member, `vmono session finish`, resolve a conflict if one stops it, report what landed. Claude Code still asks for permission to run `vmono session finish` |
+
+The hook runs the bare command `vmono`, so `vmono` must be on `PATH` for the harness, as the skill's own commands already assume. It prints nothing outside a session and never fails a start.
+
+If your organization blocks skills-directory plugins, or your Claude Code predates them, `/vmono` still loads as an ordinary project skill and only the hook and the three commands are missing. To turn the plugin off for one session, set `"vmono@skills-dir": false` under `enabledPlugins` in that session's `.claude/settings.local.json`, or run `claude plugin disable vmono@skills-dir`.
+
+OpenCode, Codex and Pi have no plugin strategy yet: OpenCode gets the same skill on its own under `.opencode/skills/vmono/`, and the rest read `AGENTS.md`.
 
 ## Commands
 

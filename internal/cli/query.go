@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"text/tabwriter"
 
@@ -114,16 +115,24 @@ func newStatusCmd() *cobra.Command {
 			if asJSON {
 				return printJSON(out, st)
 			}
-			fprintf(out, "%s/%s  (%s)  %s\n", st.Package, st.Session, st.Branch, st.State)
-			tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-			for _, m := range st.Members {
-				fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n", m.Name, m.Mode, where(m), cleanliness(m), aheadBehind(m), toLand(m))
-			}
-			return tw.Flush()
+			return writeStatusText(out, st)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
 	return cmd
+}
+
+// writeStatusText prints a session's state as `vmono status` shows it: one
+// line naming the session, its branch and its state, then a row per member.
+// The session-start hook prints the same text so an agent sees exactly what
+// the user would.
+func writeStatusText(w io.Writer, st core.SessionStatus) error {
+	fprintf(w, "%s/%s  (%s)  %s\n", st.Package, st.Session, st.Branch, st.State)
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	for _, m := range st.Members {
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n", m.Name, m.Mode, where(m), cleanliness(m), aheadBehind(m), toLand(m))
+	}
+	return tw.Flush()
 }
 
 // where describes a member's branch or ref for display.

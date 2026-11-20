@@ -857,3 +857,58 @@ func TestSessionIntoIsPerMember(t *testing.T) {
 		t.Errorf("per-member --into at create: %s", out)
 	}
 }
+
+func TestHookSessionStart(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	out, stderr, err := run(t, "new", "work", "--active", a, "--ref", b, "--session", "s1")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	dir := strings.TrimSpace(out)
+
+	// From inside a member of the session it reports the session and every
+	// member, and names the commands the plugin offers.
+	t.Chdir(filepath.Join(dir, "alpha"))
+	testutil.WriteFile(t, filepath.Join(dir, "alpha", "wip"), "x")
+	got, _, err := run(t, "hook", "session-start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"work/s1", "vmono/work/s1", "in-progress", "alpha", "beta", "1 untracked", "/vmono:finish", "/vmono:note", "/vmono:status"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("hook output missing %q:\n%s", want, got)
+		}
+	}
+
+	// The status command still prints the same table the hook embeds.
+	statusOut, _, err := run(t, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, statusOut) {
+		t.Errorf("hook should embed the status text.\nstatus:\n%s\nhook:\n%s", statusOut, got)
+	}
+
+	// It stays quiet, and succeeds, wherever it is not in a session: a
+	// package directory with exactly one session, and an unrelated one.
+	for _, where := range []string{filepath.Dir(dir), env.Root} {
+		t.Chdir(where)
+		got, stderr, err := run(t, "hook", "session-start")
+		if err != nil || got != "" || stderr != "" {
+			t.Errorf("outside a session (%s): out %q, stderr %q, err %v", where, got, stderr, err)
+		}
+	}
+}
+
+func TestHookIsHiddenFromHelp(t *testing.T) {
+	testutil.NewEnv(t)
+	out, _, err := run(t, "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "session-start") || strings.Contains(out, "  hook ") {
+		t.Errorf("hook should not appear in help:\n%s", out)
+	}
+}

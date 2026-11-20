@@ -7,13 +7,25 @@ const SkillName = "vmono"
 // inside a session to read and refine its package through the vmono CLI.
 // It is identical for every session; nothing in it is specific to one, so
 // the agent reads the live state with `vmono show --json`.
-const skillBody = `---
+//
+// It is assembled from named sections so that a harness integration with
+// more than one entry point, such as the Claude Code plugin's commands, can
+// quote the guidance it shares with the skill instead of restating it.
+const skillBody = skillHeader + skillIntro + whatGoesWhere + addMemberSection + finishSection + skillRules
+
+// skillHeader is the frontmatter and generated-file note that open the
+// bundled skill.
+const skillHeader = `---
 name: vmono
 description: Use when working inside a vmono session (the VMONO_PACKAGE and VMONO_SESSION environment variables are set, or .vmono/session.toml exists above the working directory). Read the package's purpose, context, notes and members, and keep the package up to date with the vmono CLI when you learn something every future session needs.
 ---
 <!-- ` + GeneratedNote + ` -->
 
-# Working inside a vmono session
+`
+
+// skillIntro explains what a package and a session are, how to recognize
+// that the agent is inside one, and to read the live state before writing.
+const skillIntro = `# Working inside a vmono session
 
 A vmono **package** groups several git repositories (members) and records why:
 a purpose, free-form context, a dated log of notes, and a one-line role per
@@ -39,7 +51,11 @@ Use that rather than parsing files by hand. Do not edit
 ` + "`.vmono/session.toml`" + `, ` + "`AGENTS.md`" + ` between the vmono markers, or other generated files
 directly; they are rebuilt.
 
-## What goes where
+`
+
+// whatGoesWhere says what belongs in the package and what stays in the
+// conversation, and lists the commands that write to the package.
+const whatGoesWhere = `## What goes where
 
 What this session is trying to do, its progress, and its decisions stay in the
 conversation with the user. Do not record them in vmono.
@@ -59,7 +75,10 @@ is for. Tell the user when you do, and say that it applies to every session.
 Prefer ` + "`note`" + ` over rewriting the context: it never loses information. For longer
 text use ` + "`--context-file FILE`" + ` or ` + "`--purpose-file FILE`" + `.
 
-## Add a member
+`
+
+// addMemberSection says when and how to add a repository to the package.
+const addMemberSection = `## Add a member
 
 If the work needs a repository the package does not have, ask the user first,
 then run ` + "`vmono add REPO --role \"TEXT\"`" + ` (a known repo name or a path to any git repo).
@@ -67,7 +86,11 @@ Add ` + "`--ref`" + ` for a read-only reference member. The member is added to e
 session of the package, and its worktree in your session exists on disk
 immediately.
 
-## Finishing the session
+`
+
+// finishSection is the procedure for landing a session's commits, with the
+// rules that bound it. The Claude Code plugin's finish command quotes it.
+const finishSection = `## Finishing the session
 
 Finishing lands the session's commits on a branch in each member's source repo.
 Each member has its own landing branch, by default the branch its source repo had
@@ -103,7 +126,11 @@ its ` + "`state`" + `). New commits reopen it, and finishing again lands only th
 - Change a landing branch only if the user names one: ` + "`vmono session into --member NAME=BRANCH`" + `
   (or ` + "`--into NAME=BRANCH`" + ` on finish). Never pick a different branch yourself.
 
-## What you must not do
+`
+
+// skillRules is what the agent must never do, and when a change to the
+// package reaches a running conversation.
+const skillRules = `## What you must not do
 
 - Never remove a member, delete a session, or delete the package. Point the
   user to the vmono TUI (run ` + "`vmono`" + ` with no arguments) for those. ` + "`vmono rm`" + `,
@@ -124,7 +151,9 @@ the change; the regenerated ` + "`AGENTS.md`" + ` is read by the next launch of 
 // SkillMarkdown returns the bundled skill's SKILL.md.
 func SkillMarkdown() string { return skillBody }
 
-// writeBundledSkill writes the vmono skill at destDir/vmono/SKILL.md.
+// writeBundledSkill writes the vmono skill alone at destDir/vmono/SKILL.md.
+// It is what a harness gets when its adapter has no entry in pluginWriters;
+// see writeIntegration.
 func writeBundledSkill(w *writer, destDir string) error {
 	return w.file(destDir+"/"+SkillName+"/SKILL.md", SkillMarkdown())
 }

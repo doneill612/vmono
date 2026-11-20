@@ -46,6 +46,7 @@ func NewRoot(runTUI func() error) *cobra.Command {
 		newSyncCmd(),
 		newDoctorCmd(),
 		newInspectCmd(),
+		newHookCmd(),
 	)
 	return root
 }
