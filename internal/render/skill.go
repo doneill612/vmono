@@ -151,7 +151,9 @@ the change; the regenerated ` + "`AGENTS.md`" + ` is read by the next launch of 
 // SkillMarkdown returns the bundled skill's SKILL.md.
 func SkillMarkdown() string { return skillBody }
 
-// writeBundledSkill writes the vmono skill at destDir/vmono/SKILL.md.
+// writeBundledSkill writes the vmono skill alone at destDir/vmono/SKILL.md.
+// It is what a harness gets when its adapter has no entry in pluginWriters;
+// see writeIntegration.
 func writeBundledSkill(w *writer, destDir string) error {
 	return w.file(destDir+"/"+SkillName+"/SKILL.md", SkillMarkdown())
 }

@@ -1,7 +1,8 @@
 // Package render generates the files that make a package directory usable
 // by a coding harness: the AGENTS.md block, CLAUDE.md, .gitignore, harness
-// adapters and the bundled vmono skill. Everything it writes can be rebuilt
-// from the manifest.
+// adapters and the vmono skill, which a harness with a plugin strategy
+// (Claude Code) receives as a plugin built around that skill. Everything it
+// writes can be rebuilt from the manifest.
 package render
 
 import (
