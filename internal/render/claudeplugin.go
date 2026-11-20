@@ -47,14 +47,48 @@ func claudePluginFiles() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	hooks, err := json.MarshalIndent(claudePluginHooks(), "", "  ")
+	if err != nil {
+		return nil, err
+	}
 	files := map[string]string{
 		".claude-plugin/plugin.json": string(manifest) + "\n",
 		"SKILL.md":                   SkillMarkdown(),
+		"hooks/hooks.json":           string(hooks) + "\n",
 	}
 	for _, c := range claudeCommands {
 		files["skills/"+c.name+"/SKILL.md"] = c.markdown()
 	}
 	return files, nil
+}
+
+// claudePluginHooks is the plugin's hooks/hooks.json: one SessionStart hook
+// that runs `vmono hook session-start`, whose output Claude Code adds to the
+// conversation as context. With no matcher it runs for every start source:
+// a new conversation, a resume, a clear, a fork, and after compaction, which
+// is when the live state is most likely to have been lost.
+//
+// It is in exec form (command plus args, no shell), so it behaves the same
+// on Windows without Git Bash. It relies on vmono being on PATH, as the
+// skill already does for every command it teaches. The timeout bounds the
+// git status calls so a slow repo cannot hold up the start of a session.
+func claudePluginHooks() map[string]any {
+	return map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "vmono",
+							"args":    []string{"hook", "session-start"},
+							"timeout": 20,
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
 // claudeCommand is one of the plugin's skills that the user invokes by name,

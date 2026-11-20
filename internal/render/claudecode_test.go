@@ -361,3 +361,40 @@ func TestClaudePluginCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudePluginSessionStartHook(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".claude/skills/vmono/hooks/hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Type    string   `json:"type"`
+				Command string   `json:"command"`
+				Args    []string `json:"args"`
+				Timeout int      `json:"timeout"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatalf("hooks.json: %v\n%s", err, data)
+	}
+	groups := f.Hooks["SessionStart"]
+	if len(f.Hooks) != 1 || len(groups) != 1 || len(groups[0].Hooks) != 1 {
+		t.Fatalf("want exactly one SessionStart hook, got %s", data)
+	}
+	if groups[0].Matcher != "" {
+		t.Errorf("no matcher, so it runs on startup, resume, clear, fork and compact: %q", groups[0].Matcher)
+	}
+	h := groups[0].Hooks[0]
+	// Exec form: args present, command a bare executable with no shell syntax.
+	if h.Type != "command" || h.Command != "vmono" || strings.Join(h.Args, " ") != "hook session-start" || h.Timeout <= 0 {
+		t.Errorf("hook = %+v", h)
+	}
+}
