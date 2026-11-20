@@ -246,3 +246,69 @@ func TestBundledSkillWrittenForBothAdapters(t *testing.T) {
 		t.Error("no adapter, no .claude directory")
 	}
 }
+
+func TestClaudePluginWrittenAndKeptExact(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	opts := Options{Adapters: []string{AdapterClaudeCode}}
+	if _, err := Render(dir, m, testSession(m), opts); err != nil {
+		t.Fatal(err)
+	}
+	read := func(rel string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("%s: %v", rel, err)
+		}
+		return string(data)
+	}
+
+	var manifest struct {
+		Name   string `json:"name"`
+		Author struct {
+			Name string `json:"name"`
+		} `json:"author"`
+	}
+	if err := json.Unmarshal([]byte(read(".claude/skills/vmono/.claude-plugin/plugin.json")), &manifest); err != nil {
+		t.Fatalf("plugin.json: %v", err)
+	}
+	if manifest.Name != "vmono" || manifest.Author.Name == "" {
+		t.Errorf("plugin.json = %+v", manifest)
+	}
+	if got := read(".claude/skills/vmono/SKILL.md"); got != SkillMarkdown() {
+		t.Error("the plugin's root SKILL.md must be the bundled skill, so a blocked plugin falls back to it")
+	}
+
+	// Anything else under the plugin directory is vmono's to remove, so a
+	// file from an older version cannot keep loading.
+	stray := filepath.Join(dir, ".claude/skills/vmono/old/nested/leftover.md")
+	if err := os.MkdirAll(filepath.Dir(stray), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stray, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := Render(dir, m, testSession(m), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".claude/skills/vmono/old")); !os.IsNotExist(err) {
+		t.Error("stray file and the directories it emptied should be removed")
+	}
+	if len(changed) != 1 || changed[0] != ".claude/skills/vmono/old/nested/leftover.md" {
+		t.Errorf("only the stray file should be reported, got %v", changed)
+	}
+
+	// With nothing stale, a render leaves the plugin untouched.
+	changed, err = Render(dir, m, testSession(m), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range changed {
+		if strings.HasPrefix(rel, ".claude/skills/vmono/") {
+			t.Errorf("unchanged plugin rewritten: %s", rel)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".claude/skills/mine/SKILL.md")); err != nil {
+		t.Error("the user's own skill must survive")
+	}
+}

@@ -97,7 +97,7 @@ func renderClaudeCode(w *writer, m *manifest.Manifest) error {
 	if err := w.file(claudeSettingsPath, string(data)+"\n"); err != nil {
 		return err
 	}
-	if err := writeBundledSkill(w, ".claude/skills"); err != nil {
+	if err := writeIntegration(w, AdapterClaudeCode, ".claude/skills"); err != nil {
 		return err
 	}
 	return syncMemberSkills(w, m, skillRoot{dest: ".claude/skills", sources: []string{".claude/skills"}})
