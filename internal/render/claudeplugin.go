@@ -2,6 +2,7 @@ package render
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // claudePluginDir is where the Claude Code plugin lives in a session. A
@@ -46,10 +47,115 @@ func claudePluginFiles() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{
+	files := map[string]string{
 		".claude-plugin/plugin.json": string(manifest) + "\n",
 		"SKILL.md":                   SkillMarkdown(),
-	}, nil
+	}
+	for _, c := range claudeCommands {
+		files["skills/"+c.name+"/SKILL.md"] = c.markdown()
+	}
+	return files, nil
+}
+
+// claudeCommand is one of the plugin's skills that the user invokes by name,
+// as /vmono:<name>. Each is a thin entry point that quotes guidance the root
+// skill already carries, so there is one wording of it to maintain.
+type claudeCommand struct {
+	name        string
+	description string
+	// argumentHint is shown after the command name; empty for none.
+	argumentHint string
+	// allowedTools are the tool rules the command may use without asking.
+	// The finish command has none: the adapter's `ask` rule for
+	// `vmono session finish` must keep prompting.
+	allowedTools []string
+	// userOnly stops Claude from running the command on its own, for the
+	// commands that act on the user's say-so.
+	userOnly bool
+	body     string
+}
+
+// markdown renders the command as a SKILL.md: YAML frontmatter, the
+// generated-file note, then the body. Every string value is written as a
+// JSON string, which is also a valid YAML double-quoted scalar, so colons
+// and asterisks in descriptions and tool rules need no escaping care.
+func (c claudeCommand) markdown() string {
+	quote := func(v string) string {
+		out, _ := json.Marshal(v)
+		return string(out)
+	}
+	var b strings.Builder
+	b.WriteString("---\nname: " + c.name + "\n")
+	b.WriteString("description: " + quote(c.description) + "\n")
+	if c.argumentHint != "" {
+		b.WriteString("argument-hint: " + quote(c.argumentHint) + "\n")
+	}
+	if len(c.allowedTools) > 0 {
+		b.WriteString("allowed-tools: " + quote(strings.Join(c.allowedTools, " ")) + "\n")
+	}
+	if c.userOnly {
+		b.WriteString("disable-model-invocation: true\n")
+	}
+	b.WriteString("---\n<!-- " + GeneratedNote + " -->\n\n")
+	b.WriteString(c.body)
+	return b.String()
+}
+
+// claudeCommands are the plugin's /vmono:<name> commands, in the order they
+// are documented.
+var claudeCommands = []claudeCommand{
+	{
+		name:        "finish",
+		description: "Land this vmono session's commits on each member's landing branch",
+		userOnly:    true,
+		body: `# Finish this vmono session
+
+The user ran this command, so they have said the work is done. If you are not
+inside a vmono session (see "Recognize a session" in the ` + "`vmono`" + ` skill), say so and
+stop.
+
+` + finishSection,
+	},
+	{
+		name:         "note",
+		description:  "Record a note on this vmono session's package, for every future session",
+		argumentHint: "[note text]",
+		allowedTools: []string{"Bash(vmono note:*)"},
+		userOnly:     true,
+		body: `# Record a package note
+
+The note belongs to the package, not to this session: every session of it,
+now and later, reads the same notes. If you are not inside a vmono session,
+say so and stop.
+
+The user's text, if any: $ARGUMENTS
+
+If that is not empty, record it as given with ` + "`vmono note`" + `, quoting it safely
+for the shell, then tell the user it was recorded and applies to every session.
+
+If it is empty, look back over the conversation for what every future session
+of this package will need, and propose one note. Show the user the text and
+write it only once they agree. If nothing qualifies, say so rather than
+inventing a note.
+
+` + whatGoesWhere,
+	},
+	{
+		name:         "status",
+		description:  "Summarize this vmono session: each member's branch, uncommitted work and what is left to land",
+		allowedTools: []string{"Bash(vmono status:*)"},
+		body: `# Session status
+
+Run ` + "`vmono status --json`" + ` and summarize it for the user in a few lines: the
+session's ` + "`state`" + ` (in-progress or finished) and, for each member, its branch, any
+uncommitted or untracked files, and how many commits are left to land on its
+` + "`into`" + ` branch. Call out anything that would block ` + "`vmono session finish`" + `
+(uncommitted work, a rebase in progress, a missing worktree).
+
+If the command says you are not inside a vmono session, tell the user that.
+This only reads state; change nothing.
+`,
+	},
 }
 
 // writeClaudePlugin writes the Claude Code plugin into the session, and

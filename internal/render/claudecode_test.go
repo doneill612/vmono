@@ -312,3 +312,52 @@ func TestClaudePluginWrittenAndKeptExact(t *testing.T) {
 		t.Error("the user's own skill must survive")
 	}
 }
+
+func TestClaudePluginCommands(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+		t.Fatal(err)
+	}
+	read := func(name string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(dir, ".claude/skills/vmono/skills", name, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return string(data)
+	}
+
+	finish := read("finish")
+	for _, want := range []string{"name: finish\n", "disable-model-invocation: true\n", finishSection, "vmono session finish --json"} {
+		if !strings.Contains(finish, want) {
+			t.Errorf("finish missing %q", want)
+		}
+	}
+	// A pre-approval here would silence the adapter's ask rule for
+	// `vmono session finish`.
+	if strings.Contains(finish, "allowed-tools") {
+		t.Error("finish must not pre-approve tools: the ask rule for vmono session finish has to keep prompting")
+	}
+
+	note := read("note")
+	for _, want := range []string{"name: note\n", `argument-hint: "[note text]"`, `allowed-tools: "Bash(vmono note:*)"`, "$ARGUMENTS", whatGoesWhere} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note missing %q", want)
+		}
+	}
+
+	status := read("status")
+	for _, want := range []string{"name: status\n", `allowed-tools: "Bash(vmono status:*)"`, "vmono status --json"} {
+		if !strings.Contains(status, want) {
+			t.Errorf("status missing %q", want)
+		}
+	}
+	if strings.Contains(status, "disable-model-invocation") {
+		t.Error("status is read-only and may be run by Claude")
+	}
+	for name, body := range map[string]string{"finish": finish, "note": note, "status": status} {
+		if !strings.HasPrefix(body, "---\nname: "+name+"\n") || !strings.Contains(body, "\n---\n<!-- "+GeneratedNote+" -->") {
+			t.Errorf("%s: frontmatter malformed:\n%s", name, body)
+		}
+	}
+}
