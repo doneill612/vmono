@@ -48,6 +48,12 @@ func TestRewriteRule(t *testing.T) {
 		{"Edit", EffectAllow, "", false},
 		{"Edit", EffectDeny, "Edit(/api/**)", true},
 		{"Bash", EffectAllow, "Bash", true},
+		// Legacy wildcard tool names are not valid allow rules any more.
+		{"Edit:*", EffectAllow, "", false},
+		{"Write:*", EffectAllow, "", false},
+		{"Bash:*", EffectAllow, "", false},
+		{"Bash:*", EffectDeny, "Bash:*", true},
+		{"Edit:*", EffectAsk, "Edit:*", true},
 	}
 	for _, c := range cases {
 		got, keep := RewriteRule("api", c.rule, c.effect)
@@ -72,7 +78,7 @@ func pkgWithMembers(t *testing.T, hooks bool) (string, *manifest.Manifest) {
 	}
 	write("api/.claude/settings.json", `{
   "permissions": {
-    "allow": ["Edit(src/**)", "Bash(npm test:*)", "Edit", "Bash(vmono rm:*)"],
+    "allow": ["Edit(src/**)", "Bash(npm test:*)", "Edit", "Bash(vmono rm:*)", "Edit:*", "Bash:*"],
     "deny": ["Read(.env)"]
   },
   "hooks": {"PostToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "npm run lint"}]}]}
@@ -138,6 +144,11 @@ func TestClaudeAdapterMergesMemberPermissions(t *testing.T) {
 	}
 	if !contains(f.Permissions.Allow, "Edit(/api/src/**)") {
 		t.Errorf("rewritten allow missing: %v", f.Permissions.Allow)
+	}
+	for _, legacy := range []string{"Edit:*", "Bash:*"} {
+		if contains(f.Permissions.Allow, legacy) {
+			t.Errorf("legacy wildcard %q is rejected by Claude Code and must not be written", legacy)
+		}
 	}
 	if contains(f.Permissions.Allow, "Edit") {
 		t.Error("a bare Edit allow from a member would widen access and must be dropped")

@@ -97,6 +97,13 @@ func splitRule(rule string) (tool, arg string, hasArg bool) {
 	return rule[:i], rule[i+1 : len(rule)-1], true
 }
 
+// isLegacyWildcardTool reports whether rule is a bare tool name followed by
+// ":*", such as "Edit:*". A rule with an argument list, like
+// "Bash(npm test:*)", is the prefix-match form and is not this.
+func isLegacyWildcardTool(rule string) bool {
+	return strings.HasSuffix(rule, ":*") && !strings.Contains(rule, "(")
+}
+
 // RewritePathPattern re-anchors a member's path pattern under the member's
 // folder at the package root, using Claude Code's "/" project anchor.
 //
@@ -125,7 +132,17 @@ func RewritePathPattern(memberPath, pattern string) string {
 // settings so it applies inside that member only. It returns ok=false for a
 // rule that cannot be scoped safely: a bare path-tool allow such as "Edit"
 // would grant access across the whole package.
+//
+// An allow rule written as a legacy wildcard tool name, such as "Edit:*" or
+// "Bash:*" (the old spelling of "this tool, unrestricted"), is dropped for
+// the same reason and because Claude Code no longer accepts it: it skips
+// each one and prints a warning for it every time the session opens. Deny
+// and ask rules in that form are left as written, since Claude Code accepts
+// wildcards there and vmono cannot tell what a member meant by one.
 func RewriteRule(memberPath, rule string, e Effect) (string, bool) {
+	if e == EffectAllow && isLegacyWildcardTool(rule) {
+		return "", false
+	}
 	tool, arg, hasArg := splitRule(rule)
 	if !pathTools[tool] {
 		return rule, true
