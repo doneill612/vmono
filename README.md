@@ -190,18 +190,24 @@ The shortcuts, none of which you have to use:
 
 | Key (sessions) | Does |
 | --- | --- |
-| `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, copy path, finish, delete |
+| `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, copy path, finish, push, delete |
 | `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
 | `n` | Start a new session: a name, optionally a branch (default `vmono/<package>/<session>`), and one `into` row per active member, filled in with the branch its source has checked out |
 | `F` | Finish the session: shows what would land on which branch, or what blocks it, then `y` lands it. `i` changes the members' landing branches, `c` also removes the session afterward. A conflict offers to launch the harness in the session to resolve it |
+| `P` | Push a finished session: shows each member's landing branch and the remote it goes to, or what blocks it, then `y` pushes. Never forced. An in-progress session is refused |
 | `m` / `d` | Members of the session / describe it |
 | `s` / `f` | Sync the session / fetch every member's source |
 | `e` | Edit the package |
 | `ctrl+d` | Delete the session; the package and its other sessions stay |
 | `y` | Copy the session path |
 
-Members, repos and harnesses have menus too (`enter`), with the same keys where they apply. Sorting is only in the palette (`sort by name`, `sort by opened`, …); choosing the same column again reverses it.
+| Key (members) | Does |
+| --- | --- |
+| `p` | Push the highlighted member's landing branch (a finished session; same dialog as `P`, for one member) |
+| `P` | Push every member of the finished session |
+
+Members, repos and harnesses have menus too (`enter`), with the same keys where they apply. The members preview shows where each landing branch is pushed and how many commits it has that the remote lacks, and a finished session's preview sums them. Sorting is only in the palette (`sort by name`, `sort by opened`, …); choosing the same column again reverses it.
 
 Creating a package returns to the packages screen; start a session from there (`enter`, then `New session`, or `→` then `n`) when you want one.
 
@@ -244,7 +250,7 @@ A branch can be checked out in only one worktree at a time, and git cannot hold 
 
 ## Finishing a session
 
-A session is done when its work has landed on a branch in each member's source repo. `vmono session finish` does that locally; it never pushes.
+A session is done when its work has landed on a branch in each member's source repo. `vmono session finish` does that locally; it never pushes. Pushing is a separate step you ask for, below.
 
 1. For each active member, the session's own commits (on the session branch, but on neither the member's base nor its landing branch) are rebased onto the landing branch, inside the session's worktree.
 2. The landing branch in the source repo then moves to the result: fast-forwarded when it is checked out in a clean worktree, updated in place when nothing has it checked out, and created when it does not exist yet.
@@ -257,7 +263,17 @@ Nothing moves unless every member can land. Uncommitted or untracked files, a la
 
 A finished session is not a removed one. It stays in the package's session list, dimmed and sorted below the others, with its worktrees and branch, until you remove it (`ctrl+d` in the TUI, `vmono session rm`, or `finish --close` to do both at once). Its state is derived rather than stored: any new commit or uncommitted edit makes it `in-progress` again, relaunching it changes nothing, and finishing again lands only the new commits. `vmono session ls`, `status` and `show --json` report the state, and `status` shows what is left to land in each member.
 
-The vmono skill teaches the agent to do this when you say the work is done (in Claude Code, `/vmono:finish` says it for you): commit in every member, run `vmono session finish`, resolve a conflict if one stops it, and report what landed where. The adapters ask for permission first, and the agent never passes `--close` or pushes.
+### Pushing a finished session
+
+Landing leaves each member's landing branch ahead of its remote. `vmono session push [pkg/session] [--member NAME]... [--dry-run] [--json]`, or `P` on the session (or `p` on a member) in the TUI, publishes them. It is only for a finished session: one that was never finished, or has new commits or edits since, is refused with exit code `2`, so nothing unlanded or half-committed is pushed.
+
+Only each member's landing branch is pushed, from its source repo, and never the session's own branch. A branch that tracks a remote branch goes there. A branch with no upstream goes to a branch of the same name on `origin` (or on the repo's only remote) and is set to track it, which is how a landing branch that finish created ends up published. A repo with several remotes and no `origin` blocks that member until you give the branch an upstream with `git branch --set-upstream-to`.
+
+Nothing is forced. If the remote branch has commits the landing branch lacks, the member is blocked, or git refuses the push, and you pull or rebase in the member's source repo and push again. Whether a branch is behind is judged from the last fetch (`f` in the TUI, or `git fetch` in the source repo), so the dialog can be a fetch out of date, and git has the final say. Members are independent: one that is blocked or refused does not stop the others, and the command exits `2` when any is blocked (`1` when git refused one). Members whose remote already has everything are skipped, so pushing twice is safe. `--dry-run` prints the plan and pushes nothing.
+
+Push before you remove the session: `finish --close` and `vmono session rm` take the session with them, after which the landing branches are plain branches in the source repos and you push them by hand.
+
+The vmono skill teaches the agent to do this when you say the work is done (in Claude Code, `/vmono:finish` says it for you): commit in every member, run `vmono session finish`, resolve a conflict if one stops it, and report what landed where. The adapters ask for permission first, and the agent never passes `--close` or pushes; pushing is yours, from the TUI or `vmono session push`.
 
 ### Packages from before sessions
 
@@ -295,6 +311,7 @@ Every read command takes `--json`. Anything that could discard work refuses unle
 | `vmono session into [pkg/session] [--all B] [--member NAME=B]...` | Show each member's landing branch, or change them |
 | `vmono session ls [pkg]` | List a package's sessions and whether each is finished |
 | `vmono session finish [pkg/session] [--into [MEMBER=]B]... [--close] [--dry-run]` | Land the session's commits on each member's branch in its source repo. Nothing is pushed; see Finishing a session |
+| `vmono session push [pkg/session] [--member NAME]... [--dry-run] [--json]` | Push a finished session's landing branches to their remotes, never forced. See Pushing a finished session |
 | `vmono session rm <pkg>/<session> [--force] [--delete-branches]` | Remove a session; the package and its other sessions stay |
 | `vmono add [pkg] <repo> [--ref] [--role R]` | Add a member to the package, and so to every session (a known repo name or any path) |
 | `vmono rm [pkg] <member> [--force] [--delete-branch]` | Remove a member from every session |
@@ -344,7 +361,7 @@ Any CLI that takes its working directory as its project can be a harness. The `a
 
 vmono runs the system `git` for everything and keeps no credentials of its own, so whatever lets `git fetch` work in a source repo works here: an SSH key in your agent, or a credential helper such as the one `gh auth setup-git` installs.
 
-Fetches never prompt. Starting a session, adding members, sync and the TUI's fetch fetch each distinct source repo once, several at a time, and a repo that fails only warns and falls back to the refs already on disk. If a fetch fails for lack of credentials, vmono says so once, naming the repos. Load your key (`ssh-add`) or sign in through your credential helper, then retry. SSH runs in batch mode so it cannot prompt; set `GIT_SSH_COMMAND` or `core.sshCommand` if you need your own ssh command, and vmono will leave it alone.
+Fetches and pushes never prompt. Starting a session, adding members, sync and the TUI's fetch fetch each distinct source repo once, several at a time, and a repo that fails only warns and falls back to the refs already on disk. If a fetch fails for lack of credentials, vmono says so once, naming the repos. Load your key (`ssh-add`) or sign in through your credential helper, then retry. SSH runs in batch mode so it cannot prompt; set `GIT_SSH_COMMAND` or `core.sshCommand` if you need your own ssh command, and vmono will leave it alone.
 
 ## Safety
 
@@ -352,6 +369,7 @@ Fetches never prompt. Starting a session, adding members, sync and the TUI's fet
 - A dirty worktree is never removed without `--force` (or typing the package or session name in the TUI). Removing a member, deleting a session or deleting a package checks every session it reaches, and one dirty worktree refuses the whole operation.
 - A branch with unmerged commits is never deleted, even with `--force`. A session branch counts as merged when it is merged into the member's base or into its landing branch, and commits already on the landing branch are not counted as unpushed.
 - `vmono session finish` moves no branch unless every member can land, and puts back the ones it moved if a later one fails.
+- `vmono session push` is the only command that pushes, and only on request. It sends one branch per member, the landing branch, never forced, and refuses a session that is not finished. A branch the remote has moved past is left alone.
 - Deleting a package or session directory by hand leaves its worktrees registered in the source repos. `vmono doctor --fix` prunes those records, and starting a session and adding or editing members release any whose directory is gone before adding a worktree, warning about each. Branches are still kept, so recreating a session of the same name asks to reuse its branch. Prefer `vmono session rm` and `vmono delete`, which remove the worktrees properly.
 - On Windows, vmono refuses to remove a session, member or package while your working directory is inside it, since Windows cannot delete a directory in use. `cd` out and run the command again, naming the session (`vmono session finish PKG/SESSION --close`). Nothing has changed when it refuses, and `--force` does not apply. Another program holding the directory open, such as an editor or a second terminal, can still make the removal fail with git's own `Permission denied`.
 - Symlinks are never followed or created.
