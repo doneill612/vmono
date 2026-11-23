@@ -26,15 +26,15 @@ func run(t *testing.T, args ...string) (string, string, error) {
 	return out.String(), errb.String(), err
 }
 
-// TestVersionFlag checks that --version prints the build's version, which is
-// "dev" for a test binary.
+// TestVersionFlag checks that --version prints "vmono (<version>)" with the
+// build's version, which is "dev" for a test binary.
 func TestVersionFlag(t *testing.T) {
 	out, _, err := run(t, "--version")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSpace(out); !strings.HasPrefix(got, "vmono version ") || strings.HasSuffix(got, "version") {
-		t.Fatalf("--version = %q, want \"vmono version <version>\"", got)
+	if got := strings.TrimSpace(out); !strings.HasPrefix(got, "vmono (") || !strings.HasSuffix(got, ")") || got == "vmono ()" {
+		t.Fatalf("--version = %q, want \"vmono (<version>)\"", got)
 	}
 }
 
