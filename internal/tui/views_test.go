@@ -47,7 +47,7 @@ func TestReposEnterScopesPackagesAndNStartsNewPackage(t *testing.T) {
 
 	goToView(d, "repos")
 	d.eventually(func() bool { return containsView(d, "beta") }, "repo list")
-	d.key("enter") // alpha
+	d.key("right") // alpha
 	d.has("packages(alpha)[1]", "payments")
 	d.lacks("auth ")
 	d.key("esc")

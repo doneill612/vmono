@@ -42,7 +42,7 @@ func TestLaunchPickerBackdropShowsTheNewSession(t *testing.T) {
 	seedPackage(t, env, "bare", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
 
-	d.key("enter") // open the package's empty sessions view
+	d.key("right") // open the package's empty sessions view
 	d.has("No sessions yet")
 	d.key("n")
 	d.typeText("first")
@@ -57,7 +57,7 @@ func TestSessionPromptValidatesAndOverridesBranch(t *testing.T) {
 	seed(t, env, "pay", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
 
-	d.key("enter", "n")
+	d.key("right", "n")
 	d.has("new session", "vmono/pay/<session>")
 	d.key("enter") // empty name
 	d.has("invalid name")
@@ -91,7 +91,7 @@ func TestPromptEscCancelsWithoutCreating(t *testing.T) {
 	env := testutil.NewEnv(t)
 	seed(t, env, "pay", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
-	d.key("enter", "n")
+	d.key("right", "n")
 	d.typeText("nope")
 	d.key("esc")
 	d.has("sessions(pay)[1]")
@@ -107,7 +107,7 @@ func TestOpenKeyLaunchesTheMostRecentlyOpenedSession(t *testing.T) {
 	seed(t, env, "pay", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
 	// Start a second session, then launch it so it becomes the latest.
-	d.key("enter", "n")
+	d.key("right", "n")
 	d.typeText("second")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
@@ -135,7 +135,7 @@ func TestDeleteSessionKeepsThePackageAndSiblings(t *testing.T) {
 	env := testutil.NewEnv(t)
 	seed(t, env, "pay", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
-	d.key("enter", "n")
+	d.key("right", "n")
 	d.typeText("extra")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
@@ -219,7 +219,7 @@ func TestEnterOnASessionOpensTheActionMenu(t *testing.T) {
 	seed(t, env, "pay", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
 
-	d.key("enter") // into the sessions view
+	d.key("right") // into the sessions view
 	d.key("enter") // on a session: the menu, not a launch
 	if d.quit || d.app.Launch() != nil {
 		t.Fatal("enter on a session must not launch directly")
@@ -241,7 +241,7 @@ func TestSessionMenuRunsTheChosenAction(t *testing.T) {
 	seed(t, env, "pay", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
 
-	d.key("enter", "enter", "down", "enter") // Launch with…
+	d.key("right", "enter", "down", "enter") // Launch with…
 	d.has("pay/work", "not now")
 	d.key("esc")
 	d.lacks("not now")
@@ -249,4 +249,22 @@ func TestSessionMenuRunsTheChosenAction(t *testing.T) {
 	d.key("enter", "m") // an action's own key works inside the menu
 	d.lacks("enter select")
 	d.has("members")
+}
+
+func TestEnterOnAPackageOpensTheActionMenu(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	seed(t, env, "pay", env.NewSource(t, "alpha"))
+	d := newDriver(t, env, "")
+
+	d.key("enter")
+	d.has("Sessions", "Launch latest", "Launch with…", "New session", "Describe", "Edit", "Sync all", "Fetch", "Copy path", "Delete")
+	d.lacks("sessions(pay)")
+
+	d.key("enter") // the first entry drills into the sessions
+	d.has("sessions(pay)[1]")
+	d.lacks("Launch latest")
+
+	d.key("esc", "enter", "d") // an entry's own key works inside the menu
+	d.has("describe(pay)")
 }

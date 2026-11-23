@@ -79,7 +79,7 @@ func TestCreateFlowEditorPickerProgressLaunch(t *testing.T) {
 	d.key("ctrl+s")
 	d.eventually(func() bool { return containsView(d, "shiny") && !containsView(d, "new package") }, "packages screen")
 	d.lacks("new session")
-	d.key("enter") // open the package's (empty) sessions view
+	d.key("right") // open the package's (empty) sessions view
 	d.key("n")
 	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
 	d.has("package shiny", "vmono/shiny/<session>")
@@ -125,7 +125,7 @@ func TestCreateAsksBeforeReusingExistingBranch(t *testing.T) {
 	d.key("space", "enter", "ctrl+s")
 	d.eventually(func() bool { return containsView(d, "reuse") && !containsView(d, "new package") }, "packages screen")
 	d.lacks("new session")
-	d.key("enter", "n")
+	d.key("right", "n")
 	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
 	d.typeText("work")
 	d.key("enter")

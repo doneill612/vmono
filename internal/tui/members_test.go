@@ -14,7 +14,7 @@ func TestEnterDrillsIntoSessionsThenMembersAndEscReturns(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "payments", "work", "beta", "wip.txt"), "x")
 
 	d := newDriver(t, env, "")
-	d.key("enter")
+	d.key("right")
 	d.has("sessions(payments)[1]", "work", "vmono/payments", "<payments>")
 	d.key("m")
 	d.has("members(payments/work)[2]", "alpha", "beta", "active", "role", "<work>")
@@ -41,13 +41,13 @@ func TestSessionsAndMembersOpenLaunchTheSession(t *testing.T) {
 	env := testutil.NewEnv(t)
 	seed(t, env, "payments", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
-	d.key("enter", "o")
+	d.key("right", "o")
 	if l := d.app.Launch(); !d.quit || l == nil || l.Package != "payments" || l.Session != "work" {
 		t.Fatalf("launch from sessions = %+v", l)
 	}
 
 	d = newDriver(t, env, "")
-	d.key("enter", "m", "o")
+	d.key("right", "m", "o")
 	if l := d.app.Launch(); !d.quit || l == nil || l.Package != "payments" || l.Session != "work" {
 		t.Fatalf("launch from members = %+v", l)
 	}
@@ -64,7 +64,7 @@ func TestDescribePackageAndMember(t *testing.T) {
 	d.key("esc")
 	d.has("packages[1]")
 
-	d.key("enter", "d")
+	d.key("right", "d")
 	d.has("describe(payments/work)", "Session", "Branch", "vmono/payments", "MEMBERS", "alpha")
 	d.key("esc")
 	d.has("sessions(payments)")

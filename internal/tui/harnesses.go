@@ -18,6 +18,10 @@ const (
 	hsColDefault
 )
 
+// harnessActions lists what the harnesses view can do to one harness. The key
+// is also the view's own shortcut for the action.
+var harnessActions = []action{{id: "default", label: "Set as default", key: "s"}}
+
 // harnessesModel lists the configured harnesses: whether each command is
 // on PATH, which adapter generates its config, and which is the default.
 // "s" makes the highlighted one the default and saves the config.
@@ -53,7 +57,7 @@ func (m *harnessesModel) Crumb() string { return "harnesses" }
 
 // Hints implements screen.
 func (m *harnessesModel) Hints() []hint {
-	return []hint{{"s", "Set default"}, {"N", "Sort name"}, {"esc", "Back"}}
+	return []hint{{"enter", "Actions"}, {"s", "Set default"}, {"N", "Sort name"}, {"esc", "Back"}}
 }
 
 // setFilter implements filterable.
@@ -99,6 +103,11 @@ func (m *harnessesModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	case refreshMsg:
 		m.fill()
 		return m, nil
+	case actionMsg:
+		if t.owner != screen(m) {
+			return m, nil
+		}
+		return m.act(t.id, t.subject)
 	case tea.KeyMsg:
 		return m.key(t)
 	}
@@ -119,18 +128,30 @@ func (m *harnessesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		return m, pop()
 	case "N":
 		m.tb.sortBy(hsColName)
-	case "s":
-		r, ok := m.tb.selected()
-		if !ok {
-			return m, nil
-		}
-		cfg := m.e.core.Cfg
-		if h := cfg.Harness[r.id]; !harness.Available(h) {
-			return m, flashErr(h.Command + " is not on PATH; install it before making it the default")
-		}
-		return m, m.setDefault(r.id)
+	}
+	r, ok := m.tb.selected()
+	if !ok {
+		return m, nil
+	}
+	if k.String() == "enter" {
+		return m, push(newActionMenu(m, "harness", r.id, "", harnessActions))
+	}
+	if a, ok := findAction(harnessActions, k.String()); ok {
+		return m.act(a.id, r.id)
 	}
 	return m, nil
+}
+
+// act performs the harness action with the given id on the named harness.
+func (m *harnessesModel) act(id, name string) (screen, tea.Cmd) {
+	if id != "default" {
+		return m, nil
+	}
+	cfg := m.e.core.Cfg
+	if h := cfg.Harness[name]; !harness.Available(h) {
+		return m, flashErr(h.Command + " is not on PATH; install it before making it the default")
+	}
+	return m, m.setDefault(name)
 }
 
 // setDefault saves a harness as the default.

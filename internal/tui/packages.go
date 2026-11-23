@@ -40,6 +40,26 @@ const (
 	pkgColOpened
 )
 
+// packageActions lists everything the packages view can do to one package, in
+// the order its menu shows it. Drilling into the sessions comes first because
+// it is what Enter on a package most often means. Each key is also the view's
+// own shortcut for the action.
+var packageActions = []action{
+	{id: "sessions", label: "Sessions", key: "right"},
+	{id: "launch", label: "Launch latest", key: "o"},
+	{id: "launch-with", label: "Launch with…", key: "l"},
+	{id: "new-session", label: "New session"},
+	{id: "describe", label: "Describe", key: "d"},
+	{id: "edit", label: "Edit", key: "e"},
+	{id: "sync", label: "Sync all", key: "s"},
+	{id: "fetch", label: "Fetch", key: "f"},
+	{id: "copy", label: "Copy path", key: "y"},
+	{id: "delete", label: "Delete", key: "ctrl+d", danger: true},
+}
+
+// legacyActions is all that can be done to a package from before sessions.
+var legacyActions = []action{{id: "copy", label: "Copy path", key: "y"}}
+
 // packagesModel is the root view: a table of every package. It can be
 // scoped to the packages that use one source repo, which the repos view
 // does when you open a repo.
@@ -105,7 +125,7 @@ func (m *packagesModel) Crumb() string {
 // Hints implements screen.
 func (m *packagesModel) Hints() []hint {
 	return []hint{
-		{"enter", "Sessions"}, {"o", "Open latest"}, {"l", "Launch…"}, {"d", "Describe"},
+		{"enter", "Actions"}, {"→", "Sessions"}, {"o", "Open latest"}, {"l", "Launch…"}, {"d", "Describe"},
 		{"n", "New package"}, {"e", "Edit"}, {"ctrl+d", "Delete"}, {"s", "Sync all"},
 		{"f", "Fetch"}, {"y", "Copy path"}, {"c", "Edit config"},
 		{"N", "Sort name"}, {"M", "Sort members"}, {"O", "Sort opened"}, {"S", "Sort state"},
@@ -240,6 +260,16 @@ func (m *packagesModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		m.e.setPackages(t.list)
 		m.fill()
 		return m, nil
+	case actionMsg:
+		if t.owner != screen(m) {
+			return m, nil
+		}
+		for _, s := range m.all {
+			if s.Name == t.subject {
+				return m.act(t.id, s)
+			}
+		}
+		return m, flashErr("package " + t.subject + " no longer exists")
 	case packageRemovedMsg:
 		m.drop(t.name)
 		return m, nil
@@ -303,37 +333,61 @@ func (m *packagesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	if !has {
 		return m, nil
 	}
-	if sel.Legacy && k.String() != "y" {
-		switch k.String() {
-		case "enter", "o", "d", "l", "e", "s", "f", "ctrl+d":
+	if sel.Legacy {
+		if a, ok := findAction(legacyActions, k.String()); ok {
+			return m.act(a.id, sel)
+		}
+		if k.String() == "enter" || findKey(packageActions, k.String()) {
 			return m, flashErr(sel.Name + " predates sessions; run `vmono doctor --fix` to migrate it")
 		}
+		return m, nil
 	}
-	switch k.String() {
-	case "enter":
+	if k.String() == "enter" {
+		return m, push(newActionMenu(m, "package", sel.Name, "", packageActions))
+	}
+	if a, ok := findAction(packageActions, k.String()); ok {
+		return m.act(a.id, sel)
+	}
+	return m, nil
+}
+
+// findKey reports whether any action is bound to key.
+func findKey(items []action, key string) bool {
+	_, ok := findAction(items, key)
+	return ok
+}
+
+// act performs the per-package action with the given id on sel. It serves
+// both the packages view's own shortcut keys and the choices made in the
+// package menu.
+func (m *packagesModel) act(id string, sel core.Summary) (screen, tea.Cmd) {
+	switch id {
+	case "sessions":
 		return m, push(newSessions(m.e, sel.Name))
-	case "o":
+	case "launch":
 		return m, m.openLatest(sel.Name, false)
-	case "d":
-		return m, push(newDescribe(m.e, sel.Name, "", ""))
-	case "l":
+	case "launch-with":
 		return m, m.openLatest(sel.Name, true)
-	case "y":
+	case "new-session":
+		return m, push(newSessionPrompt(m.e, sel.Name))
+	case "describe":
+		return m, push(newDescribe(m.e, sel.Name, "", ""))
+	case "copy":
 		if err := clipboard.WriteAll(sel.Path); err != nil {
 			return m, flashErr("could not copy: " + err.Error() + " — " + sel.Path)
 		}
 		return m, flash("copied " + paths.Contract(sel.Path))
-	case "f":
+	case "fetch":
 		return m, tea.Batch(flash("fetching "+sel.Name+"…"), fetchAll(m.e.core, sel.Name))
-	case "e":
+	case "edit":
 		p, err := m.e.core.Load(sel.Name)
 		if err != nil {
 			return m, flashErr(err.Error())
 		}
 		return m, push(newEditor(m.e, p))
-	case "s":
+	case "sync":
 		return m, push(newProgress(m.e, syncOp(m.e.core, sel.Name)))
-	case "ctrl+d":
+	case "delete":
 		return m, m.startDelete(sel.Name)
 	}
 	return m, nil

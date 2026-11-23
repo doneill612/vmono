@@ -99,7 +99,7 @@ func TestSessionSyncEndsWithLaunchNow(t *testing.T) {
 	}
 	d := newDriver(t, env, "")
 
-	d.key("enter", "s")
+	d.key("right", "s")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 	d.has("fake", "default", "heal/work")
 	if _, err := os.Stat(filepath.Join(env.PackageRoot, "heal", "work", "alpha", "README.md")); err != nil {

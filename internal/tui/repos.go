@@ -38,6 +38,14 @@ func canonPath(p string) string {
 	return filepath.Clean(p)
 }
 
+// repoActions lists everything the repos view can do to one repo. Each key is
+// also the view's own shortcut for the action.
+var repoActions = []action{
+	{id: "packages", label: "Packages using it", key: "right"},
+	{id: "new-package", label: "New package", key: "n"},
+	{id: "copy", label: "Copy path", key: "y"},
+}
+
 // reposModel lists every repo vmono knows (source roots, configured repos,
 // and ones added by path) with how many packages use each. Opening a repo
 // shows those packages; "a" finds repos that are not listed.
@@ -106,7 +114,7 @@ func (m *reposModel) Crumb() string { return "repos" }
 // Hints implements screen.
 func (m *reposModel) Hints() []hint {
 	return []hint{
-		{"enter", "Packages"}, {"n", "New package"}, {"a", "Find repo"}, {"y", "Copy path"},
+		{"enter", "Actions"}, {"→", "Packages"}, {"n", "New package"}, {"a", "Find repo"}, {"y", "Copy path"},
 		{"N", "Sort name"}, {"U", "Sort used by"}, {"esc", "Back"},
 	}
 }
@@ -192,6 +200,16 @@ func (m *reposModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		}
 		m.addRepo(t.repo)
 		return m, flash("added " + t.repo.Name)
+	case actionMsg:
+		if t.owner != screen(m) {
+			return m, nil
+		}
+		for _, r := range m.repos {
+			if r.Path == t.subject {
+				return m.act(t.id, r)
+			}
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.key(t)
 	}
@@ -234,12 +252,24 @@ func (m *reposModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	if !has {
 		return m, nil
 	}
-	switch k.String() {
-	case "enter":
+	if k.String() == "enter" {
+		return m, push(newActionMenu(m, "repo", sel.Name, paths.Contract(sel.Path), repoActions))
+	}
+	if a, ok := findAction(repoActions, k.String()); ok {
+		return m.act(a.id, sel)
+	}
+	return m, nil
+}
+
+// act performs the repo action with the given id on sel. It serves both the
+// repos view's own shortcut keys and the choices made in the repo menu.
+func (m *reposModel) act(id string, sel discover.Repo) (screen, tea.Cmd) {
+	switch id {
+	case "packages":
 		return m, push(newScopedPackages(m.e, sel.Path, sel.Name))
-	case "n":
+	case "new-package":
 		return m, push(newEditorWithRepo(m.e, sel))
-	case "y":
+	case "copy":
 		if err := clipboard.WriteAll(sel.Path); err != nil {
 			return m, flashErr("could not copy: " + err.Error() + " — " + sel.Path)
 		}
