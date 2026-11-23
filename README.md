@@ -112,7 +112,8 @@ Navigation is by drilling down: `enter` goes in, `esc` goes back. `:` opens a co
 
 | Key (sessions) | Does |
 | --- | --- |
-| `enter` / `o` | Launch the default harness in the session |
+| `enter` | Open a menu of everything you can do to the session (launch, launch with…, members, describe, sync, fetch, copy path, finish, delete). Arrow keys and `enter` choose; each entry's own key works inside the menu too |
+| `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
 | `n` | Start a new session: a name, optionally a branch (default `vmono/<package>/<session>`), and one `into` row per active member, filled in with the branch its source has checked out |
 | `F` | Finish the session: shows what would land on which branch, or what blocks it, then `y` lands it. `i` changes the members' landing branches, `c` also removes the session afterward. A conflict offers to launch the harness in the session to resolve it |

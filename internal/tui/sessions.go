@@ -83,7 +83,7 @@ func (m *sessionsModel) Crumb() string { return m.name }
 // Hints implements screen.
 func (m *sessionsModel) Hints() []hint {
 	return []hint{
-		{"enter", "Open"}, {"l", "Launch…"}, {"n", "New session"}, {"m", "Members"},
+		{"enter", "Actions"}, {"o", "Launch"}, {"l", "Launch with…"}, {"n", "New session"}, {"m", "Members"},
 		{"d", "Describe"}, {"y", "Copy path"}, {"e", "Edit package"}, {"s", "Sync"},
 		{"f", "Fetch"}, {"F", "Finish"}, {"ctrl+d", "Delete"},
 		{"N", "Sort name"}, {"O", "Sort opened"}, {"esc", "Back"},
@@ -210,6 +210,16 @@ func (m *sessionsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 			return m, tea.Batch(flashErr("fetch "+t.name+": "+t.err.Error()), m.load())
 		}
 		return m, tea.Batch(flash(fmt.Sprintf("fetched %d member(s)", t.n)), m.load())
+	case sessionActionMsg:
+		if t.owner != m {
+			return m, nil
+		}
+		for _, s := range m.list {
+			if s.Name == t.session {
+				return m.act(t.key, s)
+			}
+		}
+		return m, flashErr("session " + t.session + " no longer exists")
 	case tea.KeyMsg:
 		return m.key(t)
 	}
@@ -240,15 +250,31 @@ func (m *sessionsModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		}
 		return m, push(newEditor(m.e, m.pkg))
 	case "f":
-		return m, tea.Batch(flash("fetching "+m.name+"…"), fetchAll(m.e.core, m.name))
+		return m, m.fetch()
 	}
 	sel, ok := m.selected()
 	if !ok {
 		return m, nil
 	}
-	switch k.String() {
-	case "enter", "o":
+	if k.String() == "enter" {
+		return m, push(newSessionMenu(m, sel.Name))
+	}
+	return m.act(k.String(), sel)
+}
+
+// fetch starts fetching every member's source for the package.
+func (m *sessionsModel) fetch() tea.Cmd {
+	return tea.Batch(flash("fetching "+m.name+"…"), fetchAll(m.e.core, m.name))
+}
+
+// act performs the per-session action bound to key on sel. It serves both
+// the sessions view's own keys and the choices made in the session menu.
+func (m *sessionsModel) act(key string, sel core.SessionSummary) (screen, tea.Cmd) {
+	switch key {
+	case "o":
 		return m, func() tea.Msg { return launchMsg{LaunchRequest{Package: m.name, Session: sel.Name}} }
+	case "f":
+		return m, m.fetch()
 	case "l":
 		return m, push(newLaunchPicker(m.e, m.name, sel.Name, "Launch with"))
 	case "m":

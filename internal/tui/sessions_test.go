@@ -212,3 +212,41 @@ func TestHandoffTargetsASessionAndExplainsAmbiguity(t *testing.T) {
 
 // coreSessionOptions is a default-branch session request.
 func coreSessionOptions() core.SessionOptions { return core.SessionOptions{} }
+
+func TestEnterOnASessionOpensTheActionMenu(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	seed(t, env, "pay", env.NewSource(t, "alpha"))
+	d := newDriver(t, env, "")
+
+	d.key("enter") // into the sessions view
+	d.key("enter") // on a session: the menu, not a launch
+	if d.quit || d.app.Launch() != nil {
+		t.Fatal("enter on a session must not launch directly")
+	}
+	d.has("Launch", "Launch with…", "Members", "Describe", "Sync", "Fetch", "Copy path", "Finish", "Delete")
+
+	d.key("esc")
+	d.lacks("enter select")
+
+	d.key("enter", "enter") // menu, then its first entry
+	if l := d.app.Launch(); !d.quit || l == nil || l.Package != "pay" || l.Session != "work" {
+		t.Fatalf("launch = %+v", l)
+	}
+}
+
+func TestSessionMenuRunsTheChosenAction(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	seed(t, env, "pay", env.NewSource(t, "alpha"))
+	d := newDriver(t, env, "")
+
+	d.key("enter", "enter", "down", "enter") // Launch with…
+	d.has("pay/work", "not now")
+	d.key("esc")
+	d.lacks("not now")
+
+	d.key("enter", "m") // an action's own key works inside the menu
+	d.lacks("enter select")
+	d.has("members")
+}

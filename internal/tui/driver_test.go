@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -72,6 +73,14 @@ func (d *driver) run(cmd tea.Cmd) {
 	}
 	if strings.HasPrefix(fmt.Sprintf("%T", msg), "cursor.") {
 		return // cursor blink timers; irrelevant to behavior
+	}
+	if fmt.Sprintf("%T", msg) == "tea.sequenceMsg" {
+		// tea.Sequence's message type is unexported: a slice of commands run in order.
+		v := reflect.ValueOf(msg)
+		for i := 0; i < v.Len(); i++ {
+			d.run(v.Index(i).Interface().(tea.Cmd))
+		}
+		return
 	}
 	switch m := msg.(type) {
 	case nil:
