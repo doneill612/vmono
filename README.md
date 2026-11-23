@@ -47,20 +47,58 @@ A tarball downloaded in a browser on macOS is quarantined by Gatekeeper; clear i
 
 ### From source
 
+Requires [Go](https://go.dev/dl/) 1.25 or newer and git 2.30 or newer. Every route below installs the same binary; pick the one for your platform.
+
+**macOS and Linux** (and WSL), with `make`:
+
 ```sh
+git clone https://github.com/doneill612/vmono
+cd vmono
 make install
 ```
 
-This builds the binary and copies it to `~/.local/bin/vmono`. Requires Go. Without `make` (for example on Windows), `go install github.com/doneill612/vmono/cmd/vmono@latest` also works.
+This builds the binary and copies it to `~/.local/bin/vmono`. Override the location with `PREFIX=` or `BINDIR=`.
 
-| Target | Does |
-| --- | --- |
-| `make build` | Compile to `bin/vmono`, stamped with the git version |
-| `make install` | Build, then install to `~/.local/bin` (override with `PREFIX=` or `BINDIR=`) |
-| `make uninstall` | Remove the installed binary |
-| `make test` | Run `go vet` and the test suite |
-| `make snapshot` | Dry-run the release build into `dist/` (needs [GoReleaser](https://goreleaser.com)) |
-| `make clean` | Remove `bin/` and `dist/` |
+**Windows**, in PowerShell. `make` is not normally installed on Windows, so these are the same steps by hand:
+
+```powershell
+git clone https://github.com/doneill612/vmono
+cd vmono
+
+# Build, stamped with the git version
+$version = git describe --tags --always --dirty
+go build -trimpath -ldflags "-X github.com/doneill612/vmono/internal/buildinfo.version=$version" -o bin\vmono.exe .\cmd\vmono
+
+# Install to the same folder as the install script, and add it to your user PATH
+$dir = Join-Path $env:LOCALAPPDATA 'Programs\vmono\bin'
+New-Item -ItemType Directory -Force $dir | Out-Null
+Copy-Item bin\vmono.exe $dir -Force
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if (($userPath -split ';') -notcontains $dir) {
+    $newPath = (@($userPath, $dir) | Where-Object { $_ }) -join ';'
+    [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+}
+```
+
+This installs to `%LOCALAPPDATA%\Programs\vmono\bin`, the same place as the install script, so either one can replace the other. Open a new terminal afterwards so the `PATH` change takes effect.
+
+**Any OS, without cloning**, with `go install`:
+
+```sh
+go install github.com/doneill612/vmono/cmd/vmono@latest
+```
+
+Go puts the binary in `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows), which must be on your `PATH`. The version is read from the module, so `vmono --version` reports the tag.
+
+The rest of the Makefile, and what to run without it:
+
+| Task | With `make` | Without `make` (any OS) |
+| --- | --- | --- |
+| Build to `bin/` | `make build` | the `go build` line above |
+| Test | `make test` | `go vet ./...` then `go test ./...` |
+| Uninstall | `make uninstall` | delete the installed `vmono` / `vmono.exe` |
+| Clean | `make clean` | delete the `bin` and `dist` folders |
+| Dry-run the release build | `make snapshot` | `goreleaser release --snapshot --clean` (needs [GoReleaser](https://goreleaser.com)) |
 
 ### Releasing
 
