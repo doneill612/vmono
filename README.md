@@ -86,33 +86,38 @@ Add `eval "$(vmono shell-init zsh)"` (or `bash`, `fish`, `pwsh`) to your shell r
 
 ## The TUI
 
-`vmono` with no arguments opens a full-screen console in the spirit of k9s: a header with your config and the keys for the current view, a framed table with its title in the border, breadcrumbs and notices along the bottom.
+`vmono` with no arguments opens a full-screen console. A one-line bar at the top shows where you are (`packages › payments › work`) and how many packages there are; a one-line footer shows the few keys worth knowing and any notice. Between them is the list, and on a terminal 100 columns or wider a preview of the highlighted row sits beside it: a package's purpose, sessions and members, a session's branch and the live state of each member.
+
+You rarely need a key. **`enter` opens a menu of everything you can do to the highlighted row**, with the most common action first: `Sessions` for a package, `Launch` for a session. Each entry shows its shortcut, and pressing that key from the list (or inside the menu) does the same thing, so the menu is also how you learn them. `?` lists every shortcut for the view you are on.
 
 | View | Opened by | Shows |
 | --- | --- | --- |
-| packages | start, `:packages` | Every package: members (`2A 1R` = two active, one reference), session count, harness, clean or dirty (any session), last opened. A package from before sessions shows `migrate` |
-| sessions | `enter` on a package, `:sessions [pkg]` | Per session: branch, clean, dirty or finished (with when), last opened. Finished sessions are dimmed and sorted below the rest |
-| members | `m` on a session, `:members [pkg/session]` | Per member in that session: mode, branch or ref, HEAD, upstream, ahead/behind, dirty and untracked counts, role |
+| packages | start | Every package: members (`2A 1R` = two active, one reference), session count, harness, clean or dirty (any session), last opened. A package from before sessions shows `migrate` |
+| sessions | `→` on a package | Per session: branch, clean, dirty or finished (with when), last opened. Finished sessions are dimmed and sorted below the rest |
+| members | `m` on a session | Per member in that session: mode, branch or ref, HEAD, upstream, ahead/behind, dirty and untracked counts, role |
 | describe | `d` | Purpose, context, notes, sessions and members for a package; add a session's branch and live state when opened from one; location and git state for a member |
-| repos | `:repos` | Every known repo and how many packages use it; `enter` lists those packages |
-| harnesses | `:harnesses` | Configured harnesses, whether each is on `PATH`, and the default |
+| repos | palette | Every known repo and how many packages use it; `→` lists those packages |
+| harnesses | palette | Configured harnesses, whether each is on `PATH`, and the default |
 
-Navigation is by drilling down: `enter` goes in, `esc` goes back. `:` opens a command bar with tab completion (`:sessions pay<tab>`, `:members pay/work`, `:repos`, `:harnesses`, `:config`, `:new`, `:quit`), `/` filters the current table, and `?` lists the keys for the view you are on. Nothing refreshes by itself: `ctrl+r` reloads the current view, and a view reloads when you come back to it.
+`esc` goes back. `:` (or `ctrl+p`) opens the command palette, a fuzzy-filtered list of everything you can do from where you are: go to a view (`repos`, `harnesses`, `settings`, `new package`, `sessions of <package>`), any action on the highlighted row, sort the list by a column, reload, quit. `/` filters the current list as you type. Nothing refreshes by itself: `ctrl+r` reloads the current view, and a view reloads when you come back to it.
+
+The shortcuts, none of which you have to use:
 
 | Key (packages) | Does |
 | --- | --- |
-| `enter` | Drill into the sessions |
+| `enter` | Open the menu |
+| `→` | Drill into the sessions |
 | `o` / `l` | Open the most recently opened session with the default harness / pick a harness. A package with no sessions asks you to start one |
 | `d` | Describe |
 | `n` / `e` | New package / edit the selected one (applies to every session) |
 | `s` / `f` | Sync every session / fetch every member's source |
 | `ctrl+d` | Delete the package and all its sessions (asks first; typed confirmation if work would be lost in any of them) |
 | `y` | Copy the package path |
-| `N` `M` `O` `S` | Sort by name, members, opened, state; press again to reverse |
+| `c` | Edit the config (package root, source roots, default harness) |
 
 | Key (sessions) | Does |
 | --- | --- |
-| `enter` | Open a menu of everything you can do to the session (launch, launch with…, members, describe, sync, fetch, copy path, finish, delete). Arrow keys and `enter` choose; each entry's own key works inside the menu too |
+| `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, copy path, finish, delete |
 | `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
 | `n` | Start a new session: a name, optionally a branch (default `vmono/<package>/<session>`), and one `into` row per active member, filled in with the branch its source has checked out |
@@ -123,7 +128,9 @@ Navigation is by drilling down: `enter` goes in, `esc` goes back. `:` opens a co
 | `ctrl+d` | Delete the session; the package and its other sessions stay |
 | `y` | Copy the session path |
 
-Creating a package returns to the packages screen; start a session from there (`enter`, then `n`) when you want one.
+Members, repos and harnesses have menus too (`enter`), with the same keys where they apply. Sorting is only in the palette (`sort by name`, `sort by opened`, …); choosing the same column again reverses it.
+
+Creating a package returns to the packages screen; start a session from there (`enter`, then `New session`, or `→` then `n`) when you want one.
 
 Repos that are not under a source root, or every repo when no source root is set, are found with the repo finder (`p` while choosing members, `a` in the repos view). Type a path and it lists the directories there, marks the git repos (`●`), and scans below a typed directory for repos nested deeper. `tab` completes, `enter` picks a repo or steps into a directory; picked repos are remembered.
 
