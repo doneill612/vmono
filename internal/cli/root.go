@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/doneill612/vmono/internal/buildinfo"
 	"github.com/spf13/cobra"
 )
 
@@ -16,6 +17,7 @@ func NewRoot(runTUI func() error) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "vmono",
 		Short:         "Manage packages of repos, and the sessions that work on them",
+		Version:       buildinfo.Version(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

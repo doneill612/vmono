@@ -13,21 +13,56 @@ vmono manages **packages** and their **sessions**. A package is a set of git rep
 
 ## Install
 
+macOS and Linux:
+
+```sh
+curl -fsSL https://github.com/doneill612/vmono/releases/latest/download/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://github.com/doneill612/vmono/releases/latest/download/install.ps1 | iex
+```
+
+The script downloads the archive for your OS and CPU from the latest [release](https://github.com/doneill612/vmono/releases), checks it against the release's `checksums.txt`, and installs `vmono` to `~/.local/bin` (`%LOCALAPPDATA%\Programs\vmono\bin` on Windows, which it adds to your user `PATH`). On macOS and Linux, make sure `~/.local/bin` is on your `PATH`. Requires git 2.30 or newer.
+
+| Variable | Does |
+| --- | --- |
+| `VMONO_VERSION` | Install a specific release, e.g. `v0.1.0`, instead of the latest. On macOS and Linux you can also pass it as an argument: `... \| sh -s v0.1.0` |
+| `VMONO_INSTALL_DIR` | Install somewhere else |
+| `VMONO_DOWNLOAD_BASE` | Download from a mirror of the releases page |
+
+To uninstall, delete the `vmono` binary (and, on Windows, its folder from your `PATH`). To check what you have, run `vmono --version`.
+
+A tarball downloaded in a browser on macOS is quarantined by Gatekeeper; clear it with `xattr -d com.apple.quarantine vmono`. The install script doesn't need this.
+
+### From source
+
 ```sh
 make install
 ```
 
-This builds the binary and copies it to `~/.local/bin/vmono`; make sure that directory is on your `PATH`. Requires Go and git 2.30 or newer.
+This builds the binary and copies it to `~/.local/bin/vmono`. Requires Go. Without `make` (for example on Windows), `go install github.com/doneill612/vmono/cmd/vmono@latest` also works.
 
 | Target | Does |
 | --- | --- |
-| `make build` | Compile to `bin/vmono` |
+| `make build` | Compile to `bin/vmono`, stamped with the git version |
 | `make install` | Build, then install to `~/.local/bin` (override with `PREFIX=` or `BINDIR=`) |
 | `make uninstall` | Remove the installed binary |
 | `make test` | Run `go vet` and the test suite |
-| `make clean` | Remove `bin/` |
+| `make snapshot` | Dry-run the release build into `dist/` (needs [GoReleaser](https://goreleaser.com)) |
+| `make clean` | Remove `bin/` and `dist/` |
 
-Without `make` (for example on Windows), `go install github.com/doneill612/vmono/cmd/vmono@latest` also works.
+### Releasing
+
+Push a version tag. CI runs the tests, publishes the release with GoReleaser, then installs it on Linux, macOS and Windows with the install scripts:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+A tag with a suffix, such as `v0.2.0-rc.1`, is published as a prerelease, which `latest` skips.
 
 ## Quick start
 

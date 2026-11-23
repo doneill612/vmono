@@ -27,21 +27,23 @@ jobs:
       - name: build
         run: go build ./cmd/vmono
 
-  cross-build:
-    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+  release-config:
+    name: release config
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: go build -o /dev/null ./cmd/vmono
+      - name: shellcheck install.sh
+        run: shellcheck install.sh
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: check
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean

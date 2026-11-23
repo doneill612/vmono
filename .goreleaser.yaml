@@ -1,0 +1,65 @@
+# GoReleaser config. Run by .github/workflows/release.yml when a v* tag is
+# pushed, and in snapshot mode by ci.yml to keep this file honest.
+version: 2
+
+project_name: vmono
+
+builds:
+  - id: vmono
+    main: ./cmd/vmono
+    binary: vmono
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/doneill612/vmono/internal/buildinfo.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+# Archive names carry no version, so releases/latest/download/<name> always
+# resolves and install.sh / install.ps1 never need the GitHub API.
+archives:
+  - id: vmono
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  prerelease: auto
+  extra_files:
+    - glob: ./install.sh
+    - glob: ./install.ps1
+
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Other
+      order: 2
+  filters:
+    exclude:
+      - '^docs(\(.+\))?:'
+      - '^test(\(.+\))?:'
+      - '^chore(\(.+\))?:'
+      - '^ci(\(.+\))?:'
+      - "^Merge "
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
