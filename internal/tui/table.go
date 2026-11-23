@@ -53,9 +53,8 @@ type row struct {
 const gap = "  "
 
 // table is the list widget behind every view: a header with sort markers,
-// rows with a full-width selection bar, a cursor with scrolling, and a
-// fuzzy filter. The selected row is drawn from plain text so the bar's
-// colors are never broken up by per-cell styles.
+// rows with a full-width selection band marked by an accent gutter, a cursor
+// with scrolling, and a fuzzy filter.
 type table struct {
 	cols     []column
 	all      []row
@@ -311,7 +310,7 @@ func (t *table) view(w, h int) string {
 
 	heads := make([]string, len(t.cols))
 	for i, c := range t.cols {
-		title := strings.ToUpper(c.title)
+		title := c.title
 		if i == t.sortCol {
 			if t.sortDesc {
 				title += "↓"
@@ -322,7 +321,7 @@ func (t *table) view(w, h int) string {
 		heads[i] = fit(title, ws[i], c.right)
 	}
 	var b strings.Builder
-	b.WriteString(" " + styleHeaderCol.Render(strings.Join(heads, gap)))
+	b.WriteString(" " + styleColHead.Render(strings.Join(heads, gap)))
 
 	if len(t.rows) == 0 {
 		if t.empty != "" {
@@ -345,15 +344,20 @@ func (t *table) view(w, h int) string {
 		r := t.rows[i]
 		b.WriteString("\n")
 		if i == t.cursor && !t.static {
+			sep := styleSelBg.Render(gap)
 			parts := make([]string, len(t.cols))
 			for c := range t.cols {
-				text := ""
+				cl := cell{}
 				if c < len(r.cells) {
-					text = r.cells[c].text
+					cl = r.cells[c]
 				}
-				parts[c] = fit(text, ws[c], t.cols[c].right)
+				parts[c] = cl.style.Inherit(styleSelBg).Render(fit(cl.text, ws[c], t.cols[c].right))
 			}
-			b.WriteString(styleSelRow.Width(w).Render(" " + strings.Join(parts, gap)))
+			line := styleSelGutter.Render("▌") + strings.Join(parts, sep)
+			if pad := w - lipgloss.Width(line); pad > 0 {
+				line += styleSelBg.Render(strings.Repeat(" ", pad))
+			}
+			b.WriteString(line)
 			continue
 		}
 		parts := make([]string, len(t.cols))

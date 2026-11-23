@@ -159,6 +159,11 @@ func (m *reposModel) fill() {
 	m.tb.setRows(rows)
 }
 
+// footerHints implements footerHinter.
+func (m *reposModel) footerHints() []hint {
+	return []hint{{"enter", "actions"}, {"a", "find repo"}, {"/", "filter"}, {"esc", "back"}}
+}
+
 // tbl implements tabular.
 func (m *reposModel) tbl() *table { return m.tb }
 

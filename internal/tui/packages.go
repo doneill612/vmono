@@ -121,20 +121,17 @@ func (m *packagesModel) Hints() []hint {
 	}
 }
 
-// contextHints implements contextHinter: "c" edits the package root, source
-// roots and default harness shown in the header.
-func (m *packagesModel) contextHints() []hint { return []hint{{"c", "Edit config"}} }
-
-// frameTitle formats a table's frame title as name(scope)(/filter)[count].
+// frameTitle formats a list's heading: its name, then the scope and filter it
+// is narrowed by, then how many rows it shows.
 func frameTitle(name, scope, filter string, n int) string {
-	t := name
+	t := strings.ToUpper(name[:1]) + name[1:]
 	if scope != "" {
-		t += "(" + scope + ")"
+		t += " · " + scope
 	}
 	if filter != "" {
-		t += "(/" + filter + ")"
+		t += " /" + filter
 	}
-	return fmt.Sprintf("%s[%d]", t, n)
+	return fmt.Sprintf("%s (%d)", t, n)
 }
 
 // setFilter implements filterable.
@@ -501,6 +498,11 @@ func summarizeFetch(owners map[string][]string, results []gitx.FetchResult) (int
 		reason = gitx.AuthHint
 	}
 	return n, fmt.Errorf("fetched %d member(s); couldn't fetch %s: %s", n, strings.Join(failed, ", "), reason)
+}
+
+// footerHints implements footerHinter.
+func (m *packagesModel) footerHints() []hint {
+	return []hint{{"enter", "actions"}, {"n", "new package"}, {"/", "filter"}}
 }
 
 // tbl implements tabular.

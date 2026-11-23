@@ -25,7 +25,7 @@ func TestReposViewListsReposWithUsage(t *testing.T) {
 
 	goToView(d, "repos")
 	d.eventually(func() bool { return containsView(d, "beta") }, "repo list")
-	d.has("repos[2]", "alpha", "beta", "USED BY", "<repos>")
+	d.has("Repos (2)", "alpha", "beta", "used by", "Repos")
 	m := d.app.top().(*reposModel)
 	used := map[string]string{}
 	for _, r := range m.tb.rows {
@@ -48,15 +48,15 @@ func TestReposEnterScopesPackagesAndNStartsNewPackage(t *testing.T) {
 	goToView(d, "repos")
 	d.eventually(func() bool { return containsView(d, "beta") }, "repo list")
 	d.key("right") // alpha
-	d.has("packages(alpha)[1]", "payments")
+	d.has("Packages · alpha (1)", "payments")
 	d.lacks("auth ")
 	d.key("esc")
-	d.has("repos[2]")
+	d.has("Repos (2)")
 
 	d.key("n")
-	d.has("new package", "alpha", "active") // preselected as an active member
+	d.has("New package", "alpha", "active") // preselected as an active member
 	d.key("esc")
-	d.has("repos[2]")
+	d.has("Repos (2)")
 }
 
 func TestReposFindAddsAndSelectsRepo(t *testing.T) {
@@ -69,7 +69,7 @@ func TestReposFindAddsAndSelectsRepo(t *testing.T) {
 	d.key("ctrl+u")
 	d.typeText(elsewhere)
 	d.key("enter")
-	d.has("added elsewhere", "repos[1]")
+	d.has("added elsewhere", "Repos (1)")
 }
 
 func TestHarnessesViewSetsDefault(t *testing.T) {
@@ -77,7 +77,7 @@ func TestHarnessesViewSetsDefault(t *testing.T) {
 	useFakeHarness(t, env)
 	d := newDriver(t, env, "")
 	goToView(d, "harnesses")
-	d.has("harnesses[2]", "fake", "missing", "INSTALLED")
+	d.has("Harnesses (2)", "fake", "missing", "installed")
 
 	d.key("j", "s") // missing is not on PATH
 	d.has("is not on PATH")
@@ -128,5 +128,5 @@ func TestEnterOnARepoOpensTheActionMenu(t *testing.T) {
 	d.key("enter")
 	d.has("Packages using it", "New package", "Copy path")
 	d.key("enter") // the first entry lists the packages that use the repo
-	d.has("packages(alpha)[1]", "payments")
+	d.has("Packages · alpha (1)", "payments")
 }

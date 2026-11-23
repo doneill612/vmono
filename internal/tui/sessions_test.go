@@ -84,7 +84,7 @@ func TestSessionPromptValidatesAndOverridesBranch(t *testing.T) {
 		t.Errorf("branch = %q, want the override", br)
 	}
 	d.key("esc")
-	d.has("sessions(pay)[2]", "hotfix", "work")
+	d.has("Sessions · pay (2)", "hotfix", "work")
 }
 
 func TestPromptEscCancelsWithoutCreating(t *testing.T) {
@@ -94,8 +94,8 @@ func TestPromptEscCancelsWithoutCreating(t *testing.T) {
 	d.key("right", "n")
 	d.typeText("nope")
 	d.key("esc")
-	d.has("sessions(pay)[1]")
-	d.lacks("new session")
+	d.has("Sessions · pay (1)")
+	d.lacks("vmono/pay/<session>")
 	if _, err := os.Stat(filepath.Join(env.PackageRoot, "pay", "nope")); err == nil {
 		t.Error("cancelling must not create anything")
 	}
@@ -140,7 +140,7 @@ func TestDeleteSessionKeepsThePackageAndSiblings(t *testing.T) {
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 	d.key("esc")
-	d.has("sessions(pay)[2]")
+	d.has("Sessions · pay (2)")
 
 	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "pay", "extra", "alpha", "wip.txt"), "x")
 	d.key("j") // sorted by opened/name: move onto "extra"
@@ -248,7 +248,7 @@ func TestSessionMenuRunsTheChosenAction(t *testing.T) {
 
 	d.key("enter", "m") // an action's own key works inside the menu
 	d.lacks("enter select")
-	d.has("members")
+	d.has("Members")
 }
 
 func TestEnterOnAPackageOpensTheActionMenu(t *testing.T) {
@@ -259,12 +259,12 @@ func TestEnterOnAPackageOpensTheActionMenu(t *testing.T) {
 
 	d.key("enter")
 	d.has("Sessions", "Launch latest", "Launch with…", "New session", "Describe", "Edit", "Sync all", "Fetch", "Copy path", "Delete")
-	d.lacks("sessions(pay)")
+	d.lacks("Sessions · pay")
 
 	d.key("enter") // the first entry drills into the sessions
-	d.has("sessions(pay)[1]")
+	d.has("Sessions · pay (1)")
 	d.lacks("Launch latest")
 
 	d.key("esc", "enter", "d") // an entry's own key works inside the menu
-	d.has("describe(pay)")
+	d.has("Describe · pay")
 }

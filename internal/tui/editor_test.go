@@ -52,7 +52,7 @@ func TestCreateFlowEditorPickerProgressLaunch(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("n")
-	d.has("new package", "Name", "Purpose", "Context", "Harness", "Members")
+	d.has("New package", "Name", "Purpose", "Context", "Harness", "Members")
 	d.typeText("Bad Name")
 	d.key("ctrl+s")
 	d.has("invalid name")
@@ -65,19 +65,19 @@ func TestCreateFlowEditorPickerProgressLaunch(t *testing.T) {
 	d.key("tab", "tab") // context, harness
 	d.key("tab")        // members
 	d.key("ctrl+s")     // no members yet -> opens the picker
-	d.has("repos(select)", "alpha", "beta", "contracts")
+	d.has("Choose repos", "alpha", "beta", "contracts")
 
 	d.key("space")             // alpha: active
 	d.key("down", "down", "r") // contracts: reference
 	d.key("enter")
-	d.has("new package", "alpha", "contracts")
+	d.has("New package", "alpha", "contracts")
 	d.key("r") // role for the first member
 	d.typeText("the gateway")
 	d.key("enter")
 	d.has("the gateway")
 
 	d.key("ctrl+s")
-	d.eventually(func() bool { return containsView(d, "shiny") && !containsView(d, "new package") }, "packages screen")
+	d.eventually(func() bool { return containsView(d, "shiny") && !containsView(d, "New package") }, "packages screen")
 	d.lacks("new session")
 	d.key("right") // open the package's (empty) sessions view
 	d.key("n")
@@ -121,9 +121,9 @@ func TestCreateAsksBeforeReusingExistingBranch(t *testing.T) {
 	d.key("n")
 	d.typeText("reuse")
 	d.key("ctrl+s")
-	d.has("repos(select)")
+	d.has("Choose repos")
 	d.key("space", "enter", "ctrl+s")
-	d.eventually(func() bool { return containsView(d, "reuse") && !containsView(d, "new package") }, "packages screen")
+	d.eventually(func() bool { return containsView(d, "reuse") && !containsView(d, "New package") }, "packages screen")
 	d.lacks("new session")
 	d.key("right", "n")
 	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
@@ -148,7 +148,7 @@ func TestEditFlowRoleAndRemovalWithConfirm(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("e")
-	d.has("edit(work)", "work", "read-only")
+	d.has("Edit · work", "work", "read-only")
 	d.key("tab", "tab", "tab") // purpose -> context -> harness -> members
 	d.key("r")
 	for range "role" {
@@ -211,7 +211,7 @@ func TestPickerAddByPathWithCompletion(t *testing.T) {
 	d.key("n")
 	d.typeText("bypath")
 	d.key("ctrl+s")
-	d.has("repos(select)", "No repos found")
+	d.has("Choose repos", "No repos found")
 	d.key("p")
 	d.has("find repo")
 	d.key("ctrl+u") // the finder starts at ~/; type a path from scratch
@@ -222,7 +222,7 @@ func TestPickerAddByPathWithCompletion(t *testing.T) {
 	d.key("enter")
 	d.has("added elsewhere", "[x]")
 	d.key("enter", "ctrl+s")
-	d.eventually(func() bool { return containsView(d, "bypath") && !containsView(d, "new package") }, "packages screen")
+	d.eventually(func() bool { return containsView(d, "bypath") && !containsView(d, "New package") }, "packages screen")
 	d.lacks("new session")
 	if p := loadPkg(t, "bypath"); len(p.M.Members) != 1 || p.M.Members[0].Name != "elsewhere" {
 		t.Errorf("members = %+v", p.M.Members)

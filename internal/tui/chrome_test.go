@@ -9,7 +9,7 @@ import (
 )
 
 func TestFrameIsExactlySized(t *testing.T) {
-	f := renderFrame("packages[2]", "one\ntwo is a much longer line than the frame can hold at all", 24, 6)
+	f := renderFrame("Packages (2)", "one\ntwo is a much longer line than the frame can hold at all", 24, 6)
 	lines := strings.Split(f, "\n")
 	if len(lines) != 6 {
 		t.Fatalf("frame has %d lines, want 6", len(lines))
@@ -19,7 +19,7 @@ func TestFrameIsExactlySized(t *testing.T) {
 			t.Errorf("line %d is %d wide: %q", i, lipgloss.Width(l), l)
 		}
 	}
-	if !strings.Contains(lines[0], "packages[2]") {
+	if !strings.Contains(lines[0], "Packages (2)") {
 		t.Errorf("title should sit in the top border: %q", lines[0])
 	}
 }
@@ -39,60 +39,43 @@ func TestOverlayCompositesOverBackground(t *testing.T) {
 	}
 }
 
-func TestHeaderHasPlainTitleContextAndHints(t *testing.T) {
-	ctx := []kv{{"Package root", "~/.vmono"}, {"Harness", "claude"}}
-	hints := []hint{{"o", "Open"}, {"l", "Launch"}, {"d", "Describe"}, {"e", "Edit"}, {"s", "Sync"}}
-	for _, w := range []int{120, 60} {
-		h := renderHeader(w, ctx, nil, hints)
-		lines := strings.Split(h, "\n")
-		if len(lines) != headerHeight {
-			t.Fatalf("w=%d: header has %d lines, want %d", w, len(lines), headerHeight)
+func TestTopBarShowsCrumbsAndSummary(t *testing.T) {
+	for _, w := range []int{120, 40} {
+		bar := renderTopBar(w, []string{"packages", "payments"}, "2 packages · claude")
+		if lipgloss.Width(bar) != w {
+			t.Errorf("w=%d: top bar is %d wide: %q", w, lipgloss.Width(bar), bar)
 		}
-		if !strings.Contains(lines[0], "vmono") || !strings.Contains(h, "Package root:") {
-			t.Errorf("w=%d: title and context missing:\n%s", w, h)
-		}
-		if strings.ContainsAny(h, "█▀▄") {
-			t.Errorf("w=%d: no block-art wordmark expected:\n%s", w, h)
-		}
-		for i, l := range lines {
-			if lipgloss.Width(l) > w {
-				t.Errorf("w=%d: line %d too wide", w, i)
-			}
+		plain := ansi.Strip(bar)
+		if !strings.Contains(plain, "vmono") || !strings.Contains(plain, "packages › payments") {
+			t.Errorf("w=%d: badge and crumbs missing: %q", w, plain)
 		}
 	}
-	wide := renderHeader(120, ctx, nil, hints)
-	if !strings.Contains(wide, "<o>") {
-		t.Error("wide header should list the key hints")
-	}
-	for i, l := range strings.Split(wide, "\n") {
-		if !strings.Contains(l, "│") {
-			t.Errorf("line %d: a rule should separate context from hints: %q", i, l)
-		}
+	if wide := ansi.Strip(renderTopBar(120, []string{"packages"}, "2 packages · claude")); !strings.HasSuffix(strings.TrimRight(wide, " "), "claude") {
+		t.Errorf("the summary belongs at the right edge: %q", wide)
 	}
 }
 
-func TestStatusShowsCrumbsAndFlash(t *testing.T) {
-	s := renderStatus(60, []string{"packages", "members"}, "fetched 2", false)
-	if lipgloss.Width(s) != 60 || !strings.Contains(s, "<packages>") || !strings.Contains(s, "fetched 2") {
-		t.Errorf("status = %q", s)
+func TestFooterListsKeysAndDropsThemWhenNarrow(t *testing.T) {
+	hints := []hint{{"enter", "actions"}, {"n", "new"}, {"/", "filter"}, {"?", "help"}}
+	wide := ansi.Strip(renderFooter(80, hints, "", false))
+	for _, h := range hints {
+		if !strings.Contains(wide, h.key+" "+h.label) {
+			t.Errorf("footer missing %q: %q", h.key, wide)
+		}
+	}
+	narrow := renderFooter(24, hints, "", false)
+	if lipgloss.Width(narrow) != 24 {
+		t.Fatalf("narrow footer is %d wide", lipgloss.Width(narrow))
+	}
+	if p := ansi.Strip(narrow); !strings.Contains(p, "enter actions") || strings.Contains(p, "help") {
+		t.Errorf("keys should drop from the end: %q", p)
 	}
 }
 
-func TestHeaderPutsContextKeysAboveTheContextValues(t *testing.T) {
-	ctx := []kv{{"Package root", "~/.vmono"}, {"Harness", "claude"}}
-	hints := []hint{{"o", "Open"}, {"l", "Launch"}}
-	h := renderHeader(120, ctx, []hint{{"c", "Edit config"}}, hints)
-	lines := strings.Split(h, "\n")
-	rule := strings.Index(lines[0], "│")
-	if !strings.Contains(lines[0], "<c> Edit config") || strings.Index(lines[0], "<c>") > rule {
-		t.Errorf("the context key should sit on the title line, left of the rule:\n%s", h)
-	}
-	if strings.Count(h, "<c>") != 1 {
-		t.Errorf("the context key should appear once:\n%s", h)
-	}
-	for i, l := range lines {
-		if lipgloss.Width(l) > 120 {
-			t.Errorf("line %d too wide", i)
-		}
+func TestFooterNoticeTakesRoomFromTheKeys(t *testing.T) {
+	hints := []hint{{"enter", "actions"}, {"n", "new"}, {"/", "filter"}}
+	s := ansi.Strip(renderFooter(60, hints, "fetched 2 member(s)", false))
+	if lipgloss.Width(s) != 60 || !strings.Contains(s, "fetched 2 member(s)") || !strings.Contains(s, "enter actions") {
+		t.Errorf("footer = %q", s)
 	}
 }

@@ -43,7 +43,7 @@ func TestFinishLandsTheWorkAndKeepsTheSession(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("right") // the package's sessions
-	d.has("sessions(pay)[1]", "clean")
+	d.has("Sessions · pay (1)", "clean")
 	d.key("F")
 	d.has("finish session", "pay/work", "alpha", "1 commit → main (fast-forward)", "Nothing is pushed", "[ ] also remove")
 	d.key("y")
@@ -52,7 +52,7 @@ func TestFinishLandsTheWorkAndKeepsTheSession(t *testing.T) {
 		t.Errorf("main = %s, want the session tip %s", got, want)
 	}
 	d.key("enter")
-	d.has("sessions(pay)[1]", "work", "finished")
+	d.has("Sessions · pay (1)", "work", "finished")
 	if _, err := os.Stat(wt); err != nil {
 		t.Error("finishing must leave the worktree in place")
 	}
@@ -76,7 +76,7 @@ func TestFinishDialogRefusesWhileAMemberIsBlocked(t *testing.T) {
 		t.Error("a blocked finish must not move main")
 	}
 	d.key("esc")
-	d.has("sessions(pay)[1]")
+	d.has("Sessions · pay (1)")
 	d.lacks("finish session")
 }
 
@@ -148,7 +148,7 @@ func TestFinishedSessionsSortBelowTheRest(t *testing.T) {
 
 	d := newDriver(t, env, "")
 	d.key("right")
-	d.has("sessions(pay)[2]", "finished just now")
+	d.has("Sessions · pay (2)", "finished just now")
 	rows := d.app.top().(*sessionsModel).tb.rows
 	if len(rows) != 2 || rows[0].id != "zeta" || rows[1].id != "work" {
 		t.Errorf("a finished session belongs below the rest, got %+v", rows)

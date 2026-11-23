@@ -34,7 +34,7 @@ func TestTableSortTogglesAndKeepsSelection(t *testing.T) {
 	if tb.rows[0].id != "charlie" {
 		t.Fatalf("second press should reverse: %v", ids(tb.rows))
 	}
-	if v := tb.view(40, 6); !strings.Contains(v, "NAME↓") {
+	if v := tb.view(40, 6); !strings.Contains(v, "name↓") {
 		t.Errorf("header should show the sort arrow:\n%s", v)
 	}
 	tb.sortBy(1) // numeric key: input order

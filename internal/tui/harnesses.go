@@ -51,6 +51,11 @@ func (m *harnessesModel) Hints() []hint {
 	return []hint{{"enter", "Actions"}, {"s", "Set default"}, {"esc", "Back"}}
 }
 
+// footerHints implements footerHinter.
+func (m *harnessesModel) footerHints() []hint {
+	return []hint{{"enter", "actions"}, {"/", "filter"}, {"esc", "back"}}
+}
+
 // tbl implements tabular.
 func (m *harnessesModel) tbl() *table { return m.tb }
 

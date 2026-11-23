@@ -103,6 +103,11 @@ func (m *sessionsModel) setFilter(q string) {
 // filterValue implements filterable.
 func (m *sessionsModel) filterValue() string { return m.filter }
 
+// footerHints implements footerHinter.
+func (m *sessionsModel) footerHints() []hint {
+	return []hint{{"enter", "actions"}, {"n", "new session"}, {"/", "filter"}, {"esc", "back"}}
+}
+
 // tbl implements tabular.
 func (m *sessionsModel) tbl() *table { return m.tb }
 

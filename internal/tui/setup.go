@@ -91,13 +91,13 @@ func (m *setupModel) Init() tea.Cmd { return textinput.Blink }
 // Title implements screen.
 func (m *setupModel) Title() string {
 	if m.reconfig {
-		return "config"
+		return "Config"
 	}
-	return "setup"
+	return "Setup"
 }
 
 // Crumb implements screen.
-func (m *setupModel) Crumb() string { return m.Title() }
+func (m *setupModel) Crumb() string { return strings.ToLower(m.Title()) }
 
 // Hints implements screen.
 func (m *setupModel) Hints() []hint {

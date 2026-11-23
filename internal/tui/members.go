@@ -105,6 +105,11 @@ func (m *membersModel) setFilter(q string) {
 // filterValue implements filterable.
 func (m *membersModel) filterValue() string { return m.filter }
 
+// footerHints implements footerHinter.
+func (m *membersModel) footerHints() []hint {
+	return []hint{{"enter", "actions"}, {"/", "filter"}, {"esc", "back"}}
+}
+
 // tbl implements tabular.
 func (m *membersModel) tbl() *table { return m.tb }
 

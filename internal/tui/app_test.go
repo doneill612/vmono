@@ -28,7 +28,7 @@ func TestPaletteRunsEntries(t *testing.T) {
 	d.key("enter")
 	d.has("Source root", "Package root")
 	d.key("esc")
-	d.has("packages[0]")
+	d.has("Packages (0)")
 
 	d.key(":")
 	d.typeText("quit")
@@ -45,8 +45,8 @@ func TestPaletteEscClosesWithoutRunning(t *testing.T) {
 	d.key(":")
 	d.typeText("new")
 	d.key("esc")
-	d.has("packages[0]")
-	d.lacks("new package")
+	d.has("Packages (0)")
+	d.lacks("New package")
 }
 
 func TestPaletteOffersTheSelectedRowsActions(t *testing.T) {
@@ -61,7 +61,7 @@ func TestPaletteOffersTheSelectedRowsActions(t *testing.T) {
 	d.key("esc", ":")
 	d.typeText("descr")
 	d.key("enter")
-	d.has("describe(payments)")
+	d.has("Describe · payments")
 }
 
 func TestFilterBarFiltersLiveAndEscClears(t *testing.T) {
@@ -69,16 +69,16 @@ func TestFilterBarFiltersLiveAndEscClears(t *testing.T) {
 	seed(t, env, "payments", env.NewSource(t, "alpha"))
 	seed(t, env, "auth-rework", env.NewSource(t, "beta"))
 	d := newDriver(t, env, "")
-	d.has("packages[2]")
+	d.has("Packages (2)")
 
 	d.key("/")
 	d.typeText("pay")
-	d.has("packages(/pay)[1]", "payments")
+	d.has("Packages /pay (1)", "payments")
 	d.lacks("auth-rework")
 	d.key("enter") // keeps the filter, closes the bar
-	d.has("packages(/pay)[1]")
+	d.has("Packages /pay (1)")
 	d.key("esc") // clears it
-	d.has("packages[2]", "auth-rework")
+	d.has("Packages (2)", "auth-rework")
 }
 
 func TestPaletteSortsTheTable(t *testing.T) {
@@ -88,12 +88,12 @@ func TestPaletteSortsTheTable(t *testing.T) {
 	d := newDriver(t, env, "")
 	sortByName := func() { d.key(":"); d.typeText("sort by name"); d.key("enter") }
 	sortByName()
-	d.has("NAME↑")
+	d.has("name↑")
 	if r, _ := d.app.top().(*packagesModel).tb.selected(); r.id != "alpha" {
 		t.Errorf("name sort should put alpha first, got %q", r.id)
 	}
 	sortByName()
-	d.has("NAME↓")
+	d.has("name↓")
 }
 
 func TestHelpIsAModalOverTheScreen(t *testing.T) {
@@ -158,21 +158,4 @@ func TestEveryScreenFitsTheTerminal(t *testing.T) {
 		check("finder")
 		d.key("esc", "esc")
 	}
-}
-
-// TestConfigKeyIsShownWithTheConfigValues checks that "c" sits above the
-// header's context values, not among the table's hints, and that help still
-// lists it.
-func TestConfigKeyIsShownWithTheConfigValues(t *testing.T) {
-	env := testutil.NewEnv(t)
-	d := newDriver(t, env, "")
-	lines := strings.Split(d.view(), "\n")
-	if !strings.Contains(lines[0], "vmono") || !strings.Contains(lines[0], "<c> Edit config") {
-		t.Errorf("title line should carry the config key:\n%s", strings.Join(lines[:headerHeight], "\n"))
-	}
-	if n := strings.Count(strings.Join(lines[:headerHeight], "\n"), "<c>"); n != 1 {
-		t.Errorf("<c> appears %d times in the header", n)
-	}
-	d.key("?")
-	d.has("Edit config")
 }

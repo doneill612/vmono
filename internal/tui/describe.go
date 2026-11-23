@@ -89,15 +89,15 @@ func (m *describeModel) load() tea.Cmd {
 
 // Title implements screen.
 func (m *describeModel) Title() string {
-	t := "describe(" + m.name + ")"
+	t := "Describe · " + m.name
 	if m.session != "" {
-		t = "describe(" + m.name + "/" + m.session + ")"
+		t += "/" + m.session
 	}
 	if m.member != "" {
-		t = "describe(" + m.name + "/" + m.session + "/" + m.member + ")"
+		t += "/" + m.member
 	}
 	if m.build != nil && !(m.vp.AtTop() && m.vp.AtBottom()) {
-		t += fmt.Sprintf("[%d%%]", int(m.vp.ScrollPercent()*100))
+		t += fmt.Sprintf(" (%d%%)", int(m.vp.ScrollPercent()*100))
 	}
 	return t
 }

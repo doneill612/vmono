@@ -15,10 +15,10 @@ func TestEnterDrillsIntoSessionsThenMembersAndEscReturns(t *testing.T) {
 
 	d := newDriver(t, env, "")
 	d.key("right")
-	d.has("sessions(payments)[1]", "work", "vmono/payments", "<payments>")
+	d.has("Sessions · payments (1)", "work", "vmono/payments", "packages › payments")
 	d.key("m")
-	d.has("members(payments/work)[2]", "alpha", "beta", "active", "role", "<work>")
-	d.has("UNTR")
+	d.has("Members · payments/work (2)", "alpha", "beta", "active", "role", "packages › payments › work")
+	d.has("untr")
 	if r, _ := d.app.top().(*membersModel).tb.selected(); r.id != "alpha" {
 		t.Fatalf("selected %q", r.id)
 	}
@@ -30,11 +30,11 @@ func TestEnterDrillsIntoSessionsThenMembersAndEscReturns(t *testing.T) {
 	}
 
 	d.key("esc")
-	d.has("sessions(payments)[1]")
-	d.lacks("members(payments/work)")
+	d.has("Sessions · payments (1)")
+	d.lacks("Members · payments/work")
 	d.key("esc")
-	d.has("packages[1]")
-	d.lacks("sessions(payments)")
+	d.has("Packages (1)")
+	d.lacks("Sessions · payments")
 }
 
 func TestSessionsAndMembersOpenLaunchTheSession(t *testing.T) {
@@ -59,20 +59,20 @@ func TestDescribePackageAndMember(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("d")
-	d.has("describe(payments)", "PURPOSE", "Purpose of payments", "CONTEXT", "NOTES", "SESSIONS", "work", "MEMBERS", "alpha")
+	d.has("Describe · payments", "PURPOSE", "Purpose of payments", "CONTEXT", "NOTES", "SESSIONS", "work", "MEMBERS", "alpha")
 	d.lacks("Branch:") // a package alone has no branch; its sessions do
 	d.key("esc")
-	d.has("packages[1]")
+	d.has("Packages (1)")
 
 	d.key("right", "d")
-	d.has("describe(payments/work)", "Session", "Branch", "vmono/payments", "MEMBERS", "alpha")
+	d.has("Describe · payments/work", "Session", "Branch", "vmono/payments", "MEMBERS", "alpha")
 	d.key("esc")
-	d.has("sessions(payments)")
+	d.has("Sessions · payments")
 
 	d.key("m", "d")
-	d.has("describe(payments/work/alpha)", "LOCATION", "Source repo", "STATE", "Branch/ref", "0 modified")
+	d.has("Describe · payments/work/alpha", "LOCATION", "Source repo", "STATE", "Branch/ref", "0 modified")
 	d.key("esc")
-	d.has("members(payments/work)")
+	d.has("Members · payments/work")
 }
 
 func TestDescribeEditOpensEditor(t *testing.T) {
@@ -80,9 +80,9 @@ func TestDescribeEditOpensEditor(t *testing.T) {
 	seed(t, env, "payments", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
 	d.key("d", "e")
-	d.has("edit(payments)")
+	d.has("Edit · payments")
 	d.key("esc")
-	d.has("describe(payments)")
+	d.has("Describe · payments")
 }
 
 func TestSessionsOfAPackageFromThePalette(t *testing.T) {
@@ -94,9 +94,9 @@ func TestSessionsOfAPackageFromThePalette(t *testing.T) {
 	d.key(":")
 	d.typeText("sessions of pay")
 	d.key("enter")
-	d.has("sessions(payments)[1]", "<packages>")
+	d.has("Sessions · payments (1)", "packages › payments")
 	d.key("esc")
-	d.has("packages[2]")
+	d.has("Packages (2)")
 }
 
 func TestMembersFromASessionsPalette(t *testing.T) {
@@ -107,5 +107,5 @@ func TestMembersFromASessionsPalette(t *testing.T) {
 	d.key("right", ":")
 	d.typeText("members")
 	d.key("enter")
-	d.has("members(payments/work)")
+	d.has("Members · payments/work")
 }
