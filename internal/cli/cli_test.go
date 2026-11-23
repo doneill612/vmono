@@ -116,7 +116,8 @@ func TestNewLsStatusPathDelete(t *testing.T) {
 }
 
 func TestExitCodes(t *testing.T) {
-	testutil.NewEnv(t)
+	env := testutil.NewEnv(t)
+	repo := env.NewSource(t, "alpha")
 	cases := []struct {
 		args []string
 		want int
@@ -126,7 +127,7 @@ func TestExitCodes(t *testing.T) {
 		{[]string{"delete", "ghost"}, ExitNotFound},
 		{[]string{"new", "x", "--active", "no-such-repo"}, ExitNotFound},
 		{[]string{"new", "x"}, ExitError},
-		{[]string{"new", "Bad_Name", "--active", "."}, ExitError},
+		{[]string{"new", "Bad_Name", "--active", repo}, ExitError},
 		{[]string{"session", "rm", "ghost/none"}, ExitNotFound},
 		{[]string{"session", "rm", "noslash"}, ExitError},
 	}
