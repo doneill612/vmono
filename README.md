@@ -1,9 +1,5 @@
 <p align="center">
-  <picture>
-    <source srcset="docs/logo-dark.svg" media="(prefers-color-scheme: dark)">
-    <source srcset="docs/logo-light.svg" media="(prefers-color-scheme: light)">
-    <img src="docs/logo-light.svg" alt="vmono logo" width="96" height="96">
-  </picture>
+  <img src="docs/logo.svg" alt="vmono logo" width="96" height="96">
 </p>
 <h1 align="center"><code>vmono</code></h1>
 <p align="center">Many repos. One workspace for your coding agent.</p>
