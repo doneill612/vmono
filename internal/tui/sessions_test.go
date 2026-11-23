@@ -268,3 +268,35 @@ func TestEnterOnAPackageOpensTheActionMenu(t *testing.T) {
 	d.key("esc", "enter", "d") // an entry's own key works inside the menu
 	d.has("Describe · pay")
 }
+
+// TestListsShowASpinnerNotACountUntilLoaded guards the pause after drilling
+// into a package: until the load lands, the sessions and members views must
+// show the animated loading text and no row count, rather than an empty list
+// titled "(0)".
+func TestListsShowASpinnerNotACountUntilLoaded(t *testing.T) {
+	env := testutil.NewEnv(t)
+	d := newDriver(t, env, "")
+
+	for _, tc := range []struct {
+		name  string
+		s     screen
+		title string
+	}{
+		{"sessions", newSessions(d.app.env, "pay"), "Sessions"},
+		{"members", newMembers(d.app.env, "pay", "main"), "Members"},
+		{"packages", newPackages(d.app.env), "Packages"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.s.Title(); strings.Contains(got, "(") {
+				t.Errorf("title %q shows a count before anything loaded", got)
+			}
+			view := tc.s.View(60, 10)
+			if !strings.Contains(view, "loading…") {
+				t.Errorf("view before load lacks the loading text:\n%s", view)
+			}
+			if !strings.Contains(view, newSpinner().Spinner.Frames[0]) {
+				t.Errorf("view before load lacks the spinner:\n%s", view)
+			}
+		})
+	}
+}

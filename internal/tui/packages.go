@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/doneill612/vmono/internal/core"
@@ -60,6 +61,7 @@ type packagesModel struct {
 	loaded bool
 	filter string
 	pv     previewPane
+	spin   spinner.Model
 	// scopeRepo is the source path packages must use to be listed; empty
 	// lists everything. scopeName labels it in the frame title.
 	scopeRepo, scopeName string
@@ -75,7 +77,7 @@ func newPackages(e *env) *packagesModel {
 		{title: "state"},
 		{title: "opened"},
 	})
-	m := &packagesModel{e: e, tb: tb}
+	m := &packagesModel{e: e, tb: tb, spin: newSpinner()}
 	m.fill()
 	return m
 }
@@ -88,8 +90,9 @@ func newScopedPackages(e *env, repoPath, repoName string) *packagesModel {
 	return m
 }
 
-// Init implements screen.
-func (m *packagesModel) Init() tea.Cmd { return m.loadPackages() }
+// Init implements screen. It starts the load and the spinner that animates
+// the placeholder until the list arrives.
+func (m *packagesModel) Init() tea.Cmd { return tea.Batch(m.loadPackages(), m.spin.Tick) }
 
 // loadPackages lists packages with dirty markers, off the UI goroutine.
 func (m *packagesModel) loadPackages() tea.Cmd {
@@ -102,7 +105,11 @@ func (m *packagesModel) loadPackages() tea.Cmd {
 
 // Title implements screen.
 func (m *packagesModel) Title() string {
-	return frameTitle("packages", m.scopeName, m.filter, len(m.tb.rows))
+	n := len(m.tb.rows)
+	if !m.loaded {
+		n = -1
+	}
+	return frameTitle("packages", m.scopeName, m.filter, n)
 }
 
 // Crumb implements screen.
@@ -123,7 +130,9 @@ func (m *packagesModel) Hints() []hint {
 }
 
 // frameTitle formats a list's heading: its name, then the scope and filter it
-// is narrowed by, then how many rows it shows.
+// is narrowed by, then how many rows it shows. A negative n leaves the count
+// out, for a list whose rows have not loaded yet, since showing zero would
+// claim the list is empty.
 func frameTitle(name, scope, filter string, n int) string {
 	t := strings.ToUpper(name[:1]) + name[1:]
 	if scope != "" {
@@ -131,6 +140,9 @@ func frameTitle(name, scope, filter string, n int) string {
 	}
 	if filter != "" {
 		t += " /" + filter
+	}
+	if n < 0 {
+		return t
 	}
 	return fmt.Sprintf("%s (%d)", t, n)
 }
@@ -167,7 +179,7 @@ func (m *packagesModel) fill() {
 	}
 	switch {
 	case !m.loaded:
-		m.tb.empty = "loading…"
+		m.tb.empty = scanningLabel(m.spin, "loading…")
 	case len(m.all) == 0:
 		m.tb.empty = "No packages yet. Press n to create one."
 	case m.scopeRepo != "" && len(rows) == 0:
@@ -241,6 +253,14 @@ func (m *packagesModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		return m, cmd
 	}
 	switch t := msg.(type) {
+	case spinner.TickMsg:
+		if m.loaded {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(t)
+		m.tb.empty = scanningLabel(m.spin, "loading…")
+		return m, cmd
 	case packagesMsg:
 		m.loaded = true
 		if t.err != nil {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/doneill612/vmono/internal/core"
@@ -46,11 +47,12 @@ type membersModel struct {
 	err     string
 	tb      *table
 	filter  string
+	spin    spinner.Model
 }
 
 // newMembers builds the members view of one session of a package.
 func newMembers(e *env, name, session string) *membersModel {
-	return &membersModel{e: e, name: name, session: session, tb: newTable([]column{
+	m := &membersModel{e: e, name: name, session: session, spin: newSpinner(), tb: newTable([]column{
 		{title: "name", max: 24},
 		{title: "mode"},
 		{title: "branch/ref", max: 32},
@@ -62,10 +64,13 @@ func newMembers(e *env, name, session string) *membersModel {
 		{title: "untr", right: true},
 		{title: "role", flex: true},
 	})}
+	m.fill()
+	return m
 }
 
-// Init implements screen.
-func (m *membersModel) Init() tea.Cmd { return m.load() }
+// Init implements screen. It starts the load and the spinner that animates
+// the placeholder until the status arrives.
+func (m *membersModel) Init() tea.Cmd { return tea.Batch(m.load(), m.spin.Tick) }
 
 // id identifies the session so stale results are ignored.
 func (m *membersModel) id() string { return m.name + "/" + m.session }
@@ -84,7 +89,11 @@ func (m *membersModel) load() tea.Cmd {
 
 // Title implements screen.
 func (m *membersModel) Title() string {
-	return frameTitle("members", m.id(), m.filter, len(m.tb.rows))
+	n := len(m.tb.rows)
+	if !m.loaded {
+		n = -1
+	}
+	return frameTitle("members", m.id(), m.filter, n)
 }
 
 // Crumb implements screen.
@@ -202,7 +211,7 @@ func (m *membersModel) fill() {
 	case m.err != "":
 		m.tb.empty = m.err
 	case !m.loaded:
-		m.tb.empty = "loading…"
+		m.tb.empty = scanningLabel(m.spin, "loading…")
 	case len(m.status.Members) == 0:
 		m.tb.empty = "This package has no members."
 	default:
@@ -214,6 +223,14 @@ func (m *membersModel) fill() {
 // Update implements screen.
 func (m *membersModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch t := msg.(type) {
+	case spinner.TickMsg:
+		if m.loaded {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(t)
+		m.tb.empty = scanningLabel(m.spin, "loading…")
+		return m, cmd
 	case membersMsg:
 		if t.id != m.id() {
 			return m, nil

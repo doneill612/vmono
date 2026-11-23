@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/doneill612/vmono/internal/core"
@@ -50,20 +51,24 @@ type sessionsModel struct {
 	tb     *table
 	filter string
 	pv     previewPane
+	spin   spinner.Model
 }
 
 // newSessions builds the sessions view of a package.
 func newSessions(e *env, name string) *sessionsModel {
-	return &sessionsModel{e: e, name: name, tb: newTable([]column{
+	m := &sessionsModel{e: e, name: name, spin: newSpinner(), tb: newTable([]column{
 		{title: "session", max: 28},
 		{title: "branch", flex: true},
 		{title: "state"},
 		{title: "opened"},
 	})}
+	m.fill()
+	return m
 }
 
-// Init implements screen.
-func (m *sessionsModel) Init() tea.Cmd { return m.load() }
+// Init implements screen. It starts the load and the spinner that animates
+// the placeholder until the sessions arrive.
+func (m *sessionsModel) Init() tea.Cmd { return tea.Batch(m.load(), m.spin.Tick) }
 
 // load reads the package and its sessions with dirty markers, off the UI
 // goroutine.
@@ -81,7 +86,11 @@ func (m *sessionsModel) load() tea.Cmd {
 
 // Title implements screen.
 func (m *sessionsModel) Title() string {
-	return frameTitle("sessions", m.name, m.filter, len(m.tb.rows))
+	n := len(m.tb.rows)
+	if !m.loaded {
+		n = -1
+	}
+	return frameTitle("sessions", m.name, m.filter, n)
 }
 
 // Crumb implements screen.
@@ -215,7 +224,7 @@ func (m *sessionsModel) fill() {
 	case m.err != "":
 		m.tb.empty = m.err
 	case !m.loaded:
-		m.tb.empty = "loading…"
+		m.tb.empty = scanningLabel(m.spin, "loading…")
 	case len(m.list) == 0:
 		m.tb.empty = "No sessions yet. Press n to start one."
 	default:
@@ -230,6 +239,14 @@ func (m *sessionsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		return m, cmd
 	}
 	switch t := msg.(type) {
+	case spinner.TickMsg:
+		if m.loaded {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(t)
+		m.tb.empty = scanningLabel(m.spin, "loading…")
+		return m, cmd
 	case sessionsMsg:
 		if t.name != m.name {
 			return m, nil
