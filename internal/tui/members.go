@@ -19,23 +19,18 @@ type membersMsg struct {
 	err     error
 }
 
-// members table columns.
-const (
-	memColName = iota
-	memColMode
-	memColWhere
-	memColHead
-	memColUpstream
-	memColAhead
-	memColBehind
-	memColDirty
-	memColUntracked
-	memColRole
-)
-
-// packageSelector is implemented by screens that stand on one package, so
-// commands like ":members" can default to it.
-type packageSelector interface{ selectedPackage() string }
+// memberActions lists everything the members view can do, in the order its
+// menu shows it. Most act on the whole session; describe and copy path act on
+// the highlighted member. Each key is also the view's own shortcut.
+var memberActions = []action{
+	{id: "launch", label: "Launch", key: "o"},
+	{id: "launch-with", label: "Launch with…", key: "l"},
+	{id: "describe", label: "Describe", key: "d"},
+	{id: "copy", label: "Copy path", key: "y"},
+	{id: "edit", label: "Edit package", key: "e"},
+	{id: "sync", label: "Sync", key: "s"},
+	{id: "fetch", label: "Fetch", key: "f"},
+}
 
 // membersModel is the drill-down from a session: one row per member with its
 // branch or ref, upstream, and working tree state in that session.
@@ -96,9 +91,8 @@ func (m *membersModel) Crumb() string { return m.session }
 // Hints implements screen.
 func (m *membersModel) Hints() []hint {
 	return []hint{
-		{"o", "Open"}, {"l", "Launch…"}, {"d", "Describe"}, {"y", "Copy path"},
-		{"e", "Edit package"}, {"s", "Sync"}, {"f", "Fetch"},
-		{"N", "Sort name"}, {"M", "Sort mode"}, {"esc", "Back"},
+		{"enter", "Actions"}, {"o", "Open"}, {"l", "Launch…"}, {"d", "Describe"}, {"y", "Copy path"},
+		{"e", "Edit package"}, {"s", "Sync"}, {"f", "Fetch"}, {"esc", "Back"},
 	}
 }
 
@@ -111,11 +105,32 @@ func (m *membersModel) setFilter(q string) {
 // filterValue implements filterable.
 func (m *membersModel) filterValue() string { return m.filter }
 
-// selectedPackage implements packageSelector.
-func (m *membersModel) selectedPackage() string { return m.name }
+// previewSync implements previewer. The status the preview shows is already
+// loaded, so there is nothing to start.
+func (m *membersModel) previewSync() tea.Cmd { return nil }
 
-// selectedSession implements sessionSelector.
-func (m *membersModel) selectedSession() (string, string) { return m.name, m.session }
+// previewView implements previewer.
+func (m *membersModel) previewView(w, h int) string {
+	ms, ok := m.selectedMember()
+	if !ok {
+		return ""
+	}
+	return " " + styleLabel.Render(truncate(ms.Name, w-2)) + "\n" + buildMemberPreview(ms, w)
+}
+
+// footerHints implements footerHinter.
+func (m *membersModel) footerHints() []hint {
+	return []hint{{"enter", "actions"}, {"/", "filter"}, {"esc", "back"}}
+}
+
+// tbl implements tabular.
+func (m *membersModel) tbl() *table { return m.tb }
+
+// rowActions implements rowActor.
+func (m *membersModel) rowActions() (rowContext, bool) {
+	ms, ok := m.selectedMember()
+	return rowContext{kind: "member", subject: ms.Name, label: ms.Name, items: memberActions}, ok
+}
 
 // selectedMember returns the highlighted member's status.
 func (m *membersModel) selectedMember() (core.MemberStatus, bool) {
@@ -221,6 +236,11 @@ func (m *membersModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 			return m, tea.Batch(flashErr("fetch "+t.name+": "+t.err.Error()), m.load())
 		}
 		return m, tea.Batch(flash(fmt.Sprintf("fetched %d member(s)", t.n)), m.load())
+	case actionMsg:
+		if t.owner != screen(m) {
+			return m, nil
+		}
+		return m.act(t.id, t.subject)
 	case tea.KeyMsg:
 		return m.key(t)
 	}
@@ -239,39 +259,60 @@ func (m *membersModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			return m, nil
 		}
 		return m, pop()
-	case "N":
-		m.tb.sortBy(memColName)
-	case "M":
-		m.tb.sortBy(memColMode)
-	case "enter", "o":
+	}
+	if k.String() == "enter" {
+		if ms, ok := m.selectedMember(); ok {
+			return m, push(newActionMenu(m, "member", ms.Name, m.id(), memberActions))
+		}
+		return m, nil
+	}
+	if a, ok := findAction(memberActions, k.String()); ok {
+		return m.act(a.id, m.selectedMemberName())
+	}
+	return m, nil
+}
+
+// selectedMemberName returns the highlighted member's name, or "".
+func (m *membersModel) selectedMemberName() string {
+	ms, _ := m.selectedMember()
+	return ms.Name
+}
+
+// act performs the members-view action with the given id. member is the row
+// the action was chosen on; it is empty when nothing is highlighted, which
+// only the member-specific actions mind.
+func (m *membersModel) act(id, member string) (screen, tea.Cmd) {
+	switch id {
+	case "launch":
 		return m, func() tea.Msg { return launchMsg{LaunchRequest{Package: m.name, Session: m.session}} }
-	case "l":
+	case "launch-with":
 		return m, push(newLaunchPicker(m.e, m.name, m.session, "Launch with"))
-	case "s":
+	case "sync":
 		return m, push(newProgress(m.e, syncSessionOp(m.e.core, m.name, m.session)))
-	case "f":
+	case "fetch":
 		return m, tea.Batch(flash("fetching "+m.name+"…"), fetchAll(m.e.core, m.name))
-	case "e":
+	case "edit":
 		if m.sess == nil {
 			return m, nil
 		}
 		return m, push(newEditor(m.e, m.sess.Pkg))
-	case "d":
-		if ms, ok := m.selectedMember(); ok {
-			return m, push(newDescribe(m.e, m.name, m.session, ms.Name))
+	case "describe":
+		if member != "" {
+			return m, push(newDescribe(m.e, m.name, m.session, member))
 		}
-	case "y":
-		if ms, ok := m.selectedMember(); ok && m.sess != nil {
-			for _, mem := range m.sess.Pkg.M.Members {
-				if mem.Name != ms.Name {
-					continue
-				}
-				dir := m.sess.MemberDir(mem)
-				if err := clipboard.WriteAll(dir); err != nil {
-					return m, flashErr("could not copy: " + err.Error() + " — " + dir)
-				}
-				return m, flash("copied " + paths.Contract(dir))
+	case "copy":
+		if member == "" || m.sess == nil {
+			return m, nil
+		}
+		for _, mem := range m.sess.Pkg.M.Members {
+			if mem.Name != member {
+				continue
 			}
+			dir := m.sess.MemberDir(mem)
+			if err := clipboard.WriteAll(dir); err != nil {
+				return m, flashErr("could not copy: " + err.Error() + " — " + dir)
+			}
+			return m, flash("copied " + paths.Contract(dir))
 		}
 	}
 	return m, nil

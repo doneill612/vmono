@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -17,6 +18,8 @@ import (
 type repoListMsg struct {
 	repos []discover.Repo
 	used  map[string]int
+	// users names the packages that use each repo.
+	users map[string][]string
 	err   error
 }
 
@@ -38,6 +41,14 @@ func canonPath(p string) string {
 	return filepath.Clean(p)
 }
 
+// repoActions lists everything the repos view can do to one repo. Each key is
+// also the view's own shortcut for the action.
+var repoActions = []action{
+	{id: "packages", label: "Packages using it", key: "right"},
+	{id: "new-package", label: "New package", key: "n"},
+	{id: "copy", label: "Copy path", key: "y"},
+}
+
 // reposModel lists every repo vmono knows (source roots, configured repos,
 // and ones added by path) with how many packages use each. Opening a repo
 // shows those packages; "a" finds repos that are not listed.
@@ -45,6 +56,7 @@ type reposModel struct {
 	e      *env
 	repos  []discover.Repo
 	used   map[string]int
+	users  map[string][]string
 	loaded bool
 	spin   spinner.Model
 	tb     *table
@@ -79,6 +91,7 @@ func (m *reposModel) load() tea.Cmd {
 			return repoListMsg{err: err}
 		}
 		used := map[string]int{}
+		users := map[string][]string{}
 		for _, p := range pkgs {
 			seen := map[string]bool{}
 			for _, src := range p.Sources {
@@ -90,10 +103,11 @@ func (m *reposModel) load() tea.Cmd {
 				if !seen[k] {
 					seen[k] = true
 					used[k]++
+					users[k] = append(users[k], p.Name)
 				}
 			}
 		}
-		return repoListMsg{repos: repos, used: used}
+		return repoListMsg{repos: repos, used: used, users: users}
 	}
 }
 
@@ -106,8 +120,8 @@ func (m *reposModel) Crumb() string { return "repos" }
 // Hints implements screen.
 func (m *reposModel) Hints() []hint {
 	return []hint{
-		{"enter", "Packages"}, {"n", "New package"}, {"a", "Find repo"}, {"y", "Copy path"},
-		{"N", "Sort name"}, {"U", "Sort used by"}, {"esc", "Back"},
+		{"enter", "Actions"}, {"→", "Packages"}, {"n", "New package"}, {"a", "Find repo"}, {"y", "Copy path"},
+		{"esc", "Back"},
 	}
 }
 
@@ -151,6 +165,45 @@ func (m *reposModel) fill() {
 	m.tb.setRows(rows)
 }
 
+// previewSync implements previewer. Everything shown was loaded with the list.
+func (m *reposModel) previewSync() tea.Cmd { return nil }
+
+// previewView implements previewer.
+func (m *reposModel) previewView(w, h int) string {
+	r, ok := m.selected()
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(" " + styleLabel.Render(truncate(r.Name, w-2)) + "\n\n")
+	b.WriteString(previewField("path", paths.Contract(r.Path), w))
+	b.WriteString(previewField("branch", r.Branch, w))
+	b.WriteString(previewField("remote", r.Remote, w))
+	b.WriteString(previewSection("USED BY"))
+	users := m.users[canonPath(r.Path)]
+	if len(users) == 0 {
+		b.WriteString(" " + styleDim.Render("no package") + "\n")
+	}
+	for _, u := range users {
+		b.WriteString(" " + truncate(u, w-2) + "\n")
+	}
+	return b.String()
+}
+
+// footerHints implements footerHinter.
+func (m *reposModel) footerHints() []hint {
+	return []hint{{"enter", "actions"}, {"a", "find repo"}, {"/", "filter"}, {"esc", "back"}}
+}
+
+// tbl implements tabular.
+func (m *reposModel) tbl() *table { return m.tb }
+
+// rowActions implements rowActor.
+func (m *reposModel) rowActions() (rowContext, bool) {
+	r, ok := m.selected()
+	return rowContext{kind: "repo", subject: r.Path, label: r.Name, items: repoActions}, ok
+}
+
 // selected returns the highlighted repo.
 func (m *reposModel) selected() (discover.Repo, bool) {
 	r, ok := m.tb.selected()
@@ -181,7 +234,7 @@ func (m *reposModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		if t.err != nil {
 			return m, flashErr(t.err.Error())
 		}
-		m.repos, m.used = t.repos, t.used
+		m.repos, m.used, m.users = t.repos, t.used, t.users
 		m.fill()
 		return m, nil
 	case refreshMsg:
@@ -192,6 +245,16 @@ func (m *reposModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		}
 		m.addRepo(t.repo)
 		return m, flash("added " + t.repo.Name)
+	case actionMsg:
+		if t.owner != screen(m) {
+			return m, nil
+		}
+		for _, r := range m.repos {
+			if r.Path == t.subject {
+				return m.act(t.id, r)
+			}
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.key(t)
 	}
@@ -224,22 +287,30 @@ func (m *reposModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			return m, nil
 		}
 		return m, pop()
-	case "N":
-		m.tb.sortBy(repoColName)
-	case "U":
-		m.tb.sortBy(repoColUsed)
 	case "a":
 		return m, push(newFinder(m.e, m))
 	}
 	if !has {
 		return m, nil
 	}
-	switch k.String() {
-	case "enter":
+	if k.String() == "enter" {
+		return m, push(newActionMenu(m, "repo", sel.Path, paths.Contract(sel.Path), repoActions).named(sel.Name))
+	}
+	if a, ok := findAction(repoActions, k.String()); ok {
+		return m.act(a.id, sel)
+	}
+	return m, nil
+}
+
+// act performs the repo action with the given id on sel. It serves both the
+// repos view's own shortcut keys and the choices made in the repo menu.
+func (m *reposModel) act(id string, sel discover.Repo) (screen, tea.Cmd) {
+	switch id {
+	case "packages":
 		return m, push(newScopedPackages(m.e, sel.Path, sel.Name))
-	case "n":
+	case "new-package":
 		return m, push(newEditorWithRepo(m.e, sel))
-	case "y":
+	case "copy":
 		if err := clipboard.WriteAll(sel.Path); err != nil {
 			return m, flashErr("could not copy: " + err.Error() + " — " + sel.Path)
 		}

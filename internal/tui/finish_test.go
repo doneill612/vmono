@@ -42,8 +42,8 @@ func TestFinishLandsTheWorkAndKeepsTheSession(t *testing.T) {
 	wt := commitInSession(t, env, "pay", "work", "alpha", "one.txt")
 	d := newDriver(t, env, "")
 
-	d.key("enter") // the package's sessions
-	d.has("sessions(pay)[1]", "clean")
+	d.key("right") // the package's sessions
+	d.has("Sessions · pay (1)", "clean")
 	d.key("F")
 	d.has("finish session", "pay/work", "alpha", "1 commit → main (fast-forward)", "Nothing is pushed", "[ ] also remove")
 	d.key("y")
@@ -52,7 +52,7 @@ func TestFinishLandsTheWorkAndKeepsTheSession(t *testing.T) {
 		t.Errorf("main = %s, want the session tip %s", got, want)
 	}
 	d.key("enter")
-	d.has("sessions(pay)[1]", "work", "finished")
+	d.has("Sessions · pay (1)", "work", "finished")
 	if _, err := os.Stat(wt); err != nil {
 		t.Error("finishing must leave the worktree in place")
 	}
@@ -67,7 +67,7 @@ func TestFinishDialogRefusesWhileAMemberIsBlocked(t *testing.T) {
 	main := testutil.Git(t, a, "rev-parse", "main")
 	d := newDriver(t, env, "")
 
-	d.key("enter", "F")
+	d.key("right", "F")
 	d.has("blocked: uncommitted changes", "1 untracked", "Nothing lands until every member above can")
 	d.key("y", "c")
 	d.has("finish session")
@@ -76,7 +76,7 @@ func TestFinishDialogRefusesWhileAMemberIsBlocked(t *testing.T) {
 		t.Error("a blocked finish must not move main")
 	}
 	d.key("esc")
-	d.has("sessions(pay)[1]")
+	d.has("Sessions · pay (1)")
 	d.lacks("finish session")
 }
 
@@ -93,7 +93,7 @@ func TestFinishConflictOffersTheHarness(t *testing.T) {
 	main := testutil.Git(t, a, "rev-parse", "main")
 	d := newDriver(t, env, "")
 
-	d.key("enter", "F")
+	d.key("right", "F")
 	d.has("1 commit → main") // a conflict only shows once the rebase runs
 	d.key("y")
 	d.eventually(func() bool { return containsView(d, "stopped on conflicts") }, "the conflict to be reported")
@@ -114,7 +114,7 @@ func TestFinishCanRemoveTheSessionAfterward(t *testing.T) {
 	commitInSession(t, env, "pay", "work", "alpha", "one.txt")
 	d := newDriver(t, env, "")
 
-	d.key("enter", "F", "c")
+	d.key("right", "F", "c")
 	d.has("[x] also remove")
 	d.key("y")
 	d.eventually(func() bool {
@@ -147,8 +147,8 @@ func TestFinishedSessionsSortBelowTheRest(t *testing.T) {
 	}
 
 	d := newDriver(t, env, "")
-	d.key("enter")
-	d.has("sessions(pay)[2]", "finished just now")
+	d.key("right")
+	d.has("Sessions · pay (2)", "finished just now")
 	rows := d.app.top().(*sessionsModel).tb.rows
 	if len(rows) != 2 || rows[0].id != "zeta" || rows[1].id != "work" {
 		t.Errorf("a finished session belongs below the rest, got %+v", rows)
@@ -163,7 +163,7 @@ func TestSessionPromptPrefillsEachMembersCheckedOutBranch(t *testing.T) {
 	testutil.Git(t, b, "checkout", "--quiet", "-b", "develop")
 	d := newDriver(t, env, "")
 
-	d.key("enter", "n")
+	d.key("right", "n")
 	d.has("into alpha", "main", "into beta", "develop")
 	d.typeText("stacked")
 	d.key("enter")
@@ -183,7 +183,7 @@ func TestSessionPromptLandingBranchCanBeEditedPerMember(t *testing.T) {
 	testutil.Git(t, a, "branch", "feature")
 	d := newDriver(t, env, "")
 
-	d.key("enter", "n")
+	d.key("right", "n")
 	d.typeText("stacked")
 	d.key("tab", "tab") // name -> branch -> alpha's into
 	for range "main" {
@@ -214,7 +214,7 @@ func TestFinishDialogChangesLandingBranches(t *testing.T) {
 	commitInSession(t, env, "pay", "work", "beta", "two.txt")
 	d := newDriver(t, env, "")
 
-	d.key("enter", "F")
+	d.key("right", "F")
 	d.has("alpha", "1 commit → main", "beta")
 	d.key("i")
 	d.has("landing branches", "into alpha", "into beta")
@@ -242,7 +242,7 @@ func TestLandingBranchEditorRefusesBadNames(t *testing.T) {
 	seed(t, env, "pay", a)
 	d := newDriver(t, env, "")
 
-	d.key("enter", "F", "i")
+	d.key("right", "F", "i")
 	for range "main" {
 		d.key("backspace")
 	}

@@ -48,11 +48,11 @@ type capturing interface{ capturing() bool }
 // modalScreen marks a screen drawn as a dialog over the screen beneath it.
 type modalScreen interface{ modal() }
 
-// contextHinter is implemented by screens with keys that act on the header's
-// context values (the config) rather than on the table. The header shows
-// them above those values and leaves them out of the hint columns; the help
-// dialog still lists them with the rest.
-type contextHinter interface{ contextHints() []hint }
+// footerHinter is implemented by screens that choose which few keys the
+// footer shows. The footer is deliberately short: everything else is in the
+// screen's action menu, the palette and the "?" help, which lists Hints in
+// full. Screens without it show their Hints.
+type footerHinter interface{ footerHints() []hint }
 
 // filterable is implemented by screens that can be narrowed with "/".
 type filterable interface {
@@ -156,8 +156,21 @@ func (a *App) top() screen { return a.stack[len(a.stack)-1] }
 // Init implements tea.Model.
 func (a *App) Init() tea.Cmd { return a.top().Init() }
 
-// Update implements tea.Model.
+// Update implements tea.Model. After handling a message it lets the list on
+// screen start loading the preview of whatever row the message left
+// highlighted.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m, cmd := a.update(msg)
+	if a.env.w >= previewMinW {
+		if p, ok := a.stack[a.baseIndex()].(previewer); ok {
+			cmd = tea.Batch(cmd, p.previewSync())
+		}
+	}
+	return m, cmd
+}
+
+// update handles one message.
+func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.KeyMsg:
 		if m.String() == "ctrl+c" {
@@ -192,6 +205,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.stack = a.stack[:len(a.stack)-1]
 		}
 		return a, a.broadcast(m)
+	case navigateMsg:
+		return a, a.navigate(m.build())
+	case reloadMsg:
+		return a, a.updateTop(refreshMsg{})
+	case sortMsg:
+		if t, ok := a.top().(tabular); ok {
+			t.tbl().sortBy(m.col)
+		}
+		return a, nil
 	case launchMsg:
 		req := m.req
 		a.env.launch = &req
@@ -285,11 +307,11 @@ func (a *App) globalKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	switch k.String() {
-	case ":":
-		return a.bar.open(':', ""), true
+	case ":", "ctrl+p":
+		return push(newPalette(a.paletteEntries())), true
 	case "/":
 		if f, ok := a.top().(filterable); ok {
-			return a.bar.open('/', f.filterValue()), true
+			return a.bar.open(f.filterValue()), true
 		}
 	case "?":
 		return push(newHelp(a.top().Hints())), true
@@ -303,6 +325,23 @@ func (a *App) globalKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
+// baseIndex returns the index of the screen the app is drawn around: the top
+// of the stack, or the screen beneath the dialogs above it.
+func (a *App) baseIndex() int {
+	base := len(a.stack) - 1
+	for base > 0 {
+		if _, isModal := a.stack[base].(modalScreen); !isModal {
+			break
+		}
+		base--
+	}
+	return base
+}
+
+// chromeLines is the number of lines the top bar, its rule and the footer
+// take; the screen's own heading takes one more.
+const chromeLines = 3
+
 // View implements tea.Model.
 func (a *App) View() string {
 	w, h := a.env.w, a.env.h
@@ -312,33 +351,14 @@ func (a *App) View() string {
 	if h < 8 {
 		h = 24
 	}
-	base := len(a.stack) - 1
-	for base > 0 {
-		if _, isModal := a.stack[base].(modalScreen); !isModal {
-			break
-		}
-		base--
-	}
+	base := a.baseIndex()
 	scr := a.stack[base]
 
-	compact := h < 20 || w < 60
-	ctxHints, hints := a.contextHints(), a.hints()
-	var header string
-	hh := headerHeight
-	if compact {
-		hh = 1
-		header = renderHeaderCompact(w, a.context())
-	} else {
-		header = renderHeader(w, a.context(), ctxHints, hints)
-	}
 	barH := 0
 	if a.bar.active {
 		barH = 1
 	}
-	bodyH := h - hh - 1 - barH
-	if bodyH < 3 {
-		bodyH = 3
-	}
+	bodyH := max(h-chromeLines-barH, 4)
 
 	var crumbs []string
 	for _, s := range a.stack[:base+1] {
@@ -347,98 +367,88 @@ func (a *App) View() string {
 		}
 	}
 
-	parts := []string{header}
+	parts := []string{renderTopBar(w, crumbs, a.summary()), renderRule(w)}
 	if a.bar.active {
-		parts = append(parts, a.bar.view(w, a.ghost()))
+		parts = append(parts, a.bar.view(w))
 	}
-	frame := renderFrame(scr.Title(), scr.View(w-2, bodyH-2), w, bodyH)
+	heading := func(cw int) string { return clip(" "+styleLabel.Render(truncate(scr.Title(), cw-2)), cw) }
+	var body string
+	if p, ok := scr.(previewer); ok && w >= previewMinW {
+		lw := w * 58 / 100
+		rw := w - lw - 1
+		body = splitColumns(heading(lw)+"\n"+scr.View(lw, bodyH-1), p.previewView(rw, bodyH), lw, rw, bodyH)
+	} else {
+		body = fitBlock(heading(w)+"\n"+scr.View(w, bodyH-1), w, bodyH)
+	}
 	for _, s := range a.stack[base+1:] {
-		d := s.View(w-2, bodyH-2)
+		d := s.View(w, bodyH)
 		dw, dh := lipgloss.Width(firstLine(d)), strings.Count(d, "\n")+1
-		x, y := (w-dw)/2, (bodyH-dh)/2
-		if x < 0 {
-			x = 0
-		}
-		if y < 0 {
-			y = 0
-		}
-		frame = overlay(frame, d, x, y)
+		body = overlay(body, d, max((w-dw)/2, 0), max((bodyH-dh)/2, 0))
 	}
-	parts = append(parts, frame, renderStatus(w, crumbs, a.notice, a.noticeEr))
+	parts = append(parts, body, renderFooter(w, a.footer(), a.notice, a.noticeEr))
 	return strings.Join(parts, "\n")
+}
+
+// fitBlock cuts or pads a block of lines to exactly w by h cells, so the
+// footer stays on the last line however short the screen is and no screen
+// can push the layout wider than the terminal.
+func fitBlock(body string, w, h int) string {
+	lines := strings.Split(body, "\n")
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+	for len(lines) < h {
+		lines = append(lines, "")
+	}
+	for i, l := range lines {
+		lines[i] = clip(l, w)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // firstLine returns the first line of s.
 func firstLine(s string) string { return strings.SplitN(s, "\n", 2)[0] }
 
-// hintScreen returns the screen whose keys the header shows: the top one,
-// or the screen beneath a dialog, which has none of its own.
-func (a *App) hintScreen() screen {
-	for i := len(a.stack) - 1; i >= 0; i-- {
-		if len(a.stack[i].Hints()) > 0 {
-			return a.stack[i]
-		}
+// footer returns the keys the footer lists. Nothing is listed over a dialog,
+// which carries its own key help. Elsewhere the screen's own keys come first,
+// then the two global ones, unless a text input has the keyboard and would
+// take them as text.
+func (a *App) footer() []hint {
+	top := a.top()
+	if _, isModal := top.(modalScreen); isModal {
+		return nil
 	}
-	return a.top()
+	var own []hint
+	if f, ok := top.(footerHinter); ok {
+		own = f.footerHints()
+	} else {
+		own = top.Hints()
+	}
+	if a.isCapturing() {
+		return own
+	}
+	return append(append([]hint(nil), own...), hint{":", "palette"}, hint{"?", "help"})
 }
 
-// contextHints returns the hint-screen's keys that act on the header's
-// context values.
-func (a *App) contextHints() []hint {
-	if c, ok := a.hintScreen().(contextHinter); ok {
-		return c.contextHints()
-	}
-	return nil
-}
-
-// hints returns the hint columns: the hint-screen's keys minus the ones
-// shown with the context. The global ":" and "?" live in the status bar.
-func (a *App) hints() []hint {
-	skip := map[string]bool{}
-	for _, h := range a.contextHints() {
-		skip[h.key] = true
-	}
-	var out []hint
-	for _, h := range a.hintScreen().Hints() {
-		if !skip[h.key] {
-			out = append(out, h)
-		}
-	}
-	return out
-}
-
-// context returns the labelled lines at the left of the header.
-func (a *App) context() []kv {
+// summary is the short line at the right of the top bar: how many packages
+// there are and which harness opens them.
+func (a *App) summary() string {
 	cfg := a.env.core.Cfg
-	src := "none"
-	if len(cfg.SourceRoots) > 0 {
-		src = strings.Join(cfg.SourceRoots, ", ")
-	}
-	pk := "…"
+	var parts []string
 	if a.env.pkgKnown {
-		pk = fmt.Sprint(a.env.pkgCount)
+		pk := fmt.Sprintf("%d packages", a.env.pkgCount)
+		if a.env.pkgCount == 1 {
+			pk = "1 package"
+		}
 		if a.env.pkgDirty > 0 {
 			pk += fmt.Sprintf(" (%d dirty)", a.env.pkgDirty)
 		}
+		parts = append(parts, pk)
 	}
-	return []kv{
-		{"Package root", cfg.PackageRoot},
-		{"Source roots", src},
-		{"Harness", cfg.DefaultHarness},
-		{"Packages", pk},
+	if cfg.DefaultHarness != "" {
+		parts = append(parts, cfg.DefaultHarness)
 	}
-}
-
-// renderHeaderCompact is the one-line header for small terminals.
-func renderHeaderCompact(w int, ctx []kv) string {
-	var parts []string
-	for _, c := range ctx {
-		if c.k == "Package root" || c.k == "Harness" {
-			parts = append(parts, c.v)
-		}
-	}
-	line := " " + styleTitle.Render("vmono") + styleDim.Render("  "+strings.Join(parts, " · "))
-	return clip(line, w)
+	return strings.Join(parts, " · ")
 }
 
 // runHarness starts a prepared harness. It is a variable so tests can

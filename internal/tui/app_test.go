@@ -10,42 +10,58 @@ import (
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
-func TestCommandBarRunsCommands(t *testing.T) {
+func TestPaletteRunsEntries(t *testing.T) {
 	env := testutil.NewEnv(t)
 	d := newDriver(t, env, "")
 
 	d.key(":")
+	d.has("go to…", "Packages", "Repos", "Harnesses", "Settings")
 	d.typeText("zzz")
-	d.key("enter")
-	d.has("unknown command: zzz")
-	d.key("j") // any key clears the notice
-	d.lacks("unknown command")
+	d.has("no match")
+	d.key("enter") // nothing to run
+	d.has("no match")
+	d.key("esc")
+	d.lacks("go to…")
 
-	d.key(":")
-	d.typeText("conf")
-	d.has("config") // ghost text completes the command
-	d.key("tab")
+	d.key("ctrl+p") // the second way in
+	d.typeText("sett")
 	d.key("enter")
 	d.has("Source root", "Package root")
 	d.key("esc")
-	d.has("packages[0]")
+	d.has("Packages (0)")
 
 	d.key(":")
-	d.typeText("q")
+	d.typeText("quit")
+	d.has("Quit")
 	d.key("enter")
 	if !d.quit {
-		t.Error(":q should quit")
+		t.Error("the Quit entry should quit")
 	}
 }
 
-func TestCommandBarEscClosesWithoutRunning(t *testing.T) {
+func TestPaletteEscClosesWithoutRunning(t *testing.T) {
 	env := testutil.NewEnv(t)
 	d := newDriver(t, env, "")
 	d.key(":")
 	d.typeText("new")
 	d.key("esc")
-	d.has("packages[0]")
-	d.lacks("new package")
+	d.has("Packages (0)")
+	d.lacks("New package")
+}
+
+func TestPaletteOffersTheSelectedRowsActions(t *testing.T) {
+	env := testutil.NewEnv(t)
+	seed(t, env, "payments", env.NewSource(t, "alpha"))
+	d := newDriver(t, env, "")
+
+	d.key(":")
+	d.has("Launch latest", "Sync all")
+	d.typeText("sessions of")
+	d.has("Sessions of payments")
+	d.key("esc", ":")
+	d.typeText("descr")
+	d.key("enter")
+	d.has("Describe · payments")
 }
 
 func TestFilterBarFiltersLiveAndEscClears(t *testing.T) {
@@ -53,30 +69,31 @@ func TestFilterBarFiltersLiveAndEscClears(t *testing.T) {
 	seed(t, env, "payments", env.NewSource(t, "alpha"))
 	seed(t, env, "auth-rework", env.NewSource(t, "beta"))
 	d := newDriver(t, env, "")
-	d.has("packages[2]")
+	d.has("Packages (2)")
 
 	d.key("/")
 	d.typeText("pay")
-	d.has("packages(/pay)[1]", "payments")
+	d.has("Packages /pay (1)", "payments")
 	d.lacks("auth-rework")
 	d.key("enter") // keeps the filter, closes the bar
-	d.has("packages(/pay)[1]")
+	d.has("Packages /pay (1)")
 	d.key("esc") // clears it
-	d.has("packages[2]", "auth-rework")
+	d.has("Packages (2)", "auth-rework")
 }
 
-func TestPackagesSortKeys(t *testing.T) {
+func TestPaletteSortsTheTable(t *testing.T) {
 	env := testutil.NewEnv(t)
 	seed(t, env, "bravo", env.NewSource(t, "a"))
 	seed(t, env, "alpha", env.NewSource(t, "b"))
 	d := newDriver(t, env, "")
-	d.key("N")
-	d.has("NAME↑")
+	sortByName := func() { d.key(":"); d.typeText("sort by name"); d.key("enter") }
+	sortByName()
+	d.has("name↑")
 	if r, _ := d.app.top().(*packagesModel).tb.selected(); r.id != "alpha" {
 		t.Errorf("name sort should put alpha first, got %q", r.id)
 	}
-	d.key("N")
-	d.has("NAME↓")
+	sortByName()
+	d.has("name↓")
 }
 
 func TestHelpIsAModalOverTheScreen(t *testing.T) {
@@ -120,7 +137,7 @@ func TestEveryScreenFitsTheTerminal(t *testing.T) {
 		check("launch")
 		d.key("esc")
 		d.key(":")
-		check("command bar")
+		check("palette")
 		d.key("esc")
 		d.key("ctrl+d")
 		check("delete")
@@ -141,21 +158,4 @@ func TestEveryScreenFitsTheTerminal(t *testing.T) {
 		check("finder")
 		d.key("esc", "esc")
 	}
-}
-
-// TestConfigKeyIsShownWithTheConfigValues checks that "c" sits above the
-// header's context values, not among the table's hints, and that help still
-// lists it.
-func TestConfigKeyIsShownWithTheConfigValues(t *testing.T) {
-	env := testutil.NewEnv(t)
-	d := newDriver(t, env, "")
-	lines := strings.Split(d.view(), "\n")
-	if !strings.Contains(lines[0], "vmono") || !strings.Contains(lines[0], "<c> Edit config") {
-		t.Errorf("title line should carry the config key:\n%s", strings.Join(lines[:headerHeight], "\n"))
-	}
-	if n := strings.Count(strings.Join(lines[:headerHeight], "\n"), "<c>"); n != 1 {
-		t.Errorf("<c> appears %d times in the header", n)
-	}
-	d.key("?")
-	d.has("Edit config")
 }

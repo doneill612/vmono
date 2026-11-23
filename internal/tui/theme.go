@@ -9,13 +9,13 @@ import (
 )
 
 // Palette uses adaptive colors so the TUI reads on light and dark terminals.
-// Amber is for labels and headings, steel blue for frames, cyan for the
-// selection and frame titles, and the green, amber and red trio for state.
+// The chrome is deliberately quiet: dim gray for borders, column heads and
+// secondary text, one accent for the badge, the selection and dialog titles,
+// and the green, amber and red trio reserved for state.
 var (
-	colAccent = lipgloss.AdaptiveColor{Light: "#B45309", Dark: "#FFAF00"}
-	colFrame  = lipgloss.AdaptiveColor{Light: "#3B6EA5", Dark: "#5C8DB8"}
-	colCyan   = lipgloss.AdaptiveColor{Light: "#0E7490", Dark: "#5FD7FF"}
-	colKey    = lipgloss.AdaptiveColor{Light: "#1D4ED8", Dark: "#4D9EFF"}
+	colAccent = lipgloss.AdaptiveColor{Light: "#0E7490", Dark: "#5FD7FF"}
+	colFrame  = lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#4B5563"}
+	colSelBg  = lipgloss.AdaptiveColor{Light: "#E5E7EB", Dark: "#262B33"}
 	colSelFg  = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#000000"}
 	colDim    = lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#9CA3AF"}
 	colOK     = lipgloss.AdaptiveColor{Light: "#15803D", Dark: "#4ADE80"}
@@ -29,19 +29,20 @@ var (
 	styleOK       = lipgloss.NewStyle().Foreground(colOK)
 	styleWarn     = lipgloss.NewStyle().Foreground(colWarn)
 	styleErr      = lipgloss.NewStyle().Foreground(colErr)
-	styleSelected = lipgloss.NewStyle().Bold(true).Foreground(colCyan)
+	styleSelected = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
 	styleLabel    = lipgloss.NewStyle().Bold(true)
-	styleBox      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colDim).Padding(0, 1)
 
-	styleAmber      = lipgloss.NewStyle().Foreground(colAccent)
-	styleCyan       = lipgloss.NewStyle().Foreground(colCyan)
+	styleAmber      = lipgloss.NewStyle().Foreground(colDim)
+	styleCyan       = lipgloss.NewStyle().Foreground(colAccent)
 	styleFrame      = lipgloss.NewStyle().Foreground(colFrame)
-	styleFrameTitle = lipgloss.NewStyle().Bold(true).Foreground(colCyan)
-	styleHeaderCol  = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
-	styleKey        = lipgloss.NewStyle().Bold(true).Foreground(colKey)
-	styleSelRow     = lipgloss.NewStyle().Bold(true).Background(colCyan).Foreground(colSelFg)
-	styleCrumb      = lipgloss.NewStyle().Bold(true).Background(colAccent).Foreground(colSelFg)
-	styleCrumbLast  = lipgloss.NewStyle().Bold(true).Background(colCyan).Foreground(colSelFg)
+	styleFrameTitle = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
+	styleHeaderCol  = lipgloss.NewStyle().Bold(true).Foreground(colDim)
+	styleColHead    = lipgloss.NewStyle().Foreground(colDim)
+	styleKey        = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
+	styleBadge      = lipgloss.NewStyle().Bold(true).Background(colAccent).Foreground(colSelFg)
+	styleSelBg      = lipgloss.NewStyle().Bold(true).Background(colSelBg)
+	styleSelGutter  = lipgloss.NewStyle().Foreground(colAccent).Background(colSelBg)
+	styleSelRow     = lipgloss.NewStyle().Bold(true).Background(colSelBg)
 )
 
 // keyHelp renders a footer line of "key action" hints.

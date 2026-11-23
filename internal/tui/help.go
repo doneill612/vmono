@@ -17,12 +17,13 @@ func newHelp(view []hint) *helpModel { return &helpModel{view: view} }
 
 // globalHints are the keys that work on every screen.
 var globalHints = []hint{
-	{":", "Command bar (:packages :members :repos :harnesses :config :new :quit)"},
-	{"/", "Filter the current table"},
+	{"enter", "Open the action menu for the selected row"},
+	{":  ctrl+p", "Command palette: go to a view, act on the selection, sort"},
+	{"/", "Filter the current list"},
 	{"?", "This help"},
 	{"ctrl+r", "Reload the current view"},
 	{"esc", "Back, or clear the filter"},
-	{"ctrl+c", "Quit"},
+	{"q  ctrl+c", "Quit"},
 }
 
 // navHints are the table navigation keys.

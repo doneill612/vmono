@@ -78,7 +78,7 @@ func TestFinderTabStepsIntoDirectoriesAndEnterPicksRepos(t *testing.T) {
 	d.key("tab") // org is a plain directory: tab steps into it
 	d.has("~/work/org"+sep, "lib")
 	d.key("enter") // lib is highlighted and is a repo
-	d.has("repos(select)", "added lib", "[x]")
+	d.has("Choose repos", "added lib", "[x]")
 }
 
 func TestFinderEnterOnDirectoryDescends(t *testing.T) {

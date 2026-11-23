@@ -121,9 +121,9 @@ func (m *editorModel) capturing() bool {
 // Title implements screen.
 func (m *editorModel) Title() string {
 	if m.pkg != nil {
-		return "edit(" + m.pkg.Name + ")"
+		return "Edit · " + m.pkg.Name
 	}
-	return "new package"
+	return "New package"
 }
 
 // Crumb implements screen.
@@ -619,7 +619,7 @@ func (m *editorModel) View(w, h int) string {
 func (m *editorModel) box(content string, field, w int) string {
 	col := colFrame
 	if m.focus == field {
-		col = colCyan
+		col = colAccent
 	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(col).
 		Padding(0, 1).MarginLeft(1).Width(w - 2).Render(content)

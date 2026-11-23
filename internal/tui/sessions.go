@@ -19,17 +19,21 @@ type sessionsMsg struct {
 	err  error
 }
 
-// sessions table columns.
-const (
-	sessColName = iota
-	sessColBranch
-	sessColState
-	sessColOpened
-)
-
-// sessionSelector is implemented by screens that stand on one session, so
-// commands like ":members" can default to it.
-type sessionSelector interface{ selectedSession() (pkg, session string) }
+// sessionActions lists everything the sessions view can do to one session,
+// in the order the menu shows it. Launching comes first because it is what a
+// session is for; deleting comes last. Each key is also the view's own
+// shortcut for the action.
+var sessionActions = []action{
+	{id: "launch", label: "Launch", key: "o"},
+	{id: "launch-with", label: "Launch with…", key: "l"},
+	{id: "members", label: "Members", key: "m"},
+	{id: "describe", label: "Describe", key: "d"},
+	{id: "sync", label: "Sync", key: "s"},
+	{id: "fetch", label: "Fetch", key: "f"},
+	{id: "copy", label: "Copy path", key: "y"},
+	{id: "finish", label: "Finish", key: "F"},
+	{id: "delete", label: "Delete", key: "ctrl+d", danger: true},
+}
 
 // sessionsModel is the drill-down from a package: one row per session, which
 // is the unit of work a harness is launched into. Every session has a
@@ -43,6 +47,7 @@ type sessionsModel struct {
 	err    string
 	tb     *table
 	filter string
+	pv     previewPane
 }
 
 // newSessions builds the sessions view of a package.
@@ -86,7 +91,7 @@ func (m *sessionsModel) Hints() []hint {
 		{"enter", "Actions"}, {"o", "Launch"}, {"l", "Launch with…"}, {"n", "New session"}, {"m", "Members"},
 		{"d", "Describe"}, {"y", "Copy path"}, {"e", "Edit package"}, {"s", "Sync"},
 		{"f", "Fetch"}, {"F", "Finish"}, {"ctrl+d", "Delete"},
-		{"N", "Sort name"}, {"O", "Sort opened"}, {"esc", "Back"},
+		{"esc", "Back"},
 	}
 }
 
@@ -99,13 +104,46 @@ func (m *sessionsModel) setFilter(q string) {
 // filterValue implements filterable.
 func (m *sessionsModel) filterValue() string { return m.filter }
 
-// selectedPackage implements packageSelector.
-func (m *sessionsModel) selectedPackage() string { return m.name }
+// previewSync implements previewer.
+func (m *sessionsModel) previewSync() tea.Cmd { return m.pv.sync(m, m.tb.selectedID()) }
 
-// selectedSession implements sessionSelector.
-func (m *sessionsModel) selectedSession() (string, string) {
-	s, _ := m.selected()
-	return m.name, s.Name
+// previewView implements previewer.
+func (m *sessionsModel) previewView(w, h int) string { return m.pv.view(m.tb.selectedID(), w, h) }
+
+// loadPreview reads one session's live status, off the UI goroutine, for the
+// preview pane.
+func (m *sessionsModel) loadPreview(id string) tea.Cmd {
+	c, pkg := m.e.core, m.pkg
+	var sum core.SessionSummary
+	for _, s := range m.list {
+		if s.Name == id {
+			sum = s
+		}
+	}
+	return loadPreview(m, id, func() (func(int) string, error) {
+		if pkg == nil {
+			return nil, fmt.Errorf("package not loaded")
+		}
+		s, err := c.LoadSession(pkg, id)
+		if err != nil {
+			return nil, err
+		}
+		return buildSessionPreview(sum, c.Status(s)), nil
+	})
+}
+
+// footerHints implements footerHinter.
+func (m *sessionsModel) footerHints() []hint {
+	return []hint{{"enter", "actions"}, {"n", "new session"}, {"/", "filter"}, {"esc", "back"}}
+}
+
+// tbl implements tabular.
+func (m *sessionsModel) tbl() *table { return m.tb }
+
+// rowActions implements rowActor.
+func (m *sessionsModel) rowActions() (rowContext, bool) {
+	s, ok := m.selected()
+	return rowContext{kind: "session", subject: s.Name, label: s.Name, items: sessionActions}, ok
 }
 
 // selected returns the highlighted session.
@@ -186,6 +224,9 @@ func (m *sessionsModel) fill() {
 
 // Update implements screen.
 func (m *sessionsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
+	if cmd, ok := m.pv.handle(msg, m, m.loadPreview); ok {
+		return m, cmd
+	}
 	switch t := msg.(type) {
 	case sessionsMsg:
 		if t.name != m.name {
@@ -210,16 +251,16 @@ func (m *sessionsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 			return m, tea.Batch(flashErr("fetch "+t.name+": "+t.err.Error()), m.load())
 		}
 		return m, tea.Batch(flash(fmt.Sprintf("fetched %d member(s)", t.n)), m.load())
-	case sessionActionMsg:
-		if t.owner != m {
+	case actionMsg:
+		if t.owner != screen(m) {
 			return m, nil
 		}
 		for _, s := range m.list {
-			if s.Name == t.session {
-				return m.act(t.key, s)
+			if s.Name == t.subject {
+				return m.act(t.id, s)
 			}
 		}
-		return m, flashErr("session " + t.session + " no longer exists")
+		return m, flashErr("session " + t.subject + " no longer exists")
 	case tea.KeyMsg:
 		return m.key(t)
 	}
@@ -238,10 +279,6 @@ func (m *sessionsModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			return m, nil
 		}
 		return m, pop()
-	case "N":
-		m.tb.sortBy(sessColName)
-	case "O":
-		m.tb.sortBy(sessColOpened)
 	case "n":
 		return m, push(newSessionPrompt(m.e, m.name))
 	case "e":
@@ -257,9 +294,12 @@ func (m *sessionsModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		return m, nil
 	}
 	if k.String() == "enter" {
-		return m, push(newSessionMenu(m, sel.Name))
+		return m, push(newActionMenu(m, "session", sel.Name, m.name, sessionActions))
 	}
-	return m.act(k.String(), sel)
+	if a, ok := findAction(sessionActions, k.String()); ok {
+		return m.act(a.id, sel)
+	}
+	return m, nil
 }
 
 // fetch starts fetching every member's source for the package.
@@ -267,30 +307,31 @@ func (m *sessionsModel) fetch() tea.Cmd {
 	return tea.Batch(flash("fetching "+m.name+"…"), fetchAll(m.e.core, m.name))
 }
 
-// act performs the per-session action bound to key on sel. It serves both
-// the sessions view's own keys and the choices made in the session menu.
-func (m *sessionsModel) act(key string, sel core.SessionSummary) (screen, tea.Cmd) {
-	switch key {
-	case "o":
+// act performs the per-session action with the given id on sel. It serves
+// both the sessions view's own shortcut keys and the choices made in the
+// session menu.
+func (m *sessionsModel) act(id string, sel core.SessionSummary) (screen, tea.Cmd) {
+	switch id {
+	case "launch":
 		return m, func() tea.Msg { return launchMsg{LaunchRequest{Package: m.name, Session: sel.Name}} }
-	case "f":
+	case "fetch":
 		return m, m.fetch()
-	case "l":
+	case "launch-with":
 		return m, push(newLaunchPicker(m.e, m.name, sel.Name, "Launch with"))
-	case "m":
+	case "members":
 		return m, push(newMembers(m.e, m.name, sel.Name))
-	case "d":
+	case "describe":
 		return m, push(newDescribe(m.e, m.name, sel.Name, ""))
-	case "s":
+	case "sync":
 		return m, push(newProgress(m.e, syncSessionOp(m.e.core, m.name, sel.Name)))
-	case "y":
+	case "copy":
 		if err := clipboard.WriteAll(sel.Path); err != nil {
 			return m, flashErr("could not copy: " + err.Error() + " — " + sel.Path)
 		}
 		return m, flash("copied " + paths.Contract(sel.Path))
-	case "ctrl+d":
+	case "delete":
 		return m, m.startDelete(sel.Name)
-	case "F":
+	case "finish":
 		return m, m.startFinish(sel.Name)
 	}
 	return m, nil

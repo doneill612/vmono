@@ -69,11 +69,11 @@ func (m *pickerModel) Init() tea.Cmd {
 
 // Title implements screen.
 func (m *pickerModel) Title() string {
-	t := "repos(select)"
+	t := "Choose repos"
 	if m.filter != "" {
-		t += "(/" + m.filter + ")"
+		t += " /" + m.filter
 	}
-	return fmt.Sprintf("%s[%d selected]", t, len(m.chosen))
+	return fmt.Sprintf("%s · %d selected", t, len(m.chosen))
 }
 
 // Crumb implements screen.
