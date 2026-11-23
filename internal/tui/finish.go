@@ -160,7 +160,7 @@ func (m *finishConfirm) View(w, h int) string {
 		if m.landable() == 0 {
 			b.WriteString(" No member has commits of its own to land. Finishing only marks\n the session finished.\n\n")
 		} else {
-			b.WriteString(" Commits are rebased in the session, then each branch above moves\n in its source repo. Nothing is pushed.\n\n")
+			b.WriteString(" Commits are rebased in the session, then each branch above moves\n in its source repo. Nothing is pushed; P on the finished session does that.\n\n")
 		}
 		box := "[ ]"
 		if m.closeAfter {

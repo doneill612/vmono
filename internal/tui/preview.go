@@ -237,6 +237,9 @@ func buildSessionPreview(sum core.SessionSummary, st core.SessionStatus) func(w 
 		if t, err := time.Parse(time.RFC3339, sum.LastOpened); err == nil {
 			b.WriteString(previewField("opened", ago(t), w))
 		}
+		if sum.State == core.SessionFinished {
+			b.WriteString(previewField("to push", unpushedSummary(st.Members), w))
+		}
 		b.WriteString(previewField("path", paths.Contract(sum.Path), w))
 		b.WriteString(previewSection("MEMBERS"))
 		for _, ms := range st.Members {
@@ -244,6 +247,30 @@ func buildSessionPreview(sum core.SessionSummary, st core.SessionStatus) func(w 
 		}
 		return b.String()
 	}
+}
+
+// unpushedSummary says how much of what a finished session landed is still
+// off its remotes: the commits to push and how many members they are in, or
+// that nothing is.
+func unpushedSummary(members []core.MemberStatus) string {
+	commits, in, active := 0, 0, 0
+	for _, ms := range members {
+		if ms.Mode == manifest.ModeActive {
+			active++
+		}
+		if ms.IntoUnpushed > 0 {
+			commits += ms.IntoUnpushed
+			in++
+		}
+	}
+	if commits == 0 {
+		return "nothing, all on the remotes"
+	}
+	noun := "commits"
+	if commits == 1 {
+		noun = "commit"
+	}
+	return fmt.Sprintf("%d %s in %d of %d members (P)", commits, noun, in, active)
 }
 
 // memberPreviewLine is one member of a session: name, mode, where it is
@@ -262,6 +289,15 @@ func memberPreviewLine(ms core.MemberStatus, w int) string {
 		line += "\n   " + styleDim.Render(truncate(where, w-5))
 	}
 	return line + "\n"
+}
+
+// toPushText words how many commits a landing branch has that its remote
+// lacks.
+func toPushText(n int) string {
+	if n == 0 {
+		return "up to date"
+	}
+	return fmt.Sprintf("%d to push", n)
 }
 
 // buildMemberPreview renders a member from the status the members view has
@@ -290,6 +326,9 @@ func buildMemberPreview(ms core.MemberStatus, w int) string {
 		b.WriteString(previewField("changes", fmt.Sprintf("%d modified, %d untracked", ms.Dirty, ms.Untracked), w))
 		if ms.Into != "" {
 			b.WriteString(previewField("lands on", ms.Into, w))
+		}
+		if ms.IntoRemote != "" {
+			b.WriteString(previewField("pushes to", fmt.Sprintf("%s (%s)", ms.IntoRemote, toPushText(ms.IntoUnpushed)), w))
 		}
 	}
 	b.WriteString(previewField("role", ms.Role, w))
