@@ -13,15 +13,15 @@ import (
 	"github.com/doneill612/vmono/internal/manifest"
 )
 
-// newSessionCmd builds `vmono session`, the commands that start, list, finish
-// and remove the sessions of a package. A session is one piece of work on a
+// newSessionCmd builds `vmono session`, the commands that start, list, finish,
+// push and remove the sessions of a package. A session is one piece of work on a
 // package: its own branch, and its own worktree of every member.
 func newSessionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "session",
-		Short: "Start, list, finish and remove the sessions of a package",
+		Short: "Start, list, finish, push and remove the sessions of a package",
 	}
-	cmd.AddCommand(newSessionNewCmd(), newSessionLsCmd(), newSessionIntoCmd(), newSessionFinishCmd(), newSessionRmCmd())
+	cmd.AddCommand(newSessionNewCmd(), newSessionLsCmd(), newSessionIntoCmd(), newSessionFinishCmd(), newSessionPushCmd(), newSessionRmCmd())
 	return cmd
 }
 
@@ -286,6 +286,109 @@ func describeLanding(m core.MemberLanding, dryRun bool) string {
 	text := fmt.Sprintf("%s %s on %s (%s)", verb, commits, m.Into, m.Via)
 	if m.Create {
 		text += ", creating the branch"
+	}
+	return text
+}
+
+// newSessionPushCmd builds `vmono session push`, which publishes the landing
+// branches of a finished session. It is the only vmono command that pushes,
+// and it never forces.
+func newSessionPushCmd() *cobra.Command {
+	var members []string
+	var dryRun, asJSON bool
+	cmd := &cobra.Command{
+		Use:   "push [pkg/session] [--member NAME]... [--dry-run] [--json]",
+		Short: "Push the landing branches of a finished session to their remotes",
+		Long: `Push the work a finished session landed. Each active member's landing branch is
+pushed from its source repo: to the remote branch it already tracks, or, when it
+has no upstream, to a branch of the same name on origin, which it then tracks.
+Members whose remote already has every commit are skipped.
+
+Only the landing branch is sent, never the session's own branch, and nothing is
+forced: a remote branch that has commits yours lacks is refused, so pull or rebase
+in the member's source repo first. Nothing prompts for credentials, so load your
+key into ssh-agent or sign in through your git credential helper beforehand.
+Whether a branch is behind is judged from the last fetch; f in the TUI, or
+git fetch in the member's source repo, refreshes it.
+
+The session must be finished (` + "`vmono session finish`" + `), and still finished: work
+committed or edited since reopens it. --member limits the push to the named
+members (repeatable). Members are independent: one that cannot be pushed does not
+stop the others, and the command exits with 2 when any is blocked, 1 when git
+refused one. --dry-run shows the plan and pushes nothing.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := loadCore()
+			if err != nil {
+				return err
+			}
+			s, err := c.ResolveSession(packageArg(args))
+			if err != nil {
+				return err
+			}
+			var res core.PushResult
+			err = withEvents(cmd.ErrOrStderr(), c, func() error {
+				var perr error
+				res, perr = c.Push(s, core.PushOptions{Members: members, DryRun: dryRun})
+				return perr
+			})
+			out := cmd.OutOrStdout()
+			if len(res.Members) > 0 || err == nil {
+				if asJSON {
+					if perr := printJSON(out, res); perr != nil {
+						return perr
+					}
+				} else {
+					printPush(out, res, dryRun)
+				}
+			}
+			return err
+		},
+	}
+	f := cmd.Flags()
+	f.StringArrayVar(&members, "member", nil, "push only this member (repeatable)")
+	f.BoolVar(&dryRun, "dry-run", false, "show what would be pushed without pushing")
+	f.BoolVar(&asJSON, "json", false, "output JSON")
+	return cmd
+}
+
+// printPush writes one line per member for a push, or a dry run of one.
+func printPush(w io.Writer, res core.PushResult, dryRun bool) {
+	for _, m := range res.Members {
+		fprintf(w, "%-16s %s\n", m.Name, describePush(m, dryRun))
+	}
+	if dryRun {
+		fprintf(w, "dry run: nothing pushed\n")
+	}
+}
+
+// describePush words one member's outcome.
+func describePush(m core.MemberPush, dryRun bool) string {
+	switch m.Status {
+	case core.PushNothing:
+		return "nothing to push"
+	case core.PushBlocked:
+		return "blocked: " + m.Reason
+	case core.PushFailed:
+		return "failed: " + m.Reason
+	}
+	verb := "pushed"
+	if dryRun || m.Status == core.PushReady {
+		verb = "would push"
+	}
+	commits := fmt.Sprintf("%d commit", m.Commits)
+	if m.Commits != 1 {
+		commits += "s"
+	}
+	text := fmt.Sprintf("%s %s of %s to %s/%s", verb, commits, m.Branch, m.Remote, m.Dest)
+	if m.New {
+		text += ", creating the branch"
+	}
+	if m.SetsUpstream {
+		text += ", now tracking it"
+		if verb == "would push" {
+			text = strings.Replace(text, "now tracking", "to track", 1)
+		}
 	}
 	return text
 }
