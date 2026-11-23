@@ -11,7 +11,7 @@ const SkillName = "vmono"
 // It is assembled from named sections so that a harness integration with
 // more than one entry point, such as the Claude Code plugin's commands, can
 // quote the guidance it shares with the skill instead of restating it.
-const skillBody = skillHeader + skillIntro + whatGoesWhere + addMemberSection + finishSection + skillRules
+const skillBody = skillHeader + skillIntro + whatGoesWhere + addMemberSection + statusSection + finishSection + skillRules
 
 // skillHeader is the frontmatter and generated-file note that open the
 // bundled skill.
@@ -63,7 +63,12 @@ conversation with the user. Do not record them in vmono.
 Write to the package only when you learn something that every future session
 of it will need: a constraint of the system, a decision that outlives this
 task, a link or ticket that frames the whole effort, a change in what a member
-is for. Tell the user when you do, and say that it applies to every session.
+is for.
+
+When the user has not asked you to record something, show them the text first
+and write it only once they agree. If nothing qualifies, record nothing rather
+than inventing a note. Once it is written, tell the user, and say that it
+applies to every session.
 
 | Command | Does |
 | --- | --- |
@@ -85,6 +90,19 @@ then run ` + "`vmono add REPO --role \"TEXT\"`" + ` (a known repo name or a path
 Add ` + "`--ref`" + ` for a read-only reference member. The member is added to every
 session of the package, and its worktree in your session exists on disk
 immediately.
+
+`
+
+// statusSection says how to find out what is left to land, and what would
+// stop it from landing. The Claude Code plugin's status command quotes it.
+const statusSection = `## Check where the session stands
+
+` + "`vmono status --json`" + ` reports the session's ` + "`state`" + ` (in-progress or finished) and, for
+each member, its branch, any uncommitted or untracked files, and how many
+commits are left to land on its ` + "`into`" + ` branch. Run it when you need to know what
+is left, and before finishing. Call out anything that would block
+` + "`vmono session finish`" + `: uncommitted work, a rebase in progress, a missing
+worktree. It only reads state; it changes nothing.
 
 `
 

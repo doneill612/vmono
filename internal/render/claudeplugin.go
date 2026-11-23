@@ -180,15 +180,11 @@ inventing a note.
 		allowedTools: []string{"Bash(vmono status:*)"},
 		body: `# Session status
 
-Run ` + "`vmono status --json`" + ` and summarize it for the user in a few lines: the
-session's ` + "`state`" + ` (in-progress or finished) and, for each member, its branch, any
-uncommitted or untracked files, and how many commits are left to land on its
-` + "`into`" + ` branch. Call out anything that would block ` + "`vmono session finish`" + `
-(uncommitted work, a rebase in progress, a missing worktree).
+If you are not inside a vmono session (see "Recognize a session" in the ` + "`vmono`" + `
+skill), say so and stop. Otherwise run ` + "`vmono status --json`" + ` and summarize it for
+the user in a few lines.
 
-If the command says you are not inside a vmono session, tell the user that.
-This only reads state; change nothing.
-`,
+` + statusSection,
 	},
 }
 

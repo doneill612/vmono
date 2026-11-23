@@ -167,3 +167,20 @@ func TestSkillExplainsSessions(t *testing.T) {
 		}
 	}
 }
+
+// TestSkillCarriesWhatThePluginCommandsQuote pins that the guidance behind
+// /vmono:status and /vmono:note is in the skill every harness gets, so a
+// harness without the plugin is not left with less.
+func TestSkillCarriesWhatThePluginCommandsQuote(t *testing.T) {
+	body := SkillMarkdown()
+	for _, want := range []string{
+		"vmono status --json",
+		"a rebase in progress",
+		"show them the text first",
+		"record nothing rather",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("skill missing %q", want)
+		}
+	}
+}
