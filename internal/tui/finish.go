@@ -79,7 +79,7 @@ func (m *finishConfirm) Update(msg tea.Msg) (screen, tea.Cmd) {
 		}
 	case "i":
 		if len(m.plan.Members) > 0 {
-			return m, goTo(newIntoEditor(m.e, m.pkg, m.session, m.plan))
+			return m, goTo(newIntoEditorFromPlan(m.e, m.pkg, m.session, m.plan))
 		}
 	case "c":
 		if !m.blocked() {

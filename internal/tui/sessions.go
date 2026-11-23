@@ -21,7 +21,8 @@ type sessionsMsg struct {
 
 // sessionActions lists everything the sessions view can do to one session,
 // in the order the menu shows it. Launching comes first because it is what a
-// session is for; deleting comes last. Push is for a finished session: it
+// session is for; deleting comes last. Landing branches sit beside Finish,
+// which lands the work on them, and Push is for a finished session: it
 // publishes what finishing landed. Each key is also the view's own
 // shortcut for the action.
 var sessionActions = []action{
@@ -32,6 +33,7 @@ var sessionActions = []action{
 	{id: "sync", label: "Sync", key: "s"},
 	{id: "fetch", label: "Fetch", key: "f"},
 	{id: "copy", label: "Copy path", key: "y"},
+	{id: "into", label: "Landing branches", key: "i"},
 	{id: "finish", label: "Finish", key: "F"},
 	{id: "push", label: "Push", key: "P"},
 	{id: "delete", label: "Delete", key: "ctrl+d", danger: true},
@@ -92,7 +94,7 @@ func (m *sessionsModel) Hints() []hint {
 	return []hint{
 		{"enter", "Actions"}, {"o", "Launch"}, {"l", "Launch with…"}, {"n", "New session"}, {"m", "Members"},
 		{"d", "Describe"}, {"y", "Copy path"}, {"e", "Edit package"}, {"s", "Sync"},
-		{"f", "Fetch"}, {"F", "Finish"}, {"P", "Push"}, {"ctrl+d", "Delete"},
+		{"f", "Fetch"}, {"i", "Landing branches"}, {"F", "Finish"}, {"P", "Push"}, {"ctrl+d", "Delete"},
 		{"esc", "Back"},
 	}
 }
@@ -333,6 +335,12 @@ func (m *sessionsModel) act(id string, sel core.SessionSummary) (screen, tea.Cmd
 		return m, flash("copied " + paths.Contract(sel.Path))
 	case "delete":
 		return m, m.startDelete(sel.Name)
+	case "into":
+		ed, err := newIntoEditorFor(m.e, m.name, sel.Name)
+		if err != nil {
+			return m, flashErr(err.Error())
+		}
+		return m, push(ed)
 	case "finish":
 		return m, m.startFinish(sel.Name)
 	case "push":
