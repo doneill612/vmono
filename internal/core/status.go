@@ -27,6 +27,12 @@ type MemberStatus struct {
 	// is finished, and ToLand the commits of its own that are not there yet.
 	Into   string `json:"into,omitempty"`
 	ToLand int    `json:"to_land"`
+	// IntoRemote is the remote branch Into is pushed to, such as "origin/main",
+	// and IntoUnpushed the commits on Into that it lacks as of the last fetch.
+	// Both are empty or zero when Into does not exist locally or has no remote
+	// to push to.
+	IntoRemote   string `json:"into_remote,omitempty"`
+	IntoUnpushed int    `json:"into_unpushed"`
 	// Rebasing is true while a rebase is stopped or waiting in the worktree.
 	Rebasing bool   `json:"rebasing,omitempty"`
 	Error    string `json:"error,omitempty"`
@@ -137,6 +143,7 @@ func landingStatus(s *Session, mem manifest.Member, dir string, ms *MemberStatus
 		return
 	}
 	ms.Into = into
+	ms.IntoRemote, ms.IntoUnpushed = unpushedOn(src, into)
 	base, err := resolveRef(src, mem.Base, nil)
 	if err != nil {
 		return
