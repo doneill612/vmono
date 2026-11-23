@@ -1,35 +1,92 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/doneill612/vmono/internal/core"
+	"github.com/doneill612/vmono/internal/manifest"
 )
 
-// intoEditor is the dialog, opened with i from the finish confirm, that
-// changes the branch each member's work lands on. It takes the confirm's
-// place, and both saving and cancelling return to a confirm built from a
-// fresh plan, so the rows always show the branches now in effect.
+// intoEditor is the dialog that changes the branch each member's work lands
+// on. It is opened with i from the sessions view, where it sits above the
+// list and closing it reveals the list reloaded, or with i from the finish
+// confirm, where it takes the confirm's place and both saving and cancelling
+// return to a confirm built from a fresh plan, so the rows always show the
+// branches now in effect.
 type intoEditor struct {
 	e            *env
 	pkg, session string
 	fields       intoFields
 	focus        int
 	msg          string
+	// back builds the screen that replaces the editor when it closes. Nil
+	// means the editor was pushed, so closing it pops it.
+	back func() (screen, error)
 }
 
-// newIntoEditor builds the editor from a finish plan, whose rows carry each
-// member's current landing branch.
-func newIntoEditor(e *env, pkg, session string, plan core.FinishResult) *intoEditor {
+// newIntoEditor builds the editor from each member's name and current landing
+// branch, listed in the order the fields should appear. back is described on
+// the intoEditor type.
+func newIntoEditor(e *env, pkg, session string, names []string, current map[string]string, back func() (screen, error)) *intoEditor {
+	return &intoEditor{e: e, pkg: pkg, session: session, fields: newIntoFields(names, current), back: back}
+}
+
+// newIntoEditorFromPlan builds the editor opened from the finish confirm. Its
+// plan's rows carry each member's current landing branch, and closing it
+// returns to a finish confirm built from the session as it is then.
+func newIntoEditorFromPlan(e *env, pkg, session string, plan core.FinishResult) *intoEditor {
 	var names []string
 	current := map[string]string{}
 	for _, r := range plan.Members {
 		names = append(names, r.Name)
 		current[r.Name] = r.Into
 	}
-	return &intoEditor{e: e, pkg: pkg, session: session, fields: newIntoFields(names, current)}
+	back := func() (screen, error) {
+		s, err := e.core.ResolveSession(pkg + "/" + session)
+		if err != nil {
+			return nil, err
+		}
+		return newFinishConfirm(e, pkg, session, e.core.PlanFinish(s, core.FinishOptions{})), nil
+	}
+	return newIntoEditor(e, pkg, session, names, current, back)
+}
+
+// newIntoEditorFor builds the editor opened from the sessions view, from the
+// landing branches the session records now. It returns an error when the
+// session cannot be read or has no active member to set a branch for.
+func newIntoEditorFor(e *env, pkg, session string) (*intoEditor, error) {
+	s, err := e.core.ResolveSession(pkg + "/" + session)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	current := map[string]string{}
+	for _, m := range e.core.Status(s).Members {
+		if m.Mode == manifest.ModeActive {
+			names = append(names, m.Name)
+			current[m.Name] = m.Into
+		}
+	}
+	if len(names) == 0 {
+		return nil, errors.New("session " + pkg + "/" + session + " has no active members")
+	}
+	return newIntoEditor(e, pkg, session, names, current, nil), nil
+}
+
+// leave closes the editor: it pops it when it was pushed, and otherwise
+// replaces it with the screen back builds.
+func (m *intoEditor) leave(extra ...tea.Cmd) (screen, tea.Cmd) {
+	if m.back == nil {
+		return m, tea.Batch(append([]tea.Cmd{pop()}, extra...)...)
+	}
+	prev, err := m.back()
+	if err != nil {
+		return m, flashErr(err.Error())
+	}
+	return m, tea.Batch(append([]tea.Cmd{goTo(prev)}, extra...)...)
 }
 
 // modal implements modalScreen.
@@ -50,15 +107,6 @@ func (m *intoEditor) Crumb() string { return "" }
 // Hints implements screen.
 func (m *intoEditor) Hints() []hint { return nil }
 
-// back returns to a finish confirm built from the session as it is now.
-func (m *intoEditor) back() (screen, error) {
-	s, err := m.e.core.ResolveSession(m.pkg + "/" + m.session)
-	if err != nil {
-		return nil, err
-	}
-	return newFinishConfirm(m.e, m.pkg, m.session, m.e.core.PlanFinish(s, core.FinishOptions{})), nil
-}
-
 // Update implements screen.
 func (m *intoEditor) Update(msg tea.Msg) (screen, tea.Cmd) {
 	k, ok := msg.(tea.KeyMsg)
@@ -75,11 +123,7 @@ func (m *intoEditor) Update(msg tea.Msg) (screen, tea.Cmd) {
 	}
 	switch k.String() {
 	case "esc":
-		prev, err := m.back()
-		if err != nil {
-			return m, flashErr(err.Error())
-		}
-		return m, goTo(prev)
+		return m.leave()
 	case "tab", "down":
 		return move(m.focus + 1)
 	case "shift+tab", "up":
@@ -91,7 +135,7 @@ func (m *intoEditor) Update(msg tea.Msg) (screen, tea.Cmd) {
 	return m, m.fields.update(m.focus, msg)
 }
 
-// save records the branches typed and returns to the confirm. An empty field
+// save records the branches typed and closes the editor. An empty field
 // leaves that member's branch as it is.
 func (m *intoEditor) save() (screen, tea.Cmd) {
 	values := m.fields.values()
@@ -105,11 +149,7 @@ func (m *intoEditor) save() (screen, tea.Cmd) {
 			return m, nil
 		}
 	}
-	prev, err := m.back()
-	if err != nil {
-		return m, flashErr(err.Error())
-	}
-	return m, tea.Batch(goTo(prev), flash("landing branches updated"))
+	return m.leave(flash("landing branches updated"))
 }
 
 // View implements screen.
