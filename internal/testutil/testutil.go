@@ -22,10 +22,21 @@ type Env struct {
 }
 
 // NewEnv isolates git and vmono from the real machine: a fake HOME, no
-// global or system git config, a fixed identity, and temp config/state dirs.
+// global or system git config, a fixed identity, temp config/state dirs, and
+// a working directory inside the temp root.
+//
+// The working directory matters because vmono infers the package and session
+// by walking up from it. `go test` starts in the package under test, and
+// when the tests are run from a vmono session that directory sits inside a
+// member worktree of the real session, so any command that infers its target
+// (note, describe, sync, ...) would find and modify the developer's actual
+// package instead of failing with "not inside a package". Moving into the
+// temp root first makes inference see only the fixtures. Tests that need a
+// different directory change it themselves afterwards.
 func NewEnv(t *testing.T) *Env {
 	t.Helper()
 	root := t.TempDir()
+	t.Chdir(root)
 	home := filepath.Join(root, "home")
 	mustMkdir(t, home)
 	gitconfig := filepath.Join(root, "gitconfig")
