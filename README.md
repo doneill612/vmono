@@ -190,10 +190,11 @@ The shortcuts, none of which you have to use:
 
 | Key (sessions) | Does |
 | --- | --- |
-| `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, copy path, finish, push, delete |
+| `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, copy path, landing branches, finish, push, delete |
 | `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
 | `n` | Start a new session: a name, optionally a branch (default `vmono/<package>/<session>`), and one `into` row per active member, filled in with the branch its source has checked out |
+| `i` | Change the branch each member's work lands on, without starting a finish |
 | `F` | Finish the session: shows what would land on which branch, or what blocks it, then `y` lands it. `i` changes the members' landing branches, `c` also removes the session afterward. A conflict offers to launch the harness in the session to resolve it |
 | `P` | Push a finished session: shows each member's landing branch and the remote it goes to, or what blocks it, then `y` pushes. Never forced. A session that is not finished gets a dialog saying why, with `F` to finish it unless uncommitted work stops that |
 | `m` / `d` | Members of the session / describe it |
@@ -255,7 +256,7 @@ A session is done when its work has landed on a branch in each member's source r
 1. For each active member, the session's own commits (on the session branch, but on neither the member's base nor its landing branch) are rebased onto the landing branch, inside the session's worktree.
 2. The landing branch in the source repo then moves to the result: fast-forwarded when it is checked out in a clean worktree, updated in place when nothing has it checked out, and created when it does not exist yet.
 
-Members with no commits of their own are skipped. Landing branches are per member, since repos need not share a branch name. When a session is created, each member's is recorded as the branch its source repo has checked out at that moment (a source on a detached HEAD falls back to the branch its base names). Override them at create with `--into BRANCH` for every member or `--into MEMBER=BRANCH` for one (repeatable), or in the `into` rows of the TUI prompt, which start filled in. Change them later with `vmono session into [pkg/session] --all B --member NAME=B`, with `i` in the TUI finish dialog, or with `--into` on `finish`; `vmono session into` with no flags lists them. A branch that does not exist yet is created when the session lands.
+Members with no commits of their own are skipped. Landing branches are per member, since repos need not share a branch name. When a session is created, each member's is recorded as the branch its source repo has checked out at that moment (a source on a detached HEAD falls back to the branch its base names). Override them at create with `--into BRANCH` for every member or `--into MEMBER=BRANCH` for one (repeatable), or in the `into` rows of the TUI prompt, which start filled in. Change them later with `vmono session into [pkg/session] --all B --member NAME=B`, with `i` on the session in the TUI (or in its finish dialog), or with `--into` on `finish`; `vmono session into` with no flags lists them. A branch that does not exist yet is created when the session lands.
 
 When a member's landing branch is not the branch its base names (a feature branch, say) and it exists in the source, the session starts from it, so the work builds on that branch and lands back on it. When it is the base's branch, the session starts from the base (`origin/main`) as usual, so a stale local `main` is never the start point. A session started with the source on a stray branch lands there, so check the `into` rows before starting; the finish dialog shows each member's target too.
 
