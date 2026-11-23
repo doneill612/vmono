@@ -115,7 +115,7 @@ func (m *reposModel) Crumb() string { return "repos" }
 func (m *reposModel) Hints() []hint {
 	return []hint{
 		{"enter", "Actions"}, {"→", "Packages"}, {"n", "New package"}, {"a", "Find repo"}, {"y", "Copy path"},
-		{"N", "Sort name"}, {"U", "Sort used by"}, {"esc", "Back"},
+		{"esc", "Back"},
 	}
 }
 
@@ -157,6 +157,15 @@ func (m *reposModel) fill() {
 		m.tb.empty = "No match."
 	}
 	m.tb.setRows(rows)
+}
+
+// tbl implements tabular.
+func (m *reposModel) tbl() *table { return m.tb }
+
+// rowActions implements rowActor.
+func (m *reposModel) rowActions() (rowContext, bool) {
+	r, ok := m.selected()
+	return rowContext{kind: "repo", subject: r.Path, label: r.Name, items: repoActions}, ok
 }
 
 // selected returns the highlighted repo.
@@ -242,10 +251,6 @@ func (m *reposModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			return m, nil
 		}
 		return m, pop()
-	case "N":
-		m.tb.sortBy(repoColName)
-	case "U":
-		m.tb.sortBy(repoColUsed)
 	case "a":
 		return m, push(newFinder(m.e, m))
 	}
@@ -253,7 +258,7 @@ func (m *reposModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		return m, nil
 	}
 	if k.String() == "enter" {
-		return m, push(newActionMenu(m, "repo", sel.Name, paths.Contract(sel.Path), repoActions))
+		return m, push(newActionMenu(m, "repo", sel.Path, paths.Contract(sel.Path), repoActions).named(sel.Name))
 	}
 	if a, ok := findAction(repoActions, k.String()); ok {
 		return m.act(a.id, sel)

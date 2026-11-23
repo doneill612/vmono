@@ -30,16 +30,6 @@ type fetchedMsg struct {
 	err  error
 }
 
-// packages table columns.
-const (
-	pkgColName = iota
-	pkgColMembers
-	pkgColSessions
-	pkgColHarness
-	pkgColState
-	pkgColOpened
-)
-
 // packageActions lists everything the packages view can do to one package, in
 // the order its menu shows it. Drilling into the sessions comes first because
 // it is what Enter on a package most often means. Each key is also the view's
@@ -128,7 +118,6 @@ func (m *packagesModel) Hints() []hint {
 		{"enter", "Actions"}, {"→", "Sessions"}, {"o", "Open latest"}, {"l", "Launch…"}, {"d", "Describe"},
 		{"n", "New package"}, {"e", "Edit"}, {"ctrl+d", "Delete"}, {"s", "Sync all"},
 		{"f", "Fetch"}, {"y", "Copy path"}, {"c", "Edit config"},
-		{"N", "Sort name"}, {"M", "Sort members"}, {"O", "Sort opened"}, {"S", "Sort state"},
 	}
 }
 
@@ -317,14 +306,6 @@ func (m *packagesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			return m, pop()
 		}
 		return m, nil
-	case "N":
-		m.tb.sortBy(pkgColName)
-	case "M":
-		m.tb.sortBy(pkgColMembers)
-	case "O":
-		m.tb.sortBy(pkgColOpened)
-	case "S":
-		m.tb.sortBy(pkgColState)
 	case "n":
 		return m, push(newEditor(m.e, nil))
 	case "c":
@@ -522,10 +503,17 @@ func summarizeFetch(owners map[string][]string, results []gitx.FetchResult) (int
 	return n, fmt.Errorf("fetched %d member(s); couldn't fetch %s: %s", n, strings.Join(failed, ", "), reason)
 }
 
-// selectedPackage implements packageSelector.
-func (m *packagesModel) selectedPackage() string {
-	s, _ := m.selected()
-	return s.Name
+// tbl implements tabular.
+func (m *packagesModel) tbl() *table { return m.tb }
+
+// rowActions implements rowActor.
+func (m *packagesModel) rowActions() (rowContext, bool) {
+	s, ok := m.selected()
+	items := packageActions
+	if s.Legacy {
+		items = legacyActions
+	}
+	return rowContext{kind: "package", subject: s.Name, label: s.Name, items: items}, ok
 }
 
 // View implements screen.

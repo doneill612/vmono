@@ -19,14 +19,6 @@ type sessionsMsg struct {
 	err  error
 }
 
-// sessions table columns.
-const (
-	sessColName = iota
-	sessColBranch
-	sessColState
-	sessColOpened
-)
-
 // sessionActions lists everything the sessions view can do to one session,
 // in the order the menu shows it. Launching comes first because it is what a
 // session is for; deleting comes last. Each key is also the view's own
@@ -42,10 +34,6 @@ var sessionActions = []action{
 	{id: "finish", label: "Finish", key: "F"},
 	{id: "delete", label: "Delete", key: "ctrl+d", danger: true},
 }
-
-// sessionSelector is implemented by screens that stand on one session, so
-// commands like ":members" can default to it.
-type sessionSelector interface{ selectedSession() (pkg, session string) }
 
 // sessionsModel is the drill-down from a package: one row per session, which
 // is the unit of work a harness is launched into. Every session has a
@@ -102,7 +90,7 @@ func (m *sessionsModel) Hints() []hint {
 		{"enter", "Actions"}, {"o", "Launch"}, {"l", "Launch with…"}, {"n", "New session"}, {"m", "Members"},
 		{"d", "Describe"}, {"y", "Copy path"}, {"e", "Edit package"}, {"s", "Sync"},
 		{"f", "Fetch"}, {"F", "Finish"}, {"ctrl+d", "Delete"},
-		{"N", "Sort name"}, {"O", "Sort opened"}, {"esc", "Back"},
+		{"esc", "Back"},
 	}
 }
 
@@ -115,13 +103,13 @@ func (m *sessionsModel) setFilter(q string) {
 // filterValue implements filterable.
 func (m *sessionsModel) filterValue() string { return m.filter }
 
-// selectedPackage implements packageSelector.
-func (m *sessionsModel) selectedPackage() string { return m.name }
+// tbl implements tabular.
+func (m *sessionsModel) tbl() *table { return m.tb }
 
-// selectedSession implements sessionSelector.
-func (m *sessionsModel) selectedSession() (string, string) {
-	s, _ := m.selected()
-	return m.name, s.Name
+// rowActions implements rowActor.
+func (m *sessionsModel) rowActions() (rowContext, bool) {
+	s, ok := m.selected()
+	return rowContext{kind: "session", subject: s.Name, label: s.Name, items: sessionActions}, ok
 }
 
 // selected returns the highlighted session.
@@ -254,10 +242,6 @@ func (m *sessionsModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			return m, nil
 		}
 		return m, pop()
-	case "N":
-		m.tb.sortBy(sessColName)
-	case "O":
-		m.tb.sortBy(sessColOpened)
 	case "n":
 		return m, push(newSessionPrompt(m.e, m.name))
 	case "e":

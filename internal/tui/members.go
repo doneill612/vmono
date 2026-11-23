@@ -19,24 +19,6 @@ type membersMsg struct {
 	err     error
 }
 
-// members table columns.
-const (
-	memColName = iota
-	memColMode
-	memColWhere
-	memColHead
-	memColUpstream
-	memColAhead
-	memColBehind
-	memColDirty
-	memColUntracked
-	memColRole
-)
-
-// packageSelector is implemented by screens that stand on one package, so
-// commands like ":members" can default to it.
-type packageSelector interface{ selectedPackage() string }
-
 // memberActions lists everything the members view can do, in the order its
 // menu shows it. Most act on the whole session; describe and copy path act on
 // the highlighted member. Each key is also the view's own shortcut.
@@ -110,8 +92,7 @@ func (m *membersModel) Crumb() string { return m.session }
 func (m *membersModel) Hints() []hint {
 	return []hint{
 		{"enter", "Actions"}, {"o", "Open"}, {"l", "Launch…"}, {"d", "Describe"}, {"y", "Copy path"},
-		{"e", "Edit package"}, {"s", "Sync"}, {"f", "Fetch"},
-		{"N", "Sort name"}, {"M", "Sort mode"}, {"esc", "Back"},
+		{"e", "Edit package"}, {"s", "Sync"}, {"f", "Fetch"}, {"esc", "Back"},
 	}
 }
 
@@ -124,11 +105,14 @@ func (m *membersModel) setFilter(q string) {
 // filterValue implements filterable.
 func (m *membersModel) filterValue() string { return m.filter }
 
-// selectedPackage implements packageSelector.
-func (m *membersModel) selectedPackage() string { return m.name }
+// tbl implements tabular.
+func (m *membersModel) tbl() *table { return m.tb }
 
-// selectedSession implements sessionSelector.
-func (m *membersModel) selectedSession() (string, string) { return m.name, m.session }
+// rowActions implements rowActor.
+func (m *membersModel) rowActions() (rowContext, bool) {
+	ms, ok := m.selectedMember()
+	return rowContext{kind: "member", subject: ms.Name, label: ms.Name, items: memberActions}, ok
+}
 
 // selectedMember returns the highlighted member's status.
 func (m *membersModel) selectedMember() (core.MemberStatus, bool) {
@@ -257,10 +241,6 @@ func (m *membersModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			return m, nil
 		}
 		return m, pop()
-	case "N":
-		m.tb.sortBy(memColName)
-	case "M":
-		m.tb.sortBy(memColMode)
 	}
 	if k.String() == "enter" {
 		if ms, ok := m.selectedMember(); ok {

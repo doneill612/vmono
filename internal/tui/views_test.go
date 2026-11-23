@@ -115,3 +115,18 @@ command = "sh"
 	d.key("esc")
 	d.has("two") // the header shows the new default
 }
+
+func TestEnterOnARepoOpensTheActionMenu(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	t.Setenv("VMONO_SOURCE_ROOTS", filepath.Dir(a))
+	seed(t, env, "payments", a)
+	d := newDriver(t, env, "")
+	goToView(d, "repos")
+	d.eventually(func() bool { return containsView(d, "alpha") }, "repo list")
+
+	d.key("enter")
+	d.has("Packages using it", "New package", "Copy path")
+	d.key("enter") // the first entry lists the packages that use the repo
+	d.has("packages(alpha)[1]", "payments")
+}

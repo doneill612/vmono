@@ -10,35 +10,36 @@ import (
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
-func TestCommandBarRunsCommands(t *testing.T) {
+func TestPaletteRunsEntries(t *testing.T) {
 	env := testutil.NewEnv(t)
 	d := newDriver(t, env, "")
 
 	d.key(":")
+	d.has("go to…", "Packages", "Repos", "Harnesses", "Settings")
 	d.typeText("zzz")
-	d.key("enter")
-	d.has("unknown command: zzz")
-	d.key("j") // any key clears the notice
-	d.lacks("unknown command")
+	d.has("no match")
+	d.key("enter") // nothing to run
+	d.has("no match")
+	d.key("esc")
+	d.lacks("go to…")
 
-	d.key(":")
-	d.typeText("conf")
-	d.has("config") // ghost text completes the command
-	d.key("tab")
+	d.key("ctrl+p") // the second way in
+	d.typeText("sett")
 	d.key("enter")
 	d.has("Source root", "Package root")
 	d.key("esc")
 	d.has("packages[0]")
 
 	d.key(":")
-	d.typeText("q")
+	d.typeText("quit")
+	d.has("Quit")
 	d.key("enter")
 	if !d.quit {
-		t.Error(":q should quit")
+		t.Error("the Quit entry should quit")
 	}
 }
 
-func TestCommandBarEscClosesWithoutRunning(t *testing.T) {
+func TestPaletteEscClosesWithoutRunning(t *testing.T) {
 	env := testutil.NewEnv(t)
 	d := newDriver(t, env, "")
 	d.key(":")
@@ -46,6 +47,21 @@ func TestCommandBarEscClosesWithoutRunning(t *testing.T) {
 	d.key("esc")
 	d.has("packages[0]")
 	d.lacks("new package")
+}
+
+func TestPaletteOffersTheSelectedRowsActions(t *testing.T) {
+	env := testutil.NewEnv(t)
+	seed(t, env, "payments", env.NewSource(t, "alpha"))
+	d := newDriver(t, env, "")
+
+	d.key(":")
+	d.has("Launch latest", "Sync all")
+	d.typeText("sessions of")
+	d.has("Sessions of payments")
+	d.key("esc", ":")
+	d.typeText("descr")
+	d.key("enter")
+	d.has("describe(payments)")
 }
 
 func TestFilterBarFiltersLiveAndEscClears(t *testing.T) {
@@ -65,17 +81,18 @@ func TestFilterBarFiltersLiveAndEscClears(t *testing.T) {
 	d.has("packages[2]", "auth-rework")
 }
 
-func TestPackagesSortKeys(t *testing.T) {
+func TestPaletteSortsTheTable(t *testing.T) {
 	env := testutil.NewEnv(t)
 	seed(t, env, "bravo", env.NewSource(t, "a"))
 	seed(t, env, "alpha", env.NewSource(t, "b"))
 	d := newDriver(t, env, "")
-	d.key("N")
+	sortByName := func() { d.key(":"); d.typeText("sort by name"); d.key("enter") }
+	sortByName()
 	d.has("NAME↑")
 	if r, _ := d.app.top().(*packagesModel).tb.selected(); r.id != "alpha" {
 		t.Errorf("name sort should put alpha first, got %q", r.id)
 	}
-	d.key("N")
+	sortByName()
 	d.has("NAME↓")
 }
 
@@ -120,7 +137,7 @@ func TestEveryScreenFitsTheTerminal(t *testing.T) {
 		check("launch")
 		d.key("esc")
 		d.key(":")
-		check("command bar")
+		check("palette")
 		d.key("esc")
 		d.key("ctrl+d")
 		check("delete")

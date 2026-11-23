@@ -114,9 +114,6 @@ func (m *describeModel) Hints() []hint {
 	return append(hs, hint{"esc", "Back"})
 }
 
-// selectedPackage implements packageSelector.
-func (m *describeModel) selectedPackage() string { return m.name }
-
 // Update implements screen.
 func (m *describeModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch t := msg.(type) {

@@ -190,3 +190,13 @@ func (m *sessionPrompt) View(w, h int) string {
 	}
 	return dialog("new session", b.String(), width)
 }
+
+// contains reports whether list has s.
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}

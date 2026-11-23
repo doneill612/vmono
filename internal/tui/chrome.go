@@ -222,7 +222,7 @@ func renderStatus(w int, crumbs []string, flash string, isErr bool) string {
 		}
 		right = st.Render(truncate(flash, w-lipgloss.Width(left)-3)) + " "
 	} else {
-		right = styleKey.Render("<:>") + styleDim.Render(" command  ") + styleKey.Render("<?>") + styleDim.Render(" help ")
+		right = styleKey.Render("<:>") + styleDim.Render(" palette  ") + styleKey.Render("<?>") + styleDim.Render(" help ")
 	}
 	space := w - lipgloss.Width(left) - lipgloss.Width(right)
 	if space < 1 {

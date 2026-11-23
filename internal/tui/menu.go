@@ -62,6 +62,7 @@ type actionMenu struct {
 	owner    screen
 	kind     string
 	subject  string
+	label    string
 	subtitle string
 	items    []action
 	cursor   int
@@ -71,7 +72,14 @@ type actionMenu struct {
 // ("session", "package"), subject is its id and subtitle optional dim text
 // beside its name.
 func newActionMenu(owner screen, kind, subject, subtitle string, items []action) *actionMenu {
-	return &actionMenu{owner: owner, kind: kind, subject: subject, subtitle: subtitle, items: items}
+	return &actionMenu{owner: owner, kind: kind, subject: subject, label: subject, subtitle: subtitle, items: items}
+}
+
+// named sets the text shown as the menu's heading when it differs from the
+// row's id, as it does for a repo, which is identified by its path.
+func (m *actionMenu) named(label string) *actionMenu {
+	m.label = label
+	return m
 }
 
 // modal implements modalScreen.
@@ -129,7 +137,7 @@ func (m *actionMenu) Update(msg tea.Msg) (screen, tea.Cmd) {
 // View implements screen.
 func (m *actionMenu) View(w, h int) string {
 	var b strings.Builder
-	b.WriteString(" " + styleTitle.Render(m.subject))
+	b.WriteString(" " + styleTitle.Render(m.label))
 	if m.subtitle != "" {
 		b.WriteString(styleDim.Render("  " + m.subtitle))
 	}

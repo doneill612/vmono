@@ -9,15 +9,6 @@ import (
 	"github.com/doneill612/vmono/internal/harness"
 )
 
-// harnesses table columns.
-const (
-	hsColName = iota
-	hsColCommand
-	hsColAdapter
-	hsColInstalled
-	hsColDefault
-)
-
 // harnessActions lists what the harnesses view can do to one harness. The key
 // is also the view's own shortcut for the action.
 var harnessActions = []action{{id: "default", label: "Set as default", key: "s"}}
@@ -57,7 +48,16 @@ func (m *harnessesModel) Crumb() string { return "harnesses" }
 
 // Hints implements screen.
 func (m *harnessesModel) Hints() []hint {
-	return []hint{{"enter", "Actions"}, {"s", "Set default"}, {"N", "Sort name"}, {"esc", "Back"}}
+	return []hint{{"enter", "Actions"}, {"s", "Set default"}, {"esc", "Back"}}
+}
+
+// tbl implements tabular.
+func (m *harnessesModel) tbl() *table { return m.tb }
+
+// rowActions implements rowActor.
+func (m *harnessesModel) rowActions() (rowContext, bool) {
+	r, ok := m.tb.selected()
+	return rowContext{kind: "harness", subject: r.id, label: r.id, items: harnessActions}, ok
 }
 
 // setFilter implements filterable.
@@ -126,8 +126,6 @@ func (m *harnessesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			return m, nil
 		}
 		return m, pop()
-	case "N":
-		m.tb.sortBy(hsColName)
 	}
 	r, ok := m.tb.selected()
 	if !ok {

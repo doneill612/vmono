@@ -85,43 +85,27 @@ func TestDescribeEditOpensEditor(t *testing.T) {
 	d.has("describe(payments)")
 }
 
-func TestMembersCommand(t *testing.T) {
+func TestSessionsOfAPackageFromThePalette(t *testing.T) {
 	env := testutil.NewEnv(t)
 	seed(t, env, "payments", env.NewSource(t, "alpha"))
 	seed(t, env, "auth", env.NewSource(t, "beta"))
 	d := newDriver(t, env, "")
 
 	d.key(":")
-	d.typeText("members nope")
+	d.typeText("sessions of pay")
 	d.key("enter")
-	d.has("no package")
-
-	d.key(":")
-	d.typeText("members pay")
-	d.key("tab") // completes the package name
-	d.key("enter")
-	d.has("members(payments/work)", "<packages>")
-
+	d.has("sessions(payments)[1]", "<packages>")
 	d.key("esc")
-	d.key(":")
-	d.typeText("mem")
-	d.key("enter") // no argument: the selected package, which has one session
-	d.has("members(")
+	d.has("packages[2]")
 }
 
-func TestSessionsCommand(t *testing.T) {
+func TestMembersFromASessionsPalette(t *testing.T) {
 	env := testutil.NewEnv(t)
 	seed(t, env, "payments", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
 
-	d.key(":")
-	d.typeText("sessions nope")
+	d.key("right", ":")
+	d.typeText("members")
 	d.key("enter")
-	d.has("no such package: nope")
-
-	d.key(":")
-	d.typeText("sessions pay")
-	d.key("tab")
-	d.key("enter")
-	d.has("sessions(payments)[1]", "<packages>")
+	d.has("members(payments/work)")
 }

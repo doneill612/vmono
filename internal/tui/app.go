@@ -192,6 +192,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.stack = a.stack[:len(a.stack)-1]
 		}
 		return a, a.broadcast(m)
+	case navigateMsg:
+		return a, a.navigate(m.build())
+	case reloadMsg:
+		return a, a.updateTop(refreshMsg{})
+	case sortMsg:
+		if t, ok := a.top().(tabular); ok {
+			t.tbl().sortBy(m.col)
+		}
+		return a, nil
 	case launchMsg:
 		req := m.req
 		a.env.launch = &req
@@ -285,11 +294,11 @@ func (a *App) globalKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	switch k.String() {
-	case ":":
-		return a.bar.open(':', ""), true
+	case ":", "ctrl+p":
+		return push(newPalette(a.paletteEntries())), true
 	case "/":
 		if f, ok := a.top().(filterable); ok {
-			return a.bar.open('/', f.filterValue()), true
+			return a.bar.open(f.filterValue()), true
 		}
 	case "?":
 		return push(newHelp(a.top().Hints())), true
@@ -349,7 +358,7 @@ func (a *App) View() string {
 
 	parts := []string{header}
 	if a.bar.active {
-		parts = append(parts, a.bar.view(w, a.ghost()))
+		parts = append(parts, a.bar.view(w))
 	}
 	frame := renderFrame(scr.Title(), scr.View(w-2, bodyH-2), w, bodyH)
 	for _, s := range a.stack[base+1:] {

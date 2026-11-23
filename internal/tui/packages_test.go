@@ -138,7 +138,7 @@ func TestHomeListsFiltersAndPreviews(t *testing.T) {
 	d.key("j")
 	d.key("k")
 	d.key("?")
-	d.has("Copy path", "Command bar")
+	d.has("Copy path", "Command palette")
 }
 
 func TestOpenKeyRequestsLaunch(t *testing.T) {
