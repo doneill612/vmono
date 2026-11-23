@@ -258,6 +258,44 @@ func TestLandingBranchEditorRefusesBadNames(t *testing.T) {
 	d.lacks("into alpha", "not a valid branch name")
 }
 
+func TestSessionsViewChangesLandingBranches(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	seed(t, env, "pay", a, b)
+	d := newDriver(t, env, "")
+
+	d.key("right", "i")
+	d.has("landing branches", "into alpha", "into beta")
+	d.key("tab") // beta's field
+	for range "main" {
+		d.key("backspace")
+	}
+	d.typeText("release")
+	d.key("enter")
+	d.has("Sessions · pay (1)", "landing branches updated")
+	d.lacks("into alpha")
+	data, _ := os.ReadFile(filepath.Join(env.PackageRoot, "pay", "work", ".vmono", "session.toml"))
+	if !containsText(string(data), "beta = \"release\"") || !containsText(string(data), "alpha = \"main\"") {
+		t.Errorf("session.toml = %q", data)
+	}
+}
+
+func TestSessionMenuOffersLandingBranches(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	seed(t, env, "pay", a)
+	d := newDriver(t, env, "")
+
+	d.key("right", "enter")
+	d.has("Landing branches")
+	d.key("esc", "i")
+	d.has("landing branches", "into alpha")
+	d.key("esc")
+	d.has("Sessions · pay (1)")
+	d.lacks("into alpha")
+}
+
 // gitBranchExists reports whether repo has a local branch of that name.
 func gitBranchExists(t *testing.T, repo, branch string) bool {
 	t.Helper()
