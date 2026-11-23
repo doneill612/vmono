@@ -1,15 +1,12 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="vmono logo" width="96" height="96">
-</p>
-<h1 align="center"><code>vmono</code></h1>
-<p align="center">Many repos. One workspace for your coding agent.</p>
-<p align="center">
+  <img src="docs/logo.svg" alt="vmono logo" width="96" height="96"><br>
+  <strong><code>vmono</code></strong><br>
+  Many repos. One workspace for your coding agent.<br>
   <a href="https://github.com/doneill612/vmono/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/doneill612/vmono?style=flat-square" /></a>
   <a href="https://github.com/doneill612/vmono/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/doneill612/vmono/ci.yml?style=flat-square&label=ci" /></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/doneill612/vmono?style=flat-square" /></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/doneill612/vmono?style=flat-square" /></a><br>
+  <img src="docs/vmono-ex.png" alt="The vmono TUI showing the packages view">
 </p>
-
-![The vmono TUI showing the packages view](docs/vmono-ex.png)
 
 ---
 
