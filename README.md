@@ -1,6 +1,21 @@
-# vmono
+<p align="center">
+  <picture>
+    <source srcset="docs/logo-dark.svg" media="(prefers-color-scheme: dark)">
+    <source srcset="docs/logo-light.svg" media="(prefers-color-scheme: light)">
+    <img src="docs/logo-light.svg" alt="vmono logo" width="96" height="96">
+  </picture>
+</p>
+<h1 align="center"><code>vmono</code></h1>
+<p align="center">Many repos. One workspace for your coding agent.</p>
+<p align="center">
+  <a href="https://github.com/doneill612/vmono/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/doneill612/vmono?style=flat-square" /></a>
+  <a href="https://github.com/doneill612/vmono/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/doneill612/vmono/ci.yml?style=flat-square&label=ci" /></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/doneill612/vmono?style=flat-square" /></a>
+</p>
 
 ![The vmono TUI showing the packages view](docs/vmono-ex.png)
+
+---
 
 vmono manages **packages** and their **sessions**. A package is a set of git repos defined once, with a purpose that explains why they belong together. A session is one piece of work on a package: its own branch, and a directory holding a git worktree of every member, which a coding harness opens and sees all of them. It replaces the habit of copying repos out of `~/source/` into a temporary parent folder.
 
