@@ -195,7 +195,7 @@ The shortcuts, none of which you have to use:
 | `l` | Pick a harness |
 | `n` | Start a new session: a name, optionally a branch (default `vmono/<package>/<session>`), and one `into` row per active member, filled in with the branch its source has checked out |
 | `F` | Finish the session: shows what would land on which branch, or what blocks it, then `y` lands it. `i` changes the members' landing branches, `c` also removes the session afterward. A conflict offers to launch the harness in the session to resolve it |
-| `P` | Push a finished session: shows each member's landing branch and the remote it goes to, or what blocks it, then `y` pushes. Never forced. An in-progress session is refused |
+| `P` | Push a finished session: shows each member's landing branch and the remote it goes to, or what blocks it, then `y` pushes. Never forced. A session that is not finished gets a dialog saying why, with `F` to finish it unless uncommitted work stops that |
 | `m` / `d` | Members of the session / describe it |
 | `s` / `f` | Sync the session / fetch every member's source |
 | `e` | Edit the package |
@@ -265,7 +265,7 @@ A finished session is not a removed one. It stays in the package's session list,
 
 ### Pushing a finished session
 
-Landing leaves each member's landing branch ahead of its remote. `vmono session push [pkg/session] [--member NAME]... [--dry-run] [--json]`, or `P` on the session (or `p` on a member) in the TUI, publishes them. It is only for a finished session: one that was never finished, or has new commits or edits since, is refused with exit code `2`, so nothing unlanded or half-committed is pushed.
+Landing leaves each member's landing branch ahead of its remote. `vmono session push [pkg/session] [--member NAME]... [--dry-run] [--json]`, or `P` on the session (or `p` on a member) in the TUI, publishes them. It is only for a finished session: one that was never finished, or has new commits or edits since, is refused with exit code `2`, so nothing unlanded or half-committed is pushed. In the TUI such a session gets a dialog saying so, with `F` to finish it right there, unless uncommitted work or a rebase in progress stops it; then the dialog lists what, and you commit or resolve it first.
 
 Only each member's landing branch is pushed, from its source repo, and never the session's own branch. A branch that tracks a remote branch goes there. A branch with no upstream goes to a branch of the same name on `origin` (or on the repo's only remote) and is set to track it, which is how a landing branch that finish created ends up published. A repo with several remotes and no `origin` blocks that member until you give the branch an upstream with `git branch --set-upstream-to`.
 
