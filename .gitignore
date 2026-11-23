@@ -35,6 +35,8 @@ go.work.sum
 
 # Build output
 /bin/
+/dist/
+/vmono
 
 # macOS
 .DS_Store
