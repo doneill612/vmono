@@ -21,7 +21,8 @@ type sessionsMsg struct {
 
 // sessionActions lists everything the sessions view can do to one session,
 // in the order the menu shows it. Launching comes first because it is what a
-// session is for; deleting comes last. Each key is also the view's own
+// session is for; deleting comes last. Push is for a finished session: it
+// publishes what finishing landed. Each key is also the view's own
 // shortcut for the action.
 var sessionActions = []action{
 	{id: "launch", label: "Launch", key: "o"},
@@ -32,6 +33,7 @@ var sessionActions = []action{
 	{id: "fetch", label: "Fetch", key: "f"},
 	{id: "copy", label: "Copy path", key: "y"},
 	{id: "finish", label: "Finish", key: "F"},
+	{id: "push", label: "Push", key: "P"},
 	{id: "delete", label: "Delete", key: "ctrl+d", danger: true},
 }
 
@@ -90,7 +92,7 @@ func (m *sessionsModel) Hints() []hint {
 	return []hint{
 		{"enter", "Actions"}, {"o", "Launch"}, {"l", "Launch with…"}, {"n", "New session"}, {"m", "Members"},
 		{"d", "Describe"}, {"y", "Copy path"}, {"e", "Edit package"}, {"s", "Sync"},
-		{"f", "Fetch"}, {"F", "Finish"}, {"ctrl+d", "Delete"},
+		{"f", "Fetch"}, {"F", "Finish"}, {"P", "Push"}, {"ctrl+d", "Delete"},
 		{"esc", "Back"},
 	}
 }
@@ -333,6 +335,8 @@ func (m *sessionsModel) act(id string, sel core.SessionSummary) (screen, tea.Cmd
 		return m, m.startDelete(sel.Name)
 	case "finish":
 		return m, m.startFinish(sel.Name)
+	case "push":
+		return m, startPush(m.e, m.name, sel.Name, nil, func() screen { return newSessions(m.e, m.name) })
 	}
 	return m, nil
 }

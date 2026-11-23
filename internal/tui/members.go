@@ -20,8 +20,8 @@ type membersMsg struct {
 }
 
 // memberActions lists everything the members view can do, in the order its
-// menu shows it. Most act on the whole session; describe and copy path act on
-// the highlighted member. Each key is also the view's own shortcut.
+// menu shows it. Most act on the whole session; describe, copy path and push
+// member act on the highlighted member. The pushes are for a finished session. Each key is also the view's own shortcut.
 var memberActions = []action{
 	{id: "launch", label: "Launch", key: "o"},
 	{id: "launch-with", label: "Launch with…", key: "l"},
@@ -30,6 +30,8 @@ var memberActions = []action{
 	{id: "edit", label: "Edit package", key: "e"},
 	{id: "sync", label: "Sync", key: "s"},
 	{id: "fetch", label: "Fetch", key: "f"},
+	{id: "push", label: "Push member", key: "p"},
+	{id: "push-all", label: "Push all", key: "P"},
 }
 
 // membersModel is the drill-down from a session: one row per member with its
@@ -92,7 +94,7 @@ func (m *membersModel) Crumb() string { return m.session }
 func (m *membersModel) Hints() []hint {
 	return []hint{
 		{"enter", "Actions"}, {"o", "Open"}, {"l", "Launch…"}, {"d", "Describe"}, {"y", "Copy path"},
-		{"e", "Edit package"}, {"s", "Sync"}, {"f", "Fetch"}, {"esc", "Back"},
+		{"e", "Edit package"}, {"s", "Sync"}, {"f", "Fetch"}, {"p", "Push member"}, {"P", "Push all"}, {"esc", "Back"},
 	}
 }
 
@@ -272,6 +274,20 @@ func (m *membersModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	return m, nil
 }
 
+// memberByName returns the loaded status of the named member.
+func (m *membersModel) memberByName(name string) (core.MemberStatus, bool) {
+	for _, ms := range m.status.Members {
+		if ms.Name == name {
+			return ms, true
+		}
+	}
+	return core.MemberStatus{}, false
+}
+
+// reopen builds a fresh members view of the same session, the screen a push
+// returns to so it shows what the push changed.
+func (m *membersModel) reopen() screen { return newMembers(m.e, m.name, m.session) }
+
 // selectedMemberName returns the highlighted member's name, or "".
 func (m *membersModel) selectedMemberName() string {
 	ms, _ := m.selectedMember()
@@ -296,6 +312,17 @@ func (m *membersModel) act(id, member string) (screen, tea.Cmd) {
 			return m, nil
 		}
 		return m, push(newEditor(m.e, m.sess.Pkg))
+	case "push-all":
+		return m, startPush(m.e, m.name, m.session, nil, m.reopen)
+	case "push":
+		ms, ok := m.memberByName(member)
+		switch {
+		case !ok:
+			return m, nil
+		case ms.Mode == manifest.ModeReference:
+			return m, flashErr(member + " is a reference member, which has no work of its own to push")
+		}
+		return m, startPush(m.e, m.name, m.session, []string{member}, m.reopen)
 	case "describe":
 		if member != "" {
 			return m, push(newDescribe(m.e, m.name, m.session, member))

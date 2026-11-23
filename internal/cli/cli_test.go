@@ -924,3 +924,55 @@ func TestHookIsHiddenFromHelp(t *testing.T) {
 		t.Errorf("hook should not appear in help:\n%s", out)
 	}
 }
+
+func TestSessionPush(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	out, stderr, err := run(t, "new", "demo", "--active", a, "--session", "work")
+	if err != nil {
+		t.Fatalf("new: %v\n%s", err, stderr)
+	}
+	wt := filepath.Join(strings.TrimSpace(out), "alpha")
+	testutil.WriteFile(t, filepath.Join(wt, "one.txt"), "one\n")
+	testutil.Git(t, wt, "add", "-A")
+	testutil.Git(t, wt, "commit", "--quiet", "-m", "add one.txt")
+	remote := filepath.Join(env.Root, "remotes", "alpha.git")
+
+	// A session that has not been finished has nothing landed to push.
+	if _, _, err := run(t, "session", "push", "demo/work"); ExitCode(err) != ExitRefused {
+		t.Fatalf("push before finish: exit %d (%v), want %d", ExitCode(err), err, ExitRefused)
+	}
+	if _, stderr, err := run(t, "session", "finish", "demo/work"); err != nil {
+		t.Fatalf("finish: %v\n%s", err, stderr)
+	}
+	before := testutil.Git(t, remote, "rev-parse", "refs/heads/main")
+
+	text, _, err := run(t, "session", "push", "demo/work", "--dry-run")
+	if err != nil || !strings.Contains(text, "would push 1 commit of main to origin/main") || !strings.Contains(text, "dry run") {
+		t.Errorf("dry run = %q, %v", text, err)
+	}
+	if testutil.Git(t, remote, "rev-parse", "refs/heads/main") != before {
+		t.Fatal("a dry run must not push")
+	}
+	if _, _, err := run(t, "session", "push", "demo/work", "--member", "nope"); err == nil {
+		t.Error("an unknown --member must be rejected")
+	}
+
+	out, _, err = run(t, "session", "push", "demo/work", "--json")
+	if err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	var res core.PushResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("push --json: %v\n%s", err, out)
+	}
+	if len(res.Members) != 1 || res.Members[0].Status != core.PushPushed || res.Members[0].Commits != 1 {
+		t.Errorf("result = %+v", res)
+	}
+	if testutil.Git(t, remote, "rev-parse", "refs/heads/main") != testutil.Git(t, a, "rev-parse", "main") {
+		t.Error("origin/main should be at the landed tip")
+	}
+	if text, _, err := run(t, "session", "push", "demo/work"); err != nil || !strings.Contains(text, "nothing to push") {
+		t.Errorf("pushing again = %q, %v", text, err)
+	}
+}
