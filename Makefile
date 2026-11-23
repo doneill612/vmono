@@ -3,13 +3,15 @@ PKG     := ./cmd/vmono
 OUT     := bin/$(BINARY)
 PREFIX  ?= $(HOME)/.local
 BINDIR  ?= $(PREFIX)/bin
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X github.com/doneill612/vmono/internal/buildinfo.version=$(VERSION)
 
-.PHONY: build install uninstall test vet clean
+.PHONY: build install uninstall test vet snapshot clean
 
-## build: compile the binary to bin/vmono
+## build: compile the binary to bin/vmono, stamped with the git version
 build:
 	@mkdir -p bin
-	go build -trimpath -o $(OUT) $(PKG)
+	go build -trimpath -ldflags "$(LDFLAGS)" -o $(OUT) $(PKG)
 
 ## install: build, then copy the binary to $(BINDIR) (default ~/.local/bin)
 install: build
@@ -29,6 +31,10 @@ test: vet
 vet:
 	go vet ./...
 
+## snapshot: dry-run the release build into dist/ (needs goreleaser)
+snapshot:
+	goreleaser release --snapshot --clean
+
 ## clean: remove build output
 clean:
-	rm -rf bin
+	rm -rf bin dist
