@@ -41,7 +41,7 @@ The script downloads the archive for your OS and CPU from the latest [release](h
 | `VMONO_INSTALL_DIR` | Install somewhere else |
 | `VMONO_DOWNLOAD_BASE` | Download from a mirror of the releases page |
 
-To uninstall, delete the `vmono` binary (and, on Windows, its folder from your `PATH`). To check what you have, run `vmono --version`.
+To uninstall, delete the `vmono` binary (and, on Windows, its folder from your `PATH`; the PowerShell commands are under *From source* below). To check what you have, run `vmono --version`.
 
 A tarball downloaded in a browser on macOS is quarantined by Gatekeeper; clear it with `xattr -d com.apple.quarantine vmono`. The install script doesn't need this.
 
@@ -66,7 +66,7 @@ git clone https://github.com/doneill612/vmono
 cd vmono
 
 # Build, stamped with the git version
-$version = git describe --tags --always --dirty
+$version = git describe --tags --always --dirty 2>$null; if (-not $version) { $version = 'dev' }
 go build -trimpath -ldflags "-X github.com/doneill612/vmono/internal/buildinfo.version=$version" -o bin\vmono.exe .\cmd\vmono
 
 # Install to the same folder as the install script, and add it to your user PATH
@@ -90,15 +90,42 @@ go install github.com/doneill612/vmono/cmd/vmono@latest
 
 Go puts the binary in `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows), which must be on your `PATH`. The version is read from the module, so `vmono --version` reports the tag.
 
-The rest of the Makefile, and what to run without it:
+The rest of the Makefile, on macOS and Linux:
 
-| Task | With `make` | Without `make` (any OS) |
-| --- | --- | --- |
-| Build to `bin/` | `make build` | the `go build` line above |
-| Test | `make test` | `go vet ./...` then `go test ./...` |
-| Uninstall | `make uninstall` | delete the installed `vmono` / `vmono.exe` |
-| Clean | `make clean` | delete the `bin` and `dist` folders |
-| Dry-run the release build | `make snapshot` | `goreleaser release --snapshot --clean` (needs [GoReleaser](https://goreleaser.com)) |
+```sh
+make build      # build to bin/vmono
+make test       # go vet, then go test
+make uninstall  # remove the installed binary
+make clean      # remove bin/ and dist/
+make snapshot   # dry-run the release build (needs GoReleaser)
+```
+
+And the same tasks on Windows, in PowerShell from the repo root:
+
+```powershell
+# Build to bin\vmono.exe (make build)
+$version = git describe --tags --always --dirty 2>$null; if (-not $version) { $version = 'dev' }
+go build -trimpath -ldflags "-X github.com/doneill612/vmono/internal/buildinfo.version=$version" -o bin\vmono.exe .\cmd\vmono
+
+# Test (make test)
+go vet ./...
+go test ./...
+
+# Uninstall (make uninstall): remove the binary and its folder from your user PATH
+$dir = Join-Path $env:LOCALAPPDATA 'Programs\vmono\bin'
+Remove-Item (Join-Path $dir 'vmono.exe') -ErrorAction SilentlyContinue
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$newPath = (($userPath -split ';') | Where-Object { $_ -and $_ -ne $dir }) -join ';'
+[Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+
+# Clean (make clean)
+Remove-Item -Recurse -Force bin, dist -ErrorAction SilentlyContinue
+
+# Dry-run the release build (make snapshot); needs GoReleaser
+goreleaser release --snapshot --clean
+```
+
+If you installed somewhere else with `VMONO_INSTALL_DIR`, set `$dir` to that folder before the uninstall step. [GoReleaser](https://goreleaser.com) is only needed for the dry run.
 
 ### Releasing
 
