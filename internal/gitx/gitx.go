@@ -685,6 +685,94 @@ func Unpushed(path string, landedOn ...string) (int, error) {
 	return strconv.Atoi(out)
 }
 
+// Tracking is the remote branch a local branch is configured to track.
+type Tracking struct {
+	// Remote is the name of the remote, such as "origin".
+	Remote string
+	// Branch is the branch's name on that remote, which need not match the
+	// local branch's name.
+	Branch string
+	// Ref is the remote-tracking ref that mirrors it locally, such as
+	// "refs/remotes/origin/main". It may not exist, for example when the
+	// remote branch was deleted and pruned.
+	Ref string
+}
+
+// UpstreamOf returns the remote branch the local branch tracks. The second
+// result is false when the branch has no upstream, or tracks another local
+// branch rather than a remote one.
+func UpstreamOf(repo, branch string) (Tracking, bool) {
+	out, err := run(repo, "for-each-ref", "--format=%(upstream)\t%(upstream:remotename)", "refs/heads/"+branch)
+	if err != nil {
+		return Tracking{}, false
+	}
+	ref, remote, _ := strings.Cut(strings.TrimSpace(out), "\t")
+	remote = strings.TrimSpace(remote)
+	prefix := "refs/remotes/" + remote + "/"
+	if ref == "" || remote == "" || remote == "." || !strings.HasPrefix(ref, prefix) {
+		return Tracking{}, false
+	}
+	return Tracking{Remote: remote, Branch: strings.TrimPrefix(ref, prefix), Ref: ref}, true
+}
+
+// Remotes returns the names of the repo's remotes, in git's order.
+func Remotes(repo string) []string {
+	out, err := run(repo, "remote")
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// Push publishes the local branch to the named branch on the remote, as
+// `git push [-u] <remote> refs/heads/<branch>:refs/heads/<dest>`. With
+// setUpstream the local branch is made to track it. It never forces, so a
+// remote branch that has commits the local one lacks is refused, and it never
+// prompts for credentials: git's terminal prompts are off and ssh runs in
+// batch mode, so a push that needs credentials the user has not made available
+// fails with an error IsAuthError recognizes. Nothing but the one branch is
+// sent, whatever push.default or the remote's push refspecs say.
+func Push(repo, remote, branch, dest string, setUpstream bool) error {
+	args := []string{"push"}
+	if setUpstream {
+		args = append(args, "--set-upstream")
+	}
+	args = append(args, remote, "refs/heads/"+branch+":refs/heads/"+dest)
+	_, err := runEnv(repo, nonInteractiveSSH(repo), args...)
+	return err
+}
+
+// nonFastForwardMarkers are lowercase fragments of git stderr that mean a push
+// was refused because the remote branch has commits the local one lacks.
+var nonFastForwardMarkers = []string{
+	"non-fast-forward",
+	"fetch first",
+	"tip of your current branch is behind",
+}
+
+// IsNonFastForward reports whether err is a push the remote refused because
+// its branch is ahead of, or has diverged from, the one pushed, judged from
+// git's stderr. A refusal by a hook or a protected branch is not one.
+func IsNonFastForward(err error) bool {
+	var ge *Error
+	if !errors.As(err, &ge) {
+		return false
+	}
+	msg := strings.ToLower(ge.Stderr)
+	for _, m := range nonFastForwardMarkers {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // DefaultBranch returns the name of the branch a repo's work normally lands
 // on: the one origin/HEAD points at, or, for a repo with no remote HEAD, the
 // branch it has checked out. It returns "" when neither is known.

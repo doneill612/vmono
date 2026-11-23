@@ -489,3 +489,80 @@ func TestDefaultBranch(t *testing.T) {
 		t.Errorf("DefaultBranch without a remote falls back to the checked-out branch, got %q", got)
 	}
 }
+
+func TestUpstreamOfAndRemotes(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "alpha")
+
+	tr, ok := UpstreamOf(src, "main")
+	if !ok || tr.Remote != "origin" || tr.Branch != "main" || tr.Ref != "refs/remotes/origin/main" {
+		t.Fatalf("UpstreamOf(main) = %+v, %v", tr, ok)
+	}
+	testutil.Git(t, src, "branch", "topic")
+	if _, ok := UpstreamOf(src, "topic"); ok {
+		t.Error("a branch with no upstream must report none")
+	}
+	testutil.Git(t, src, "branch", "--set-upstream-to=main", "topic")
+	if _, ok := UpstreamOf(src, "topic"); ok {
+		t.Error("a branch tracking a local branch must report none")
+	}
+	if _, ok := UpstreamOf(src, "missing"); ok {
+		t.Error("a branch that does not exist must report none")
+	}
+	if got := Remotes(src); len(got) != 1 || got[0] != "origin" {
+		t.Errorf("Remotes = %v", got)
+	}
+}
+
+func TestPushNewBranchSetsUpstream(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "alpha")
+	testutil.Git(t, src, "checkout", "--quiet", "-b", "feature")
+	testutil.WriteFile(t, filepath.Join(src, "f.txt"), "f")
+	testutil.Git(t, src, "add", "-A")
+	testutil.Git(t, src, "commit", "--quiet", "-m", "feature work")
+	testutil.Git(t, src, "checkout", "--quiet", "main")
+
+	if err := Push(src, "origin", "feature", "feature", true); err != nil {
+		t.Fatal(err)
+	}
+	tr, ok := UpstreamOf(src, "feature")
+	if !ok || tr.Remote != "origin" || tr.Branch != "feature" {
+		t.Fatalf("upstream after push = %+v, %v", tr, ok)
+	}
+	if n, _ := RevCount(src, "feature", "--not", tr.Ref); n != 0 {
+		t.Errorf("feature should be on origin, %d commits are not", n)
+	}
+	if got := CurrentBranch(src); got != "main" {
+		t.Errorf("push must not move the checked-out branch, on %q", got)
+	}
+}
+
+func TestPushRefusesNonFastForward(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "alpha")
+	other := filepath.Join(env.Root, "other")
+	testutil.Git(t, env.Root, "clone", "--quiet", filepath.Join(env.Root, "remotes", "alpha.git"), other)
+	testutil.WriteFile(t, filepath.Join(other, "o.txt"), "o")
+	testutil.Git(t, other, "add", "-A")
+	testutil.Git(t, other, "commit", "--quiet", "-m", "theirs")
+	testutil.Git(t, other, "push", "--quiet", "origin", "main")
+
+	testutil.WriteFile(t, filepath.Join(src, "m.txt"), "m")
+	testutil.Git(t, src, "add", "-A")
+	testutil.Git(t, src, "commit", "--quiet", "-m", "mine")
+
+	err := Push(src, "origin", "main", "main", false)
+	if err == nil {
+		t.Fatal("pushing a diverged branch must fail: pushes are never forced")
+	}
+	if !IsNonFastForward(err) {
+		t.Errorf("want a non-fast-forward error, got %v", err)
+	}
+	if IsAuthError(err) {
+		t.Errorf("a refused push is not an auth error: %v", err)
+	}
+	if IsNonFastForward(errors.New("boom")) {
+		t.Error("a plain error is not a non-fast-forward")
+	}
+}
