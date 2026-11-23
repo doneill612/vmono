@@ -78,10 +78,21 @@ func TestPushRefusesASessionThatIsNotFinished(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("right", "P")
-	d.has("finish the session before pushing")
+	d.has("push session", "not finished", "nothing landed to push", "F finish the session")
+	d.key("y") // there is nothing to confirm
+	d.has("not finished")
+	d.key("esc")
 	d.lacks("push session")
+
+	// F goes straight to finishing, and finishing then enables the push.
+	d.key("P", "F")
+	d.has("finish session", "1 commit → main")
+	d.key("y")
+	d.eventually(func() bool { return containsView(d, "done") }, "finish to complete")
+	d.key("enter", "P")
+	d.has("push session", "1 commit of main → origin/main")
 	if remoteHead(t, env, "alpha") != before {
-		t.Error("an unfinished session must not push")
+		t.Error("nothing is pushed until it is confirmed")
 	}
 }
 
@@ -152,5 +163,32 @@ func TestPushShowsABlockedMemberAndTheRestStillGo(t *testing.T) {
 	}
 	if remoteHead(t, env, "alpha") != alphaBefore {
 		t.Error("a diverged branch must never be forced")
+	}
+}
+
+func TestPushOfADirtySessionOffersNoFinish(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	seed(t, env, "pay", a)
+	wt := commitInSession(t, env, "pay", "work", "alpha", "one.txt")
+	testutil.WriteFile(t, filepath.Join(wt, "forgotten.txt"), "x")
+	before := remoteHead(t, env, "alpha")
+	d := newDriver(t, env, "")
+
+	d.key("right", "P")
+	d.has("push session", "not finished, and cannot be yet", "alpha: 0 modified, 1 untracked", "Commit or resolve that")
+	d.lacks("F finish the session")
+	d.key("F")
+	d.has("push session", "cannot be yet")
+	d.lacks("finish session")
+	d.key("esc")
+	d.lacks("push session")
+
+	// The same holds from the members view.
+	d.key("m", "p")
+	d.has("push session", "cannot be yet", "alpha: 0 modified, 1 untracked")
+	d.lacks("F finish the session")
+	if remoteHead(t, env, "alpha") != before {
+		t.Error("nothing may be pushed")
 	}
 }
