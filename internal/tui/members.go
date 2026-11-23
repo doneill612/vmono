@@ -105,6 +105,19 @@ func (m *membersModel) setFilter(q string) {
 // filterValue implements filterable.
 func (m *membersModel) filterValue() string { return m.filter }
 
+// previewSync implements previewer. The status the preview shows is already
+// loaded, so there is nothing to start.
+func (m *membersModel) previewSync() tea.Cmd { return nil }
+
+// previewView implements previewer.
+func (m *membersModel) previewView(w, h int) string {
+	ms, ok := m.selectedMember()
+	if !ok {
+		return ""
+	}
+	return " " + styleLabel.Render(truncate(ms.Name, w-2)) + "\n" + buildMemberPreview(ms, w)
+}
+
 // footerHints implements footerHinter.
 func (m *membersModel) footerHints() []hint {
 	return []hint{{"enter", "actions"}, {"/", "filter"}, {"esc", "back"}}

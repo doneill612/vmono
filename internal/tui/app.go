@@ -156,8 +156,21 @@ func (a *App) top() screen { return a.stack[len(a.stack)-1] }
 // Init implements tea.Model.
 func (a *App) Init() tea.Cmd { return a.top().Init() }
 
-// Update implements tea.Model.
+// Update implements tea.Model. After handling a message it lets the list on
+// screen start loading the preview of whatever row the message left
+// highlighted.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m, cmd := a.update(msg)
+	if a.env.w >= previewMinW {
+		if p, ok := a.stack[a.baseIndex()].(previewer); ok {
+			cmd = tea.Batch(cmd, p.previewSync())
+		}
+	}
+	return m, cmd
+}
+
+// update handles one message.
+func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.KeyMsg:
 		if m.String() == "ctrl+c" {
@@ -312,6 +325,19 @@ func (a *App) globalKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
+// baseIndex returns the index of the screen the app is drawn around: the top
+// of the stack, or the screen beneath the dialogs above it.
+func (a *App) baseIndex() int {
+	base := len(a.stack) - 1
+	for base > 0 {
+		if _, isModal := a.stack[base].(modalScreen); !isModal {
+			break
+		}
+		base--
+	}
+	return base
+}
+
 // chromeLines is the number of lines the top bar, its rule and the footer
 // take; the screen's own heading takes one more.
 const chromeLines = 3
@@ -325,13 +351,7 @@ func (a *App) View() string {
 	if h < 8 {
 		h = 24
 	}
-	base := len(a.stack) - 1
-	for base > 0 {
-		if _, isModal := a.stack[base].(modalScreen); !isModal {
-			break
-		}
-		base--
-	}
+	base := a.baseIndex()
 	scr := a.stack[base]
 
 	barH := 0
@@ -351,8 +371,15 @@ func (a *App) View() string {
 	if a.bar.active {
 		parts = append(parts, a.bar.view(w))
 	}
-	body := clip(" "+styleLabel.Render(truncate(scr.Title(), w-2)), w) + "\n" + scr.View(w, bodyH-1)
-	body = fitBlock(body, w, bodyH)
+	heading := func(cw int) string { return clip(" "+styleLabel.Render(truncate(scr.Title(), cw-2)), cw) }
+	var body string
+	if p, ok := scr.(previewer); ok && w >= previewMinW {
+		lw := w * 58 / 100
+		rw := w - lw - 1
+		body = splitColumns(heading(lw)+"\n"+scr.View(lw, bodyH-1), p.previewView(rw, bodyH), lw, rw, bodyH)
+	} else {
+		body = fitBlock(heading(w)+"\n"+scr.View(w, bodyH-1), w, bodyH)
+	}
 	for _, s := range a.stack[base+1:] {
 		d := s.View(w, bodyH)
 		dw, dh := lipgloss.Width(firstLine(d)), strings.Count(d, "\n")+1

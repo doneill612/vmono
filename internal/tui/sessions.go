@@ -47,6 +47,7 @@ type sessionsModel struct {
 	err    string
 	tb     *table
 	filter string
+	pv     previewPane
 }
 
 // newSessions builds the sessions view of a package.
@@ -102,6 +103,34 @@ func (m *sessionsModel) setFilter(q string) {
 
 // filterValue implements filterable.
 func (m *sessionsModel) filterValue() string { return m.filter }
+
+// previewSync implements previewer.
+func (m *sessionsModel) previewSync() tea.Cmd { return m.pv.sync(m, m.tb.selectedID()) }
+
+// previewView implements previewer.
+func (m *sessionsModel) previewView(w, h int) string { return m.pv.view(m.tb.selectedID(), w, h) }
+
+// loadPreview reads one session's live status, off the UI goroutine, for the
+// preview pane.
+func (m *sessionsModel) loadPreview(id string) tea.Cmd {
+	c, pkg := m.e.core, m.pkg
+	var sum core.SessionSummary
+	for _, s := range m.list {
+		if s.Name == id {
+			sum = s
+		}
+	}
+	return loadPreview(m, id, func() (func(int) string, error) {
+		if pkg == nil {
+			return nil, fmt.Errorf("package not loaded")
+		}
+		s, err := c.LoadSession(pkg, id)
+		if err != nil {
+			return nil, err
+		}
+		return buildSessionPreview(sum, c.Status(s)), nil
+	})
+}
 
 // footerHints implements footerHinter.
 func (m *sessionsModel) footerHints() []hint {
@@ -195,6 +224,9 @@ func (m *sessionsModel) fill() {
 
 // Update implements screen.
 func (m *sessionsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
+	if cmd, ok := m.pv.handle(msg, m, m.loadPreview); ok {
+		return m, cmd
+	}
 	switch t := msg.(type) {
 	case sessionsMsg:
 		if t.name != m.name {

@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -17,6 +18,8 @@ import (
 type repoListMsg struct {
 	repos []discover.Repo
 	used  map[string]int
+	// users names the packages that use each repo.
+	users map[string][]string
 	err   error
 }
 
@@ -53,6 +56,7 @@ type reposModel struct {
 	e      *env
 	repos  []discover.Repo
 	used   map[string]int
+	users  map[string][]string
 	loaded bool
 	spin   spinner.Model
 	tb     *table
@@ -87,6 +91,7 @@ func (m *reposModel) load() tea.Cmd {
 			return repoListMsg{err: err}
 		}
 		used := map[string]int{}
+		users := map[string][]string{}
 		for _, p := range pkgs {
 			seen := map[string]bool{}
 			for _, src := range p.Sources {
@@ -98,10 +103,11 @@ func (m *reposModel) load() tea.Cmd {
 				if !seen[k] {
 					seen[k] = true
 					used[k]++
+					users[k] = append(users[k], p.Name)
 				}
 			}
 		}
-		return repoListMsg{repos: repos, used: used}
+		return repoListMsg{repos: repos, used: used, users: users}
 	}
 }
 
@@ -159,6 +165,31 @@ func (m *reposModel) fill() {
 	m.tb.setRows(rows)
 }
 
+// previewSync implements previewer. Everything shown was loaded with the list.
+func (m *reposModel) previewSync() tea.Cmd { return nil }
+
+// previewView implements previewer.
+func (m *reposModel) previewView(w, h int) string {
+	r, ok := m.selected()
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(" " + styleLabel.Render(truncate(r.Name, w-2)) + "\n\n")
+	b.WriteString(previewField("path", paths.Contract(r.Path), w))
+	b.WriteString(previewField("branch", r.Branch, w))
+	b.WriteString(previewField("remote", r.Remote, w))
+	b.WriteString(previewSection("USED BY"))
+	users := m.users[canonPath(r.Path)]
+	if len(users) == 0 {
+		b.WriteString(" " + styleDim.Render("no package") + "\n")
+	}
+	for _, u := range users {
+		b.WriteString(" " + truncate(u, w-2) + "\n")
+	}
+	return b.String()
+}
+
 // footerHints implements footerHinter.
 func (m *reposModel) footerHints() []hint {
 	return []hint{{"enter", "actions"}, {"a", "find repo"}, {"/", "filter"}, {"esc", "back"}}
@@ -203,7 +234,7 @@ func (m *reposModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		if t.err != nil {
 			return m, flashErr(t.err.Error())
 		}
-		m.repos, m.used = t.repos, t.used
+		m.repos, m.used, m.users = t.repos, t.used, t.users
 		m.fill()
 		return m, nil
 	case refreshMsg:

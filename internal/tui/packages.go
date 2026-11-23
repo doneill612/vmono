@@ -59,6 +59,7 @@ type packagesModel struct {
 	all    []core.Summary
 	loaded bool
 	filter string
+	pv     previewPane
 	// scopeRepo is the source path packages must use to be listed; empty
 	// lists everything. scopeName labels it in the frame title.
 	scopeRepo, scopeName string
@@ -236,6 +237,9 @@ func (m *packagesModel) selected() (core.Summary, bool) {
 
 // Update implements screen.
 func (m *packagesModel) Update(msg tea.Msg) (screen, tea.Cmd) {
+	if cmd, ok := m.pv.handle(msg, m, m.loadPreview); ok {
+		return m, cmd
+	}
 	switch t := msg.(type) {
 	case packagesMsg:
 		m.loaded = true
@@ -498,6 +502,29 @@ func summarizeFetch(owners map[string][]string, results []gitx.FetchResult) (int
 		reason = gitx.AuthHint
 	}
 	return n, fmt.Errorf("fetched %d member(s); couldn't fetch %s: %s", n, strings.Join(failed, ", "), reason)
+}
+
+// previewSync implements previewer.
+func (m *packagesModel) previewSync() tea.Cmd { return m.pv.sync(m, m.tb.selectedID()) }
+
+// previewView implements previewer.
+func (m *packagesModel) previewView(w, h int) string { return m.pv.view(m.tb.selectedID(), w, h) }
+
+// loadPreview reads a package and its sessions, off the UI goroutine, for the
+// preview pane.
+func (m *packagesModel) loadPreview(id string) tea.Cmd {
+	c := m.e.core
+	return loadPreview(m, id, func() (func(int) string, error) {
+		p, err := c.Load(id)
+		if err != nil {
+			return nil, err
+		}
+		list, err := c.ListSessions(p, true)
+		if err != nil {
+			return nil, err
+		}
+		return buildPackagePreview(p, list), nil
+	})
 }
 
 // footerHints implements footerHinter.

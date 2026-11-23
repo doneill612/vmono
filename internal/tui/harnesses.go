@@ -51,6 +51,32 @@ func (m *harnessesModel) Hints() []hint {
 	return []hint{{"enter", "Actions"}, {"s", "Set default"}, {"esc", "Back"}}
 }
 
+// previewSync implements previewer. Everything shown comes from the config.
+func (m *harnessesModel) previewSync() tea.Cmd { return nil }
+
+// previewView implements previewer.
+func (m *harnessesModel) previewView(w, h int) string {
+	r, ok := m.tb.selected()
+	if !ok {
+		return ""
+	}
+	cfg := m.e.core.Cfg
+	hc := cfg.Harness[r.id]
+	state := styleWarn.Render("not found on PATH")
+	if harness.Available(hc) {
+		state = styleOK.Render("installed")
+	}
+	var b strings.Builder
+	b.WriteString(" " + styleLabel.Render(truncate(r.id, w-2)) + "\n\n")
+	b.WriteString(previewField("command", strings.TrimSpace(hc.Command+" "+strings.Join(hc.Args, " ")), w))
+	b.WriteString(previewField("adapter", hc.Adapter, w))
+	b.WriteString(" " + styleDim.Render(fit("status", 12, false)) + state + "\n")
+	if r.id == cfg.DefaultHarness {
+		b.WriteString(" " + styleDim.Render(fit("default", 12, false)) + "yes\n")
+	}
+	return b.String()
+}
+
 // footerHints implements footerHinter.
 func (m *harnessesModel) footerHints() []hint {
 	return []hint{{"enter", "actions"}, {"/", "filter"}, {"esc", "back"}}

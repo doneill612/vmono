@@ -11,5 +11,6 @@ import (
 // block the synchronous test driver on every keystroke.
 func TestMain(m *testing.M) {
 	inputCursorMode = cursor.CursorStatic
+	previewDelay = 0
 	os.Exit(m.Run())
 }
