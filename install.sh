@@ -15,14 +15,39 @@
 
 set -eu
 
-# say prints a progress line to stderr.
+# setup_style sets the color variables. Color and the download progress bar
+# are used only when stderr is a terminal, NO_COLOR is unset and TERM is not
+# dumb, so CI logs and redirected output stay plain.
+setup_style() {
+	interactive=0
+	mark="ok"
+	accent="" ok="" warn="" err="" dim="" reset=""
+	if [ -t 2 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+		interactive=1
+		mark="✓"
+		esc="$(printf '\033')"
+		accent="${esc}[1;38;5;214m" # amber, matching the vmono TUI
+		ok="${esc}[32m"
+		warn="${esc}[33m"
+		err="${esc}[31m"
+		dim="${esc}[2m"
+		reset="${esc}[0m"
+	fi
+}
+
+# say prints a progress step to stderr.
 say() {
-	printf 'vmono-install: %s\n' "$*" >&2
+	printf '%s==>%s %s\n' "$accent" "$reset" "$*" >&2
+}
+
+# note prints a non-fatal warning to stderr.
+note() {
+	printf '%snote:%s %s\n' "$warn" "$reset" "$*" >&2
 }
 
 # die prints an error to stderr and exits.
 die() {
-	printf 'vmono-install: error: %s\n' "$*" >&2
+	printf '%serror:%s %s\n' "$err" "$reset" "$*" >&2
 	exit 1
 }
 
@@ -32,11 +57,22 @@ have() {
 }
 
 # fetch downloads URL $1 to file $2 with curl, or wget when curl is missing.
+# A third argument of "progress" shows a progress bar when interactive.
 fetch() {
+	bar=0
+	[ "${3:-}" = progress ] && [ "$interactive" = 1 ] && bar=1
 	if have curl; then
-		curl -fsSL --retry 3 -o "$2" "$1" || die "download failed: $1"
+		if [ "$bar" = 1 ]; then
+			curl -fL# --retry 3 -o "$2" "$1" || die "download failed: $1"
+		else
+			curl -fsSL --retry 3 -o "$2" "$1" || die "download failed: $1"
+		fi
 	elif have wget; then
-		wget -q -O "$2" "$1" || die "download failed: $1"
+		if [ "$bar" = 1 ] && wget --help 2>&1 | grep -q show-progress; then
+			wget -q --show-progress -O "$2" "$1" || die "download failed: $1"
+		else
+			wget -q -O "$2" "$1" || die "download failed: $1"
+		fi
 	else
 		die "need curl or wget"
 	fi
@@ -74,6 +110,7 @@ detect_arch() {
 # main installs vmono. Everything runs from this function, called on the last
 # line, so a download cut off partway through never executes half a script.
 main() {
+	setup_style
 	version="${1:-${VMONO_VERSION:-latest}}"
 	install_dir="${VMONO_INSTALL_DIR:-$HOME/.local/bin}"
 	base="${VMONO_DOWNLOAD_BASE:-https://github.com/doneill612/vmono/releases}"
@@ -92,15 +129,18 @@ main() {
 	tmp="$(mktemp -d)"
 	trap 'rm -rf "$tmp"' EXIT INT TERM
 
-	say "downloading $archive ($version)"
-	fetch "$url_dir/$archive" "$tmp/$archive"
+	say "detected $os/$arch"
+	say "downloading $archive ${dim}($version)${reset}"
+	fetch "$url_dir/$archive" "$tmp/$archive" progress
 	fetch "$url_dir/checksums.txt" "$tmp/checksums.txt"
 
+	say "verifying checksum"
 	want="$(awk -v f="$archive" '$2 == f { print $1 }' "$tmp/checksums.txt")"
 	[ -n "$want" ] || die "$archive is not listed in checksums.txt"
 	got="$(sha256_of "$tmp/$archive")"
 	[ "$want" = "$got" ] || die "checksum mismatch for $archive (expected $want, got $got)"
 
+	say "installing to $install_dir"
 	tar -xzf "$tmp/$archive" -C "$tmp" vmono || die "could not extract $archive"
 	mkdir -p "$install_dir"
 	install -m 0755 "$tmp/vmono" "$install_dir/vmono"
@@ -108,12 +148,17 @@ main() {
 		xattr -d com.apple.quarantine "$install_dir/vmono" 2>/dev/null || true
 	fi
 
-	say "installed $("$install_dir/vmono" --version) to $install_dir/vmono"
+	installed="$("$install_dir/vmono" --version)" # "vmono (0.1.0)"
+	installed="${installed##* }"
+	installed="${installed#(}"
+	installed="${installed%)}"
+	printf '%s%s%s installed vmono %s%s%s %s(%s/vmono)%s\n' \
+		"$ok" "$mark" "$reset" "$accent" "$installed" "$reset" "$dim" "$install_dir" "$reset" >&2
 	case ":$PATH:" in
 	*":$install_dir:"*) ;;
-	*) say "note: $install_dir is not on your PATH; add it to your shell profile" ;;
+	*) note "$install_dir is not on your PATH; add it to your shell profile" ;;
 	esac
-	have git || say "note: git 2.30 or newer is required and was not found"
+	have git || note "git 2.30 or newer is required and was not found"
 }
 
 main "$@"
