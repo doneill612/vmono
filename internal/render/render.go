@@ -15,6 +15,10 @@ import (
 const (
 	AdapterClaudeCode = "claude-code"
 	AdapterOpenCode   = "opencode"
+	// AdapterAgentSkills is for harnesses, such as Codex and Pi, that load
+	// skills from a project's .agents/skills/ but need no other generated
+	// config. It writes the bundled skill there and nothing else.
+	AdapterAgentSkills = "agent-skills"
 )
 
 // Options carries what rendering needs beyond the manifest.
@@ -36,6 +40,12 @@ func (o Options) has(name string) bool {
 	}
 	return false
 }
+
+// agentSkillsDir is where the agent-skills adapter puts the bundled skill:
+// the project-level skills directory that Codex and Pi both scan, from the
+// working directory up to the repository root. A session is its own git
+// repository, so its root is that root.
+const agentSkillsDir = ".agents/skills"
 
 // pluginWriters maps an adapter to the function that writes its harness's
 // full plugin. An adapter missing from it has no plugin strategy and gets
@@ -209,6 +219,11 @@ func Render(sessionDir string, m *manifest.Manifest, s *manifest.Session, opts O
 	if opts.has(AdapterOpenCode) {
 		if err := renderOpenCode(w, m, opts.OpenCodeV2); err != nil {
 			return w.changed, fmt.Errorf("opencode adapter: %w", err)
+		}
+	}
+	if opts.has(AdapterAgentSkills) {
+		if err := writeIntegration(w, AdapterAgentSkills, agentSkillsDir); err != nil {
+			return w.changed, fmt.Errorf("agent-skills adapter: %w", err)
 		}
 	}
 	return w.changed, nil

@@ -28,8 +28,8 @@ type Harness struct {
 	Command string `toml:"command"`
 	// Args are passed before any arguments given to `vmono open --`.
 	Args []string `toml:"args,omitempty"`
-	// Adapter names the generated-file adapter ("claude-code", "opencode"),
-	// or is empty for none.
+	// Adapter names the generated-file adapter ("claude-code", "opencode",
+	// "agent-skills"), or is empty for none.
 	Adapter string `toml:"adapter,omitempty"`
 	// Env is extra environment set when launching the harness.
 	Env map[string]string `toml:"env,omitempty"`
@@ -59,8 +59,8 @@ func DefaultHarnesses() map[string]Harness {
 	return map[string]Harness{
 		"claude":   {Command: "claude", Adapter: "claude-code"},
 		"opencode": {Command: "opencode", Adapter: "opencode"},
-		"codex":    {Command: "codex"},
-		"pi":       {Command: "pi"},
+		"codex":    {Command: "codex", Adapter: "agent-skills"},
+		"pi":       {Command: "pi", Adapter: "agent-skills"},
 	}
 }
 
@@ -102,6 +102,7 @@ func LoadFrom(file string) (Config, error) {
 		}
 		meta := decodeKeys(data)
 		overlay(&cfg, onDisk, meta)
+		backfillAdapters(&cfg)
 		cfg.Loaded = true
 	case errors.Is(err, os.ErrNotExist):
 	default:
@@ -161,6 +162,22 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 	}
 	if present["harness"] && len(src.Harness) > 0 {
 		dst.Harness = src.Harness
+	}
+}
+
+// backfillAdapters gives a built-in harness its default adapter when the
+// config file lists it without one. A saved config carries the whole harness
+// table, so it would otherwise keep a harness that had no adapter when the
+// file was written from ever getting one added to the defaults. Only an
+// entry that still runs the built-in command is touched, so a harness the
+// user repointed at something else is left alone.
+func backfillAdapters(c *Config) {
+	for name, def := range DefaultHarnesses() {
+		h, ok := c.Harness[name]
+		if ok && h.Adapter == "" && h.Command == def.Command {
+			h.Adapter = def.Adapter
+			c.Harness[name] = h
+		}
 	}
 }
 

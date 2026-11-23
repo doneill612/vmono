@@ -184,3 +184,26 @@ func TestSkillCarriesWhatThePluginCommandsQuote(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentSkillsAdapterWritesOnlyTheSkill pins what Codex and Pi get: the
+// bundled skill under .agents/skills, byte for byte what the other harnesses
+// get, and no config or plugin files.
+func TestAgentSkillsAdapterWritesOnlyTheSkill(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	opts := Options{Adapters: []string{AdapterAgentSkills}}
+	if _, err := Render(dir, m, testSession(m), opts); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".agents/skills/vmono/SKILL.md"))
+	if err != nil || string(data) != SkillMarkdown() {
+		t.Fatalf("agent-skills adapter should write the bundled skill: %v", err)
+	}
+	for _, rel := range []string{".claude/settings.json", ".claude/skills/vmono", ".opencode/skills/vmono", "opencode.json", ".agents/skills/vmono/.claude-plugin"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Errorf("an agent-skills-only render must not write %s", rel)
+		}
+	}
+	if changed, err := Render(dir, m, testSession(m), opts); err != nil || len(changed) != 0 {
+		t.Errorf("second render should be a no-op: %v %v", changed, err)
+	}
+}

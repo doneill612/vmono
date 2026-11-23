@@ -90,3 +90,32 @@ func TestSaveRoundTrip(t *testing.T) {
 		t.Errorf("round trip mismatch: %+v", got)
 	}
 }
+
+// TestSavedHarnessTableGetsTheBuiltInAdapter pins that a config file written
+// before codex and pi had an adapter still gets one, while a harness
+// repointed at another command is left alone.
+func TestSavedHarnessTableGetsTheBuiltInAdapter(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.toml")
+	body := `
+[harness.codex]
+command = "codex"
+[harness.pi]
+command = "pi"
+[harness.mine]
+command = "my-agent"
+[harness.claude]
+command = "claude-wrapper"
+`
+	if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"codex": "agent-skills", "pi": "agent-skills", "mine": "", "claude": ""} {
+		if got := cfg.Harness[name].Adapter; got != want {
+			t.Errorf("%s adapter = %q, want %q", name, got, want)
+		}
+	}
+}

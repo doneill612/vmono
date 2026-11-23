@@ -196,7 +196,7 @@ func validateMemberPath(p string) error {
 		return fmt.Errorf("path %q escapes the package", p)
 	}
 	first := strings.Split(clean, "/")[0]
-	if first == ".git" || first == ".vmono" || first == ".claude" {
+	if first == ".git" || first == ".vmono" || first == ".claude" || first == ".agents" {
 		return fmt.Errorf("path %q is reserved", p)
 	}
 	return nil

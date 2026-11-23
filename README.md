@@ -7,8 +7,8 @@ vmono manages **packages** and their **sessions**. A package is a set of git rep
 - A package is defined once. Starting more work on the same set of repos is a new session, not a new package, so nothing about the members is set up twice.
 - Members are **git worktrees** of repos already on your machine: no copies, no re-clones, shared object storage.
 - The package's purpose, context, notes and each member's role are written once and rendered into every session's `AGENTS.md` / `CLAUDE.md`.
-- A harness opened at a session root works with no changes. Claude Code, OpenCode, Codex and Pi work out of the box; Claude Code and OpenCode also get generated config.
-- A skill teaches the harness running inside a session to read the package, and to write back to it only what every future session needs. Claude Code gets it as a [plugin](#the-claude-code-plugin) that also adds commands and live session state; other harnesses get the skill on its own.
+- A harness opened at a session root works with no changes. Claude Code, OpenCode, Codex and Pi work out of the box; Claude Code and OpenCode also get generated config, and Codex and Pi get the skill.
+- A skill teaches the harness running inside a session to read the package, and to write back to it only what every future session needs. Claude Code gets it as a [plugin](#the-claude-code-plugin) that also adds commands and live session state; other harnesses get the same skill on its own.
 - Runs on macOS, Linux and Windows, without admin rights.
 
 ## Install
@@ -158,6 +158,7 @@ A package with two sessions looks like this:
 │   ├── AGENTS.md            generated block + your own notes
 │   ├── CLAUDE.md            generated: @AGENTS.md
 │   ├── .claude/             generated: settings.json, skills/vmono (the Claude Code plugin)
+│   ├── .agents/             generated: skills/vmono, for Codex and Pi
 │   ├── opencode.json        generated
 │   ├── member-a/            active member (worktree on vmono/project/token-refresh)
 │   └── _ref/member-c/       reference member (detached worktree)
@@ -205,7 +206,7 @@ The hook runs the bare command `vmono`, so `vmono` must be on `PATH` for the har
 
 If your organization blocks skills-directory plugins, or your Claude Code predates them, `/vmono` still loads as an ordinary project skill and only the hook and the three commands are missing. To turn the plugin off for one session, set `"vmono@skills-dir": false` under `enabledPlugins` in that session's `.claude/settings.local.json`, or run `claude plugin disable vmono@skills-dir`.
 
-OpenCode, Codex and Pi have no plugin strategy yet: OpenCode gets the same skill on its own under `.opencode/skills/vmono/`, and the rest read `AGENTS.md`.
+The other harnesses have no plugin strategy yet, so they get the same `SKILL.md` on its own, with the guidance behind the three commands (checking status, proposing a note before writing it, finishing) in it: OpenCode under `.opencode/skills/vmono/`, and Codex and Pi under `.agents/skills/vmono/`, which both scan from the session root. They do not get the live state at the start of a conversation; the skill tells the agent to run `vmono show --json` and `vmono status --json` instead.
 
 ## Commands
 
@@ -261,9 +262,10 @@ adapter = "claude-code"
 
 [harness.codex]
 command = "codex"
+adapter = "agent-skills"
 ```
 
-Any CLI that takes its working directory as its project can be a harness. Precedence: flags, then `VMONO_*` environment variables, then the file, then defaults. `VMONO_CONFIG_DIR` and `VMONO_STATE_DIR` relocate the config and the index cache.
+Any CLI that takes its working directory as its project can be a harness. The `adapter` says what vmono generates for it: `claude-code` (settings and the plugin), `opencode` (`opencode.json` and the skill), `agent-skills` (the skill under `.agents/skills/`, for Codex and Pi), or none. A built-in harness listed without an adapter still running its built-in command gets its default one, so a config saved before an adapter existed picks it up. Precedence: flags, then `VMONO_*` environment variables, then the file, then defaults. `VMONO_CONFIG_DIR` and `VMONO_STATE_DIR` relocate the config and the index cache.
 
 ## Authentication
 
@@ -282,7 +284,7 @@ Fetches never prompt. Starting a session, adding members, sync and the TUI's fet
 - Symlinks are never followed or created.
 - Committing from a worktree writes into the source repo's git directory, outside the package. `vmono inspect --json` lists each `git_common_dir` so sandboxing wrappers can allow it.
 
-vmono enforces nothing about what an agent may do; the harness's own permission system does. The adapters add `ask` rules for `vmono rm`, `vmono session rm`, `vmono session finish` and `vmono delete` and a deny rule for edits under `_ref/`.
+vmono enforces nothing about what an agent may do; the harness's own permission system does. The `claude-code` and `opencode` adapters add `ask` rules for `vmono rm`, `vmono session rm`, `vmono session finish` and `vmono delete` and a deny rule for edits under `_ref/`.
 
 ## Development
 

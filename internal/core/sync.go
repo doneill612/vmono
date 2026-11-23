@@ -37,7 +37,7 @@ type SyncResult struct {
 
 // reservedTop are top-level names in a session that are not members.
 var reservedTop = map[string]bool{
-	".git": true, ".vmono": true, ".claude": true, ".opencode": true,
+	".git": true, ".vmono": true, ".claude": true, ".opencode": true, ".agents": true,
 	"AGENTS.md": true, "CLAUDE.md": true, ".gitignore": true, "opencode.json": true,
 }
 
