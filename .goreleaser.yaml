@@ -43,6 +43,7 @@ release:
 
 changelog:
   use: git
+  abbrev: 7
   sort: asc
   groups:
     - title: Features
