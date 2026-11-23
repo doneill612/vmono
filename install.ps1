@@ -18,7 +18,21 @@
 # script.
 function Install-Vmono {
     $ErrorActionPreference = 'Stop'
+    # Invoke-WebRequest's built-in progress bar makes downloads far slower on
+    # Windows PowerShell 5.1, so it stays off and the steps below report progress.
     $ProgressPreference = 'SilentlyContinue'
+
+    # Write-Step prints a "==> message" progress line. Colors are skipped when
+    # NO_COLOR is set.
+    $useColor = -not $env:NO_COLOR
+    function Write-Step([string]$Message) {
+        if ($useColor) { Write-Host '==>' -ForegroundColor Yellow -NoNewline; Write-Host " $Message" }
+        else { Write-Host "==> $Message" }
+    }
+    function Write-Note([string]$Message) {
+        if ($useColor) { Write-Host 'note:' -ForegroundColor DarkYellow -NoNewline; Write-Host " $Message" }
+        else { Write-Host "note: $Message" }
+    }
 
     $version = if ($env:VMONO_VERSION) { $env:VMONO_VERSION } else { 'latest' }
     $installDir = if ($env:VMONO_INSTALL_DIR) { $env:VMONO_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\vmono\bin' }
@@ -36,16 +50,19 @@ function Install-Vmono {
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("vmono-install-" + [System.Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
-        Write-Host "vmono-install: downloading $archive ($version)"
+        Write-Step "detected windows/$arch"
+        Write-Step "downloading $archive ($version)"
         Invoke-WebRequest -UseBasicParsing -Uri "$urlDir/$archive" -OutFile (Join-Path $tmp $archive)
         Invoke-WebRequest -UseBasicParsing -Uri "$urlDir/checksums.txt" -OutFile (Join-Path $tmp 'checksums.txt')
 
+        Write-Step 'verifying checksum'
         $line = Get-Content (Join-Path $tmp 'checksums.txt') | Where-Object { ($_ -split '\s+')[1] -eq $archive } | Select-Object -First 1
         if (-not $line) { throw "$archive is not listed in checksums.txt" }
         $want = ($line -split '\s+')[0].ToLower()
         $got = (Get-FileHash -Algorithm SHA256 (Join-Path $tmp $archive)).Hash.ToLower()
         if ($want -ne $got) { throw "checksum mismatch for $archive (expected $want, got $got)" }
 
+        Write-Step "installing to $installDir"
         Expand-Archive -Path (Join-Path $tmp $archive) -DestinationPath (Join-Path $tmp 'x') -Force
         New-Item -ItemType Directory -Path $installDir -Force | Out-Null
         Copy-Item (Join-Path $tmp 'x\vmono.exe') (Join-Path $installDir 'vmono.exe') -Force
@@ -55,17 +72,27 @@ function Install-Vmono {
     }
 
     $exe = Join-Path $installDir 'vmono.exe'
-    Write-Host "vmono-install: installed $(& $exe --version) to $exe"
+    $installed = (& $exe --version | Out-String).Trim()
+    $installedVersion = ($installed -split '\s+')[-1].Trim('(', ')')
+    if ($useColor) {
+        Write-Host 'ok' -ForegroundColor Green -NoNewline
+        Write-Host ' installed vmono ' -NoNewline
+        Write-Host $installedVersion -ForegroundColor Yellow -NoNewline
+        Write-Host " ($exe)" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "ok installed vmono $installedVersion ($exe)"
+    }
 
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     $entries = if ($userPath) { $userPath -split ';' } else { @() }
     if ($entries -notcontains $installDir) {
         $newPath = if ($userPath) { "$userPath;$installDir" } else { $installDir }
         [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-        Write-Host "vmono-install: added $installDir to your PATH; open a new terminal to use vmono"
+        Write-Note "added $installDir to your PATH; open a new terminal to use vmono"
     }
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Write-Host 'vmono-install: note: git 2.30 or newer is required and was not found'
+        Write-Note 'git 2.30 or newer is required and was not found'
     }
 }
 
