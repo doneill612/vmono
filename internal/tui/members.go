@@ -301,10 +301,6 @@ func (m *membersModel) memberByName(name string) (core.MemberStatus, bool) {
 	return core.MemberStatus{}, false
 }
 
-// reopen builds a fresh members view of the same session, the screen a push
-// returns to so it shows what the push changed.
-func (m *membersModel) reopen() screen { return newMembers(m.e, m.name, m.session) }
-
 // selectedMemberName returns the highlighted member's name, or "".
 func (m *membersModel) selectedMemberName() string {
 	ms, _ := m.selectedMember()
@@ -330,7 +326,7 @@ func (m *membersModel) act(id, member string) (screen, tea.Cmd) {
 		}
 		return m, push(m, newEditor(m.e, m.sess.Pkg))
 	case "push-all":
-		return m, startPush(m, m.e, m.name, m.session, nil, m.reopen)
+		return m, startPush(m, m.e, m.name, m.session, nil)
 	case "push":
 		ms, ok := m.memberByName(member)
 		switch {
@@ -339,7 +335,7 @@ func (m *membersModel) act(id, member string) (screen, tea.Cmd) {
 		case ms.Mode == manifest.ModeReference:
 			return m, flashErr(member + " is a reference member, which has no work of its own to push")
 		}
-		return m, startPush(m, m.e, m.name, m.session, []string{member}, m.reopen)
+		return m, startPush(m, m.e, m.name, m.session, []string{member})
 	case "describe":
 		if member != "" {
 			return m, push(m, newDescribe(m.e, m.name, m.session, member))
