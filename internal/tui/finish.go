@@ -97,9 +97,18 @@ func (m *finishConfirm) Update(msg tea.Msg) (screen, tea.Cmd) {
 // session afresh so the file it records is the one on disk. A failure offers
 // to launch the harness in the session, where conflicts are resolved. Either
 // way the user returns to the screen the dialog was opened from, reloaded,
-// rather than to a new copy of it.
+// rather than to a new copy of it. When the session is removed afterward, a
+// members view of it above the sessions list is closed as well, since it has
+// nothing left to show.
 func (m *finishConfirm) run() screen {
 	c, e, pkg, session, closeAfter := m.e.core, m.e, m.pkg, m.session, m.closeAfter
+	var removes func(screen) bool
+	if closeAfter {
+		removes = func(s screen) bool {
+			mv, ok := s.(*membersModel)
+			return ok && mv.name == pkg && mv.session == session
+		}
+	}
 	return newProgress(e, operation{
 		title: "Finish " + pkg + "/" + session,
 		run: func(_, _ bool) error {
@@ -110,8 +119,9 @@ func (m *finishConfirm) run() screen {
 			_, err = c.Finish(s, core.FinishOptions{Close: closeAfter})
 			return err
 		},
-		reveal: true,
-		fixIn:  &LaunchRequest{Package: pkg, Session: session},
+		reveal:  true,
+		removes: removes,
+		fixIn:   &LaunchRequest{Package: pkg, Session: session},
 	})
 }
 
