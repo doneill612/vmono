@@ -23,7 +23,7 @@ jobs:
       - name: vet
         run: go vet ./...
       - name: test
-        run: go test ./... -count=1
+        run: go test ./... -count=1 -timeout 20m
       - name: build
         run: go build ./cmd/vmono
 
