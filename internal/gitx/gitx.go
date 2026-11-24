@@ -737,6 +737,12 @@ func UpstreamOf(repo, branch string) (Tracking, bool) {
 	return Tracking{Remote: remote, Branch: strings.TrimPrefix(ref, prefix), Ref: ref}, true
 }
 
+// SetUpstream makes the local branch track upstream, such as "origin/main".
+func SetUpstream(repo, branch, upstream string) error {
+	_, err := run(repo, "branch", "--set-upstream-to="+upstream, branch)
+	return err
+}
+
 // Remotes returns the names of the repo's remotes, in git's order.
 func Remotes(repo string) []string {
 	out, err := run(repo, "remote")

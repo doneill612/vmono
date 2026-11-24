@@ -28,15 +28,19 @@ func newSessionCmd() *cobra.Command {
 // newSessionNewCmd builds `vmono session new`.
 func newSessionNewCmd() *cobra.Command {
 	var branch string
-	var into []string
+	var into, track []string
 	var reuse bool
 	cmd := &cobra.Command{
-		Use:   "new [pkg] <name> [--branch B] [--into [MEMBER=]B]... [--reuse-branch]",
+		Use:   "new [pkg] <name> [--branch B] [--into [MEMBER=]B]... [--track [MEMBER=]B]... [--reuse-branch]",
 		Short: "Start a session: a worktree of every member on a new branch",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg, rest := splitPkgArgs(args, 2)
-			intoAll, intoBy, err := parseInto(into)
+			intoAll, intoBy, err := parseBranches("--into", into)
+			if err != nil {
+				return err
+			}
+			trackAll, trackBy, err := parseBranches("--track", track)
 			if err != nil {
 				return err
 			}
@@ -47,7 +51,7 @@ func newSessionNewCmd() *cobra.Command {
 			var s *core.Session
 			err = withEvents(cmd.ErrOrStderr(), c, func() error {
 				var cerr error
-				s, cerr = c.CreateSession(p, rest[0], core.SessionOptions{Branch: branch, Into: intoAll, IntoByMember: intoBy, ReuseBranch: reuse})
+				s, cerr = c.CreateSession(p, rest[0], core.SessionOptions{Branch: branch, Into: intoAll, IntoByMember: intoBy, Track: trackAll, TrackByMember: trackBy, ReuseBranch: reuse})
 				return cerr
 			})
 			if err != nil {
@@ -59,6 +63,7 @@ func newSessionNewCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "session branch (default: <branch_prefix><pkg>/<session>)")
 	cmd.Flags().StringArrayVar(&into, "into", nil, intoHelp+"; default is the branch each source has checked out. A session starts from its landing branch when that is not the member's base branch and exists")
+	cmd.Flags().StringArrayVar(&track, "track", nil, trackHelp)
 	cmd.Flags().BoolVar(&reuse, "reuse-branch", false, "check out the branch if it already exists in a source repo")
 	return cmd
 }
@@ -171,7 +176,7 @@ does not exist yet is created when the session is finished.`,
 
 // parseMembers reads NAME=BRANCH pairs.
 func parseMembers(vals []string) (map[string]string, error) {
-	_, by, err := parseInto(vals)
+	_, by, err := parseBranches("--member", vals)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +291,7 @@ The session, its worktrees and its branch stay in place and the session is marke
 finished; remove it with ` + "`vmono session rm`" + ` or pass --close. Nothing is pushed.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			intoAll, intoBy, err := parseInto(into)
+			intoAll, intoBy, err := parseBranches("--into", into)
 			if err != nil {
 				return err
 			}

@@ -35,6 +35,77 @@ type SessionOptions struct {
 	// is created at finish.
 	Into         string
 	IntoByMember map[string]string
+	// Track names a branch on the members' remotes to start from and land back
+	// on: the landing branch of every active member whose remote has it. A
+	// member whose remote lacks it keeps its default. TrackByMember names one
+	// for individual members, wins over Track, and fails for a member whose
+	// remote lacks it. Tracking fetches first, whatever fetch_on_create says,
+	// since the branch may be one the source has never seen. No local branch
+	// is made until finish.
+	Track         string
+	TrackByMember map[string]string
+}
+
+// tracking reports whether the options start any member from a remote branch.
+func (o SessionOptions) tracking() bool { return o.Track != "" || len(o.TrackByMember) > 0 }
+
+// resolveTrack turns the tracked branches in opts into landing branches, as of
+// the last fetch, and returns the options with IntoByMember filled in. It
+// fails when a member named in TrackByMember has no such branch on its remote,
+// when no member has the one named for all of them, and when a member is given
+// both a tracked and a landing branch.
+func resolveTrack(p *Package, opts SessionOptions, srcs map[string]string, warn func(member, msg string)) (SessionOptions, error) {
+	if opts.Track != "" && opts.Into != "" {
+		return opts, errors.New("--track and --into cannot both name a branch for every member")
+	}
+	into := map[string]string{}
+	for member, b := range opts.IntoByMember {
+		if opts.TrackByMember[member] != "" {
+			return opts, fmt.Errorf("--track and --into both name a branch for %s", member)
+		}
+		into[member] = b
+	}
+	active := map[string]bool{}
+	found := 0
+	type miss struct{ member, msg string }
+	var missing []miss
+	for _, mem := range p.M.Members {
+		if mem.Mode != manifest.ModeActive {
+			continue
+		}
+		active[mem.Name] = true
+		branch, explicit := opts.TrackByMember[mem.Name], true
+		if branch == "" {
+			branch, explicit = opts.Track, false
+		}
+		if branch == "" || (!explicit && into[mem.Name] != "") {
+			continue
+		}
+		remote := primaryRemote(srcs[mem.Name])
+		if remote != "" && branch != "HEAD" && gitx.RefExists(srcs[mem.Name], "refs/remotes/"+remote+"/"+branch) {
+			into[mem.Name] = branch
+			found++
+			continue
+		}
+		msg := fmt.Sprintf("no branch %q on %s", branch, firstNonEmpty(remote, "any remote"))
+		if explicit {
+			return opts, NotFound("%s: %s", mem.Name, msg)
+		}
+		missing = append(missing, miss{mem.Name, msg + "; starting from its default"})
+	}
+	for member := range opts.TrackByMember {
+		if !active[member] {
+			return opts, fmt.Errorf("--track names %q, which is not an active member of %s", member, p.Name)
+		}
+	}
+	if opts.Track != "" && found == 0 {
+		return opts, NotFound("no member of %s has a branch %q on its remote", p.Name, opts.Track)
+	}
+	for _, m := range missing {
+		warn(m.member, m.msg)
+	}
+	opts.IntoByMember = into
+	return opts, nil
 }
 
 // DefaultLanding returns, for each active member of p, the branch its source
@@ -285,17 +356,23 @@ func preflightInto(ms *manifest.Session, members []manifest.Member, srcs map[str
 
 // cutPoint returns the ref a new session branch for mem is cut from. When the
 // member's recorded landing branch is not the branch its base names, and it
-// exists in the source as a local branch or on origin, the session starts
-// from it: the work is meant to build on that branch and land back on it.
-// Otherwise it starts from the member's base. The branch the base names is
+// exists in the source as a local branch or on its remote, the session starts
+// from it: the work is meant to build on that branch and land back on it. When
+// it exists in both places the one further ahead is used, and the local one,
+// with a warning, when they have diverged. Otherwise it starts from the member's base. The branch the base names is
 // deliberately not used: the local copy can lag behind origin/main, and the
 // manifest's base already says where ordinary work starts.
 func cutPoint(src string, ms *manifest.Session, mem manifest.Member, warn func(string)) (string, error) {
 	if into := ms.Into[mem.Name]; into != "" && into != baseBranchOf(src, mem) {
-		for _, ref := range []string{"refs/heads/" + into, "refs/remotes/origin/" + into} {
-			if gitx.RefExists(src, ref) {
-				return ref, nil
+		if gitx.BranchExists(src, into) {
+			ref, diverged := freshest(src, into)
+			if diverged && warn != nil {
+				warn(fmt.Sprintf("%s has diverged from %s; starting from the local branch", into, shortRef(remoteCounterpart(src, into))))
 			}
+			return ref, nil
+		}
+		if ref := remoteCounterpart(src, into); ref != "" {
+			return ref, nil
 		}
 	}
 	return resolveRef(src, mem.Base, warn)
@@ -400,20 +477,39 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	}
 	ms := &manifest.Session{Package: p.Name, Name: name, Branch: opts.Branch, Created: time.Now().Truncate(time.Second)}
 	ms.ApplyDefaults(c.Cfg.BranchPrefix)
-	into, err := c.landingFor(p, ms.Branch, opts)
-	if err != nil {
-		return nil, err
-	}
-	ms.Into = into
-	if err := ms.Validate(); err != nil {
-		return nil, err
-	}
 	dir := p.SessionDir(name)
 	if _, err := os.Stat(dir); err == nil {
 		return nil, fmt.Errorf("package %s already has a session %q at %s", p.Name, name, dir)
 	}
 	srcs, err := memberSources(p.M)
 	if err != nil {
+		return nil, err
+	}
+	var srcList []string
+	for _, mem := range p.M.Members {
+		srcList = append(srcList, srcs[mem.Name])
+	}
+	fetch := c.fetchStep(srcList...)
+	if opts.tracking() {
+		// The landing branches depend on what the remotes have, so this fetch
+		// has to happen ahead of the checks, and replaces the usual one.
+		fetch = nil
+		if err := (&apply.Runner{Events: c.Events}).Run([]apply.Step{{Name: "fetch", Run: func(warn func(string)) error {
+			fetchSources(srcList, warn)
+			return nil
+		}}}); err != nil {
+			return nil, err
+		}
+		if opts, err = resolveTrack(p, opts, srcs, func(member, msg string) { c.warnEvent(member, "track", msg) }); err != nil {
+			return nil, err
+		}
+	}
+	into, err := c.landingFor(p, ms.Branch, opts)
+	if err != nil {
+		return nil, err
+	}
+	ms.Into = into
+	if err := ms.Validate(); err != nil {
 		return nil, err
 	}
 	existing, err := preflightMembers(p.M, ms.Branch, srcs, p.M.Members, opts.ReuseBranch, nil)
@@ -425,12 +521,7 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	}
 
 	s := &Session{Pkg: p, Name: name, Dir: dir, S: ms}
-	var srcList []string
-	for _, mem := range p.M.Members {
-		srcList = append(srcList, srcs[mem.Name])
-	}
-	steps := c.fetchStep(srcList...)
-	steps = append(steps, apply.Step{
+	steps := append(fetch, apply.Step{
 		Name: "create session",
 		Run: func(func(string)) error {
 			if err := os.Mkdir(dir, 0o755); err != nil {

@@ -444,6 +444,13 @@ func (c *Core) Finish(s *Session, opts FinishOptions) (FinishResult, error) {
 	}
 	for _, l := range touched {
 		l.Status = LandLanded
+		// A branch that so far existed only on its remote should track it, as
+		// one made with `git switch` would. Push copes without it.
+		if remote, ok := strings.CutPrefix(l.target, "refs/remotes/"); ok && l.Create {
+			if err := gitx.SetUpstream(l.src, l.Into, remote); err != nil {
+				c.warnEvent(l.Name, "update "+l.Into, "could not make it track "+remote+": "+oneLine(err.Error()))
+			}
+		}
 	}
 	res.Members = membersOf(plan)
 
