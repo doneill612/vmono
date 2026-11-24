@@ -68,7 +68,7 @@ func (d *driver) run(cmd tea.Cmd) {
 	var msg tea.Msg
 	select {
 	case msg = <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(30 * time.Second):
 		return
 	}
 	if strings.HasPrefix(fmt.Sprintf("%T", msg), "cursor.") {
