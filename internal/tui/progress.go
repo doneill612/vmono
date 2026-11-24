@@ -88,8 +88,9 @@ func newSpinner() spinner.Model {
 	return s
 }
 
-// scanningLabel is the animated placeholder shown while repos are being
-// discovered: the current spinner frame followed by the given text.
+// scanningLabel is the animated placeholder every screen shows while it waits
+// on work, whether that is scanning for repos or loading a list: the current
+// spinner frame followed by the given text.
 func scanningLabel(s spinner.Model, text string) string {
 	return s.View() + " " + text
 }

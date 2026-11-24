@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/doneill612/vmono/internal/core"
@@ -51,11 +52,41 @@ type (
 // previewPane is the state a list screen keeps for its preview: which row
 // the highlight is on, and what has been loaded for the rows seen so far.
 // Loaded previews are kept until the screen reloads, so moving back to a row
-// is instant.
+// is instant. While the highlighted row's preview loads, the pane shows the
+// shared spinner; spin is created on first use so the zero value works, and
+// ticking is true while a tick chain is running.
 type previewPane struct {
-	want  string
-	built map[string]func(w int) string
-	errs  map[string]string
+	want    string
+	built   map[string]func(w int) string
+	errs    map[string]string
+	spin    spinner.Model
+	ticking bool
+}
+
+// pending reports whether the highlighted row's preview is still to be
+// loaded, which is when the pane shows its spinner.
+func (p *previewPane) pending() bool {
+	if p.want == "" {
+		return false
+	}
+	if _, ok := p.built[p.want]; ok {
+		return false
+	}
+	_, failed := p.errs[p.want]
+	return !failed
+}
+
+// startSpin makes sure the spinner is created and ticking, and returns the
+// command that starts its tick chain, or nil when one is already running.
+func (p *previewPane) startSpin() tea.Cmd {
+	if p.spin.ID() == 0 {
+		p.spin = newSpinner()
+	}
+	if p.ticking {
+		return nil
+	}
+	p.ticking = true
+	return p.spin.Tick
 }
 
 // sync notes the row the highlight is on and, when nothing is known about it
@@ -73,9 +104,9 @@ func (p *previewPane) sync(owner screen, id string) tea.Cmd {
 		return nil
 	}
 	if previewDelay <= 0 {
-		return func() tea.Msg { return previewDueMsg{owner, id} }
+		return tea.Batch(func() tea.Msg { return previewDueMsg{owner, id} }, p.startSpin())
 	}
-	return tea.Tick(previewDelay, func(time.Time) tea.Msg { return previewDueMsg{owner, id} })
+	return tea.Batch(tea.Tick(previewDelay, func(time.Time) tea.Msg { return previewDueMsg{owner, id} }), p.startSpin())
 }
 
 // handle advances the pipeline for a message and reports whether it was one
@@ -83,6 +114,17 @@ func (p *previewPane) sync(owner screen, id string) tea.Cmd {
 // the highlight is still on.
 func (p *previewPane) handle(msg tea.Msg, owner screen, load func(id string) tea.Cmd) (tea.Cmd, bool) {
 	switch t := msg.(type) {
+	case spinner.TickMsg:
+		if p.spin.ID() == 0 || t.ID != p.spin.ID() {
+			return nil, false
+		}
+		if !p.pending() {
+			p.ticking = false
+			return nil, true
+		}
+		var cmd tea.Cmd
+		p.spin, cmd = p.spin.Update(t)
+		return cmd, true
 	case previewDueMsg:
 		if t.owner != owner {
 			return nil, false
@@ -131,7 +173,10 @@ func (p *previewPane) view(id string, w, h int) string {
 	}
 	build, ok := p.built[id]
 	if !ok {
-		return head + "\n\n " + styleDim.Render("loading…")
+		if p.spin.ID() == 0 {
+			p.spin = newSpinner()
+		}
+		return head + "\n\n " + styleDim.Render(scanningLabel(p.spin, "loading…"))
 	}
 	return head + "\n" + build(w)
 }

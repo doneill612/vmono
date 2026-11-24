@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -35,20 +36,25 @@ type describeModel struct {
 	err     string
 	vp      viewport.Model
 	renderW int
+	spin    spinner.Model
 }
 
 // newDescribe builds the detail view. session is empty to describe the
 // package alone, with no live git state; member is empty to describe the
 // package itself rather than one member, and needs a session.
 func newDescribe(e *env, name, session, member string) *describeModel {
-	return &describeModel{e: e, name: name, session: session, member: member, vp: viewport.New(0, 0)}
+	return &describeModel{e: e, name: name, session: session, member: member, vp: viewport.New(0, 0), spin: newSpinner()}
 }
 
 // id identifies the subject so stale results are ignored.
 func (m *describeModel) id() string { return m.name + "/" + m.session + "/" + m.member }
 
-// Init implements screen.
-func (m *describeModel) Init() tea.Cmd { return m.load() }
+// Init implements screen. It starts the load and the spinner that animates
+// the placeholder until the details arrive.
+func (m *describeModel) Init() tea.Cmd { return tea.Batch(m.load(), m.spin.Tick) }
+
+// waiting reports whether the details are still being gathered.
+func (m *describeModel) waiting() bool { return m.build == nil && m.err == "" }
 
 // load gathers the data off the UI goroutine.
 func (m *describeModel) load() tea.Cmd {
@@ -117,6 +123,13 @@ func (m *describeModel) Hints() []hint {
 // Update implements screen.
 func (m *describeModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch t := msg.(type) {
+	case spinner.TickMsg:
+		if !m.waiting() {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(t)
+		return m, cmd
 	case describeMsg:
 		if t.id != m.id() {
 			return m, nil
@@ -159,7 +172,7 @@ func (m *describeModel) View(w, h int) string {
 		return "\n " + styleErr.Render(m.err)
 	}
 	if m.build == nil {
-		return "\n " + styleDim.Render("loading…")
+		return "\n " + styleDim.Render(scanningLabel(m.spin, "loading…"))
 	}
 	m.vp.Width, m.vp.Height = w, h
 	if m.renderW != w {
