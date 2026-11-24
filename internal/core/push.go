@@ -143,16 +143,12 @@ func pushTargetFor(src, into string) (pushTarget, error) {
 		}
 		return t, nil
 	}
-	remotes := gitx.Remotes(src)
-	var remote string
-	switch {
-	case len(remotes) == 0:
-		return pushTarget{}, errors.New("its source repo has no remote to push to")
-	case slices.Contains(remotes, "origin"):
-		remote = "origin"
-	case len(remotes) == 1:
-		remote = remotes[0]
-	default:
+	remote := primaryRemote(src)
+	if remote == "" {
+		remotes := gitx.Remotes(src)
+		if len(remotes) == 0 {
+			return pushTarget{}, errors.New("its source repo has no remote to push to")
+		}
 		return pushTarget{}, fmt.Errorf("its source repo has several remotes (%s) and none is origin; give %s an upstream with `git branch --set-upstream-to`", strings.Join(remotes, ", "), into)
 	}
 	t := pushTarget{remote: remote, dest: into}
@@ -198,23 +194,6 @@ func unpushedOn(src, into string) (target string, n int) {
 		return "", 0
 	}
 	return t.remote + "/" + t.dest, ahead
-}
-
-// validate checks that every member the options name is an active member of
-// the session's package.
-func (o PushOptions) validate(s *Session) error {
-	active := map[string]bool{}
-	for _, mem := range s.Pkg.M.Members {
-		if mem.Mode == manifest.ModeActive {
-			active[mem.Name] = true
-		}
-	}
-	for _, name := range o.Members {
-		if !active[name] {
-			return fmt.Errorf("%q is not an active member of %s", name, s.Pkg.Name)
-		}
-	}
-	return nil
 }
 
 // planPush inspects every active member the options select and decides,
@@ -288,7 +267,7 @@ func (c *Core) checkPush(s *Session, opts PushOptions) ([]*pushing, error) {
 	if err := gitx.CheckVersion(); err != nil {
 		return nil, err
 	}
-	if err := opts.validate(s); err != nil {
+	if err := checkActive(s, opts.Members); err != nil {
 		return nil, err
 	}
 	if c.SessionState(s) != SessionFinished {

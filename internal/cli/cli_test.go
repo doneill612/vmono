@@ -1055,3 +1055,28 @@ func TestSessionPush(t *testing.T) {
 		t.Errorf("pushing again = %q, %v", text, err)
 	}
 }
+
+func TestSessionUpdate(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	out, stderr, err := run(t, "new", "demo", "--active", a, "--session", "work")
+	if err != nil {
+		t.Fatalf("new: %v\n%s", err, stderr)
+	}
+	wt := filepath.Join(strings.TrimSpace(out), "alpha")
+	testutil.WriteFile(t, filepath.Join(a, "new.txt"), "new\n")
+	testutil.Git(t, a, "add", "-A")
+	testutil.Git(t, a, "commit", "--quiet", "-m", "new")
+
+	testutil.WriteFile(t, filepath.Join(wt, "README.md"), "edited\n")
+	out, _, err = run(t, "session", "update", "demo/work", "--json")
+	var res core.UpdateResult
+	if ExitCode(err) != ExitRefused || json.Unmarshal([]byte(out), &res) != nil || res.Members[0].Status != core.UpdateSkipped {
+		t.Errorf("dirty update = %q, %v", out, err)
+	}
+	testutil.Git(t, wt, "checkout", "--quiet", "README.md")
+	out, _, err = run(t, "session", "update", "demo/work")
+	if err != nil || !strings.Contains(out, "updated onto main (1 behind") {
+		t.Errorf("update = %q, %v", out, err)
+	}
+}

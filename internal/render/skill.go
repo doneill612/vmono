@@ -11,7 +11,7 @@ const SkillName = "vmono"
 // It is assembled from named sections so that a harness integration with
 // more than one entry point, such as the Claude Code plugin's commands, can
 // quote the guidance it shares with the skill instead of restating it.
-const skillBody = skillHeader + skillIntro + whatGoesWhere + addMemberSection + statusSection + finishSection + skillRules
+const skillBody = skillHeader + skillIntro + whatGoesWhere + addMemberSection + statusSection + finishSection + updateSection + skillRules
 
 // skillHeader is the frontmatter and generated-file note that open the
 // bundled skill.
@@ -118,13 +118,14 @@ is done or asks to land or merge it back.
 
 1. Commit your work in every member, from inside the member's directory.
    ` + "`vmono session finish`" + ` refuses uncommitted changes and untracked files.
-2. Preview with ` + "`vmono session finish --dry-run --json`" + ` if you are unsure, then run
+2. Preview with ` + "`vmono session finish --dry-run --json`" + ` and read it as in step 3, then run
    ` + "`vmono session finish --json`" + `. It asks the user for permission by design.
 3. Read the result. Each member is one of:
    - ` + "`landed`" + `: its commits are now on the branch in ` + "`into`" + `.
    - ` + "`nothing`" + `: it had no commits of its own.
    - ` + "`blocked`" + `: ` + "`reason`" + ` says why. Fix what is in your session (commit, finish a
-     rebase) and run it again. If the cause is in the source repo, such as
+     rebase) and run it again. If it names ` + "`vmono session update`" + `, see Updating the
+     session below. If the cause is in the source repo, such as
      uncommitted changes where the branch is checked out, tell the user; do not
      touch the source repo yourself.
    - ` + "`conflict`" + `: the rebase onto the landing branch stopped. ` + "`conflicts`" + ` lists the
@@ -132,6 +133,9 @@ is done or asks to land or merge it back.
      intent, run ` + "`git add`" + ` on them, then ` + "`git -c core.editor=true rebase --continue`" + `,
      and run ` + "`vmono session finish`" + ` again. Nothing has moved while any member is
      blocked or conflicted, so it is safe to stop and ask the user.
+   A member's ` + "`notes`" + ` do not stop the finish. If the preview notes that a landing
+   branch has diverged from its upstream, landing works but the user's push will
+   be refused. Tell them, and offer ` + "`vmono session update --merge`" + ` before finishing.
 4. Tell the user which branch each member landed on and how many commits.
 
 The session stays in place afterward, marked finished (` + "`vmono show --json`" + ` reports
@@ -143,6 +147,39 @@ its ` + "`state`" + `). New commits reopen it, and finishing again lands only th
   requests are the user's.
 - Change a landing branch only if the user names one: ` + "`vmono session into --member NAME=BRANCH`" + `
   (or ` + "`--into NAME=BRANCH`" + ` on finish). Never pick a different branch yourself.
+
+`
+
+// updateSection is how to catch a session up with its landing branches, and
+// what to do when one has diverged. The Claude Code plugin's finish command
+// quotes it, since finishing is where an agent usually needs it.
+const updateSection = `## Updating the session
+
+` + "`vmono session update --json`" + ` fetches, then rebases each member's commits onto the
+latest of its landing branch. Run it when the user asks to update, sync with or
+rebase onto upstream, or when finish tells you to. Commit your work first, and
+make sure nothing else is working in the session, since it rewrites the session
+branch. Each member is one of:
+
+- ` + "`updated`" + ` or ` + "`up-to-date`" + `: nothing to do. After an update, check that the work
+  still builds and passes its tests.
+- ` + "`skipped`" + `: ` + "`reason`" + ` says why, and the member is unchanged. If it is uncommitted work,
+  commit it and run the update again. If the landing branch and its remote copy
+  have diverged, explain that to the user and ask before running
+  ` + "`vmono session update --merge --json`" + `. It merges both sides into the session, keeps
+  every commit, and lets finish and the user's push go through as fast-forwards,
+  but the merge commit lands with the work. Never use ` + "`--merge`" + ` without asking, and
+  never reconcile the branches in the source repo yourself.
+- ` + "`conflict`" + `: it was aborted and the member is unchanged. ` + "`conflicts`" + ` lists the files and
+  ` + "`reason`" + ` gives the git commands that reproduce it. Run them in that member's
+  directory and resolve keeping both sides' intent. For a rebase, ` + "`git add`" + ` the files
+  and run ` + "`git -c core.editor=true rebase --continue`" + `; for a merge, commit it. Then run
+  the update again. Ask the user if the right resolution is not clear.
+- ` + "`failed`" + `: report ` + "`reason`" + ` to the user.
+
+` + "`finish`" + ` blocks a member whose landing branch moved after the session took in
+upstream's commits, because rebasing would duplicate them. If the user already
+agreed to merge that member, or once they do, run ` + "`vmono session update --merge --json`" + ` and finish again.
 
 `
 

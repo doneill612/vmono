@@ -551,6 +551,28 @@ func RebaseOnto(worktree, onto, upstream string) error {
 	return err
 }
 
+// RebaseAbort gives up a rebase in progress in the worktree, putting its branch
+// and files back as they were before it started.
+func RebaseAbort(worktree string) error {
+	_, err := run(worktree, "rebase", "--abort")
+	return err
+}
+
+// Merge merges ref into the worktree's checked-out branch, without opening an
+// editor. On a conflict git stops and leaves the merge in progress. A missing
+// commit identity is filled in the same way CommitAll fills it.
+func Merge(worktree, ref string) error {
+	_, err := run(worktree, append(identityArgs(worktree), "merge", "--no-edit", "--quiet", ref)...)
+	return err
+}
+
+// MergeAbort gives up a merge in progress in the worktree, putting its branch
+// and files back as they were before it started.
+func MergeAbort(worktree string) error {
+	_, err := run(worktree, "merge", "--abort")
+	return err
+}
+
 // RebaseInProgress reports whether the worktree is in the middle of a
 // rebase, stopped on a conflict or waiting on `git rebase --continue`.
 func RebaseInProgress(worktree string) bool {

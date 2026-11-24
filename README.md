@@ -190,7 +190,7 @@ The shortcuts, none of which you have to use:
 
 | Key (sessions) | Does |
 | --- | --- |
-| `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, copy path, landing branches, finish, push, delete |
+| `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, update, copy path, landing branches, finish, push, delete |
 | `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
 | `n` | Start a new session: a name, optionally a branch (default `vmono/<package>/<session>`), and one `into` row per active member, filled in with the branch its source has checked out |
@@ -198,6 +198,7 @@ The shortcuts, none of which you have to use:
 | `F` | Finish the session: shows what would land on which branch, or what blocks it, then `y` lands it. `i` changes the members' landing branches, `c` also removes the session afterward. A conflict offers to launch the harness in the session to resolve it |
 | `P` | Push a finished session: shows each member's landing branch and the remote it goes to, or what blocks it, then `y` pushes. Never forced. A session that is not finished gets a dialog saying why, with `F` to finish it unless uncommitted work stops that |
 | `m` / `d` | Members of the session / describe it |
+| `u` | Update the session: rebase its commits onto the latest of each member's landing branch |
 | `s` / `f` | Sync the session / fetch every member's source |
 | `e` | Edit the package |
 | `ctrl+d` | Delete the session; the package and its other sessions stay |
@@ -249,6 +250,14 @@ Everything except the manifest, the session file and your own text in `AGENTS.md
 
 A branch can be checked out in only one worktree at a time, and git cannot hold both `vmono/project` and `vmono/project/spike`, which is why session branches include the package name. If a branch name in the way already exists, vmono says so and suggests `--branch`; it never renames branches.
 
+## Updating a session
+
+`vmono session update [pkg/session]`, or `u` on the session in the TUI, catches a session up with the branches its work lands on. The sources are fetched, then each active member's own commits are rebased inside the session onto its landing branch or that branch's copy on the remote, whichever is further ahead. A landing branch that does not exist yet stands for the member's base. Only the session branch moves; no branch in a source repo does.
+
+Members are independent. One with uncommitted changes is skipped, and so is one whose landing branch and its remote copy have diverged, because rebasing onto one side could drop the other. `--merge` merges both sides into the session for those members instead. Finishing then fast-forwards the landing branch and pushing it is a fast-forward again, at the cost of a merge commit that lands with the work. If the landing branch moves before you finish, `finish` blocks that member rather than duplicate upstream commits; run the update with `--merge` again. A rebase or merge that conflicts is aborted, so that member stays exactly as it was, and the reason names the files. The command exits `2` when any member was skipped or conflicted; `--member` limits it to some members, and `--no-fetch` uses the refs on disk. A fetch that fails only warns.
+
+An update rewrites the session branch, so do it while no agent is in the middle of a change.
+
 ## Finishing a session
 
 A session is done when its work has landed on a branch in each member's source repo. `vmono session finish` does that locally; it never pushes. Pushing is a separate step you ask for, below.
@@ -274,7 +283,7 @@ Nothing is forced. If the remote branch has commits the landing branch lacks, th
 
 Push before you remove the session: `finish --close` and `vmono session rm` take the session with them, after which the landing branches are plain branches in the source repos and you push them by hand.
 
-The vmono skill teaches the agent to do this when you say the work is done (in Claude Code, `/vmono:finish` says it for you): commit in every member, run `vmono session finish`, resolve a conflict if one stops it, and report what landed where. The adapters ask for permission first, and the agent never passes `--close` or pushes; pushing is yours, from the TUI or `vmono session push`.
+The vmono skill teaches the agent to do this when you say the work is done (in Claude Code, `/vmono:finish` says it for you): commit in every member, run `vmono session finish`, resolve a conflict if one stops it, and report what landed where. It also teaches updating a session, and to ask you before it merges a landing branch that has diverged. The adapters ask for permission first, and the agent never passes `--close` or pushes; pushing is yours, from the TUI or `vmono session push`.
 
 ### Packages from before sessions
 
@@ -340,6 +349,7 @@ Every read command takes `--json`. Anything that could discard work refuses unle
 | `vmono session new [pkg] <name> [--branch B] [--into [MEMBER=]B]... [--reuse-branch]` | Start a session: a worktree of every member on a new branch. Records each member's landing branch (default: its source's checked-out branch) |
 | `vmono session into [pkg/session] [--all B] [--member NAME=B]...` | Show each member's landing branch, or change them |
 | `vmono session ls [pkg]` | List a package's sessions and whether each is finished |
+| `vmono session update [pkg/session] [--member NAME]... [--merge] [--no-fetch] [--dry-run]` | Fetch, then rebase the session's commits onto the latest of each member's landing branch. See Updating a session |
 | `vmono session finish [pkg/session] [--into [MEMBER=]B]... [--close] [--dry-run]` | Land the session's commits on each member's branch in its source repo. Nothing is pushed; see Finishing a session |
 | `vmono session push [pkg/session] [--member NAME]... [--dry-run] [--json]` | Push a finished session's landing branches to their remotes, never forced. See Pushing a finished session |
 | `vmono session rm <pkg>/<session> [--force] [--delete-branches]` | Remove a session; the package and its other sessions stay |

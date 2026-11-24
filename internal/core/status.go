@@ -149,7 +149,7 @@ func landingStatus(s *Session, mem manifest.Member, dir string, ms *MemberStatus
 		return
 	}
 	target, _ := landingTarget(src, into, base)
-	if n, err := ownCommits(dir, base, target); err == nil {
+	if n, err := ownCommits(src, dir, into, base, target); err == nil {
 		ms.ToLand = n
 	}
 }
