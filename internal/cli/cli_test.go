@@ -192,6 +192,33 @@ func TestOpenPassesArgsAndHarness(t *testing.T) {
 	}
 }
 
+// TestOpenRoutesThroughTheLauncher pins that open honors the launcher
+// setting: "auto" outside tmux launches in place, and an unknown launcher is
+// refused when the config loads, before anything starts.
+func TestOpenRoutesThroughTheLauncher(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	if _, stderr, err := run(t, "new", "demo", "--active", a, "--session", "work"); err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	var launched int
+	orig := launchHarness
+	launchHarness = func(*harness.Launch, bool) error { launched++; return nil }
+	t.Cleanup(func() { launchHarness = orig })
+
+	cfgPath := filepath.Join(env.Root, "cfg", "config.toml")
+	t.Setenv("TMUX", "")
+	testutil.WriteFile(t, cfgPath, "launcher = \"auto\"\ndefault_harness = \"fake\"\n[harness.fake]\ncommand = \"sh\"\n")
+	if _, _, err := run(t, "open", "demo"); err != nil || launched != 1 {
+		t.Fatalf("auto outside tmux should launch in place: launched=%d err=%v", launched, err)
+	}
+
+	testutil.WriteFile(t, cfgPath, "launcher = \"screen\"\ndefault_harness = \"fake\"\n[harness.fake]\ncommand = \"sh\"\n")
+	if _, _, err := run(t, "open", "demo"); err == nil || launched != 1 {
+		t.Errorf("unknown launcher should be refused: launched=%d err=%v", launched, err)
+	}
+}
+
 func TestAgentCommandsInferPackageFromCwd(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
