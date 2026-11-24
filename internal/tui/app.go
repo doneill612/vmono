@@ -14,6 +14,7 @@ import (
 	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/harness"
+	"github.com/doneill612/vmono/internal/launcher"
 )
 
 // LaunchRequest asks the caller to start a harness at a session once the
@@ -497,12 +498,25 @@ var runHarness = harness.Run
 // Launch returns the launch request chosen during the session, if any.
 func (a *App) Launch() *LaunchRequest { return a.env.launch }
 
+// resolveLauncher picks the launcher for a handoff. It is a variable so
+// tests can stand in a launcher without a real tmux.
+var resolveLauncher = launcher.Resolve
+
 // handoff runs after the TUI has released the terminal. It prepares the
-// harness for the request and starts it. Without return_to_tui (macOS and
-// Linux) vmono is replaced by the harness and the result is final. With it
+// harness for the request and starts it with the configured launcher.
+//
+// With the direct launcher and no return_to_tui (macOS and Linux) vmono is
+// replaced by the harness and the result is final. With return_to_tui
 // (always on Windows) the harness runs as a child; again is true so the
 // caller reopens the TUI when it exits, carrying message if the launch
 // itself failed. A harness's own non-zero exit is not a vmono failure.
+//
+// With the tmux launcher, a launch that switched the tmux client to the
+// session's own tmux session is final: the harness runs there, and quitting
+// is what closes the TUI when it was opened in a tmux popup. Attaching from
+// outside tmux follows return_to_tui like a direct launch, reopening the TUI
+// once the client detaches. A tmux failure reopens the TUI with tmux's
+// message instead of leaving the user at a bare shell.
 func handoff(c *core.Core, req *LaunchRequest) (message string, again bool, err error) {
 	target := req.Package
 	if req.Session != "" {
@@ -515,6 +529,21 @@ func handoff(c *core.Core, req *LaunchRequest) (message string, again bool, err 
 	l, err := harness.Prepare(c, sess, req.Harness, nil)
 	if err != nil {
 		return err.Error(), true, nil
+	}
+	ln, err := resolveLauncher(c.Cfg)
+	if err != nil {
+		return err.Error(), true, nil
+	}
+	if _, direct := ln.(launcher.Direct); !direct {
+		res, err := ln.Launch(l, launcher.Opts{Replace: !c.Cfg.ReturnToTUI})
+		switch {
+		case err != nil:
+			return err.Error(), true, nil
+		case res == launcher.Elsewhere || !c.Cfg.ReturnToTUI:
+			return "", false, nil
+		default:
+			return "", true, nil
+		}
 	}
 	if !c.Cfg.ReturnToTUI {
 		return "", false, runHarness(l, true)
