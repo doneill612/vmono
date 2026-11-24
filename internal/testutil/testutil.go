@@ -40,7 +40,7 @@ func NewEnv(t *testing.T) *Env {
 	home := filepath.Join(root, "home")
 	mustMkdir(t, home)
 	gitconfig := filepath.Join(root, "gitconfig")
-	write(t, gitconfig, "[user]\n\tname = Test User\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n[protocol \"file\"]\n\tallow = always\n")
+	write(t, gitconfig, "[user]\n\tname = Test User\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n[protocol \"file\"]\n\tallow = always\n[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n[receive]\n\tautogc = false\n[core]\n\tfsync = none\n")
 
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -72,16 +72,46 @@ func Git(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// templateRoot is where NewSource keeps the repos it copies, one directory per
+// source name. Main sets it for the life of the process; while it is empty,
+// every source is built from scratch.
+var templateRoot string
+
 // NewSource creates a bare remote named <name>.git and a clone at
 // <Root>/source/<name> with one commit on main pushed to it, and returns the
 // clone path. Tracked files: README.md.
+//
+// Building the pair takes nine git commands, which are slow to start on some
+// systems, so under Main each name is built once per process and copied after
+// that. Only the remote's URL in the clone's config depends on where the pair
+// lives, and it is rewritten in the copy. Sources of one name therefore share
+// their initial commit id across tests, which run in separate directories.
 func (e *Env) NewSource(t *testing.T, name string) string {
 	t.Helper()
+	src := filepath.Join(e.Root, "source", name)
 	remote := filepath.Join(e.Root, "remotes", name+".git")
+	if templateRoot == "" {
+		buildSource(t, name, remote, src)
+		return src
+	}
+	tmpl := filepath.Join(templateRoot, name)
+	tmplRemote, tmplSrc := filepath.Join(tmpl, "remote.git"), filepath.Join(tmpl, "source")
+	if _, err := os.Stat(filepath.Join(tmpl, "done")); err != nil {
+		buildSource(t, name, tmplRemote, tmplSrc)
+		write(t, filepath.Join(tmpl, "done"), "")
+	}
+	copyDir(t, tmplRemote, remote)
+	copyDir(t, tmplSrc, src)
+	Git(t, src, "remote", "set-url", "origin", remote)
+	return src
+}
+
+// buildSource makes the remote and clone that NewSource describes.
+func buildSource(t *testing.T, name, remote, src string) {
+	t.Helper()
 	mustMkdir(t, remote)
 	Git(t, remote, "init", "--bare", "--quiet", "--initial-branch=main")
 
-	src := filepath.Join(e.Root, "source", name)
 	mustMkdir(t, src)
 	Git(t, src, "init", "--quiet", "--initial-branch=main")
 	write(t, filepath.Join(src, "README.md"), "# "+name+"\n")
@@ -90,7 +120,15 @@ func (e *Env) NewSource(t *testing.T, name string) string {
 	Git(t, src, "remote", "add", "origin", remote)
 	Git(t, src, "push", "--quiet", "-u", "origin", "main")
 	Git(t, src, "remote", "set-head", "origin", "main")
-	return src
+}
+
+// copyDir copies the tree at from to the new directory to. os.CopyFS keeps the
+// executable bits, which git hooks need, and makes files writable.
+func copyDir(t *testing.T, from, to string) {
+	t.Helper()
+	if err := os.CopyFS(to, os.DirFS(from)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // WriteFile writes content to path, creating parent directories.

@@ -46,11 +46,11 @@ func Main(m *testing.M) int {
 	flag.Parse()
 	if os.Getenv(childEnv) != "" {
 		os.Unsetenv(childEnv)
-		return m.Run()
+		return runHere(m)
 	}
 	n := shardCount(os.Getenv(shardsEnv), runtime.NumCPU())
 	if n < 2 || !shardable(setFlags()) {
-		return m.Run()
+		return runHere(m)
 	}
 	names, err := listTests()
 	if err != nil {
@@ -58,7 +58,7 @@ func Main(m *testing.M) int {
 		return 1
 	}
 	if len(names) < 2 {
-		return m.Run()
+		return runHere(m)
 	}
 	return runBatches(split(names, n*batchesPerShard), n, runBatch)
 }
@@ -220,4 +220,15 @@ func quiet(out string) string {
 		b.WriteString(line)
 	}
 	return b.String()
+}
+
+// runHere runs the tests in this process, with a place for NewSource to keep
+// the repos it copies.
+func runHere(m *testing.M) int {
+	dir, err := os.MkdirTemp("", "vmono-test-templates-")
+	if err == nil {
+		templateRoot = dir
+		defer os.RemoveAll(dir)
+	}
+	return m.Run()
 }
