@@ -143,13 +143,14 @@ func landingStatus(s *Session, mem manifest.Member, dir string, ms *MemberStatus
 		return
 	}
 	ms.Into = into
-	ms.IntoRemote, ms.IntoUnpushed = unpushedOn(src, into)
-	base, err := resolveRef(src, mem.Base, nil)
+	refs := gitx.SnapshotRefs(src, into)
+	ms.IntoRemote, ms.IntoUnpushed = unpushedOn(refs, src, into)
+	base, err := resolveRefIn(refs, src, mem.Base, nil)
 	if err != nil {
 		return
 	}
-	target, _ := landingTarget(src, into, base)
-	if n, err := ownCommits(src, dir, into, base, target); err == nil {
+	target, _ := landingTarget(refs, src, into, base)
+	if n, err := ownCommits(refs, src, dir, into, base, target); err == nil {
 		ms.ToLand = n
 	}
 }

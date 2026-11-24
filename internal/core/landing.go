@@ -27,14 +27,19 @@ func primaryRemote(src string) string {
 // branch of the same name on the primary remote. It is "" when there is none
 // on disk as of the last fetch.
 func remoteCounterpart(src, into string) string {
-	if tr, ok := gitx.UpstreamOf(src, into); ok {
-		if gitx.RefExists(src, tr.Ref) {
+	return remoteCounterpartIn(gitx.LiveRefs(src), src, into)
+}
+
+// remoteCounterpartIn is remoteCounterpart answered from refs.
+func remoteCounterpartIn(refs gitx.Refs, src, into string) string {
+	if tr, ok := refs.UpstreamOf(into); ok {
+		if refs.Exists(tr.Ref) {
 			return tr.Ref
 		}
 		return ""
 	}
 	if remote := primaryRemote(src); remote != "" {
-		if ref := "refs/remotes/" + remote + "/" + into; gitx.RefExists(src, ref) {
+		if ref := "refs/remotes/" + remote + "/" + into; refs.Exists(ref) {
 			return ref
 		}
 	}
@@ -61,11 +66,11 @@ func freshest(src, into string) (ref string, diverged bool) {
 // against, and whether the landing branch exists as a local branch. A branch
 // that exists only on its remote stands in for it, and one that exists nowhere
 // is measured against the member's base, since finish will create it there.
-func landingTarget(src, into, base string) (target string, exists bool) {
-	if gitx.BranchExists(src, into) {
+func landingTarget(refs gitx.Refs, src, into, base string) (target string, exists bool) {
+	if refs.BranchExists(into) {
 		return "refs/heads/" + into, true
 	}
-	if ref := remoteCounterpart(src, into); ref != "" {
+	if ref := remoteCounterpartIn(refs, src, into); ref != "" {
 		return ref, false
 	}
 	return base, false
@@ -76,9 +81,9 @@ func landingTarget(src, into, base string) (target string, exists bool) {
 // of its landing branch into: the session's own work still to land. The remote
 // copy matters for a session updated onto it while the local branch lags, or
 // merged with it: what it picked up there is not its own.
-func ownCommits(src, wt, into, base, target string) (int, error) {
+func ownCommits(refs gitx.Refs, src, wt, into, base, target string) (int, error) {
 	not := []string{"HEAD", "--not", base, target}
-	if ref := remoteCounterpart(src, into); ref != "" {
+	if ref := remoteCounterpartIn(refs, src, into); ref != "" {
 		not = append(not, ref)
 	}
 	return gitx.RevCount(wt, not...)

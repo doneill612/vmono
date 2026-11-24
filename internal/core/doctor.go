@@ -284,11 +284,7 @@ func isRepo(path string) bool {
 	if _, err := os.Stat(path); err != nil {
 		return false
 	}
-	top, err := gitx.TopLevel(path)
-	if err != nil {
-		return false
-	}
-	bare, err := gitx.IsBare(top)
+	_, bare, err := gitx.WorkTree(path)
 	return err == nil && !bare
 }
 
