@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/doneill612/vmono/internal/apply"
+	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/gitx"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
@@ -462,7 +463,8 @@ func (c *Core) CreatePackage(m *manifest.Manifest) (*Package, error) {
 // CreateSession starts a new session of a package: it validates, then makes
 // the session directory with its own git repo and session file, a worktree
 // of every member on the session branch, copies each member's untracked
-// files, renders the generated files and commits them. If any step fails,
+// files, renders the generated files, commits them and runs the post_create
+// hook. If any step fails,
 // every step already done is undone and the error names the failing member.
 //
 // The session repo always gets an initial commit, even with auto_commit off,
@@ -547,6 +549,7 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 			return err
 		}},
 	)
+	steps = append(steps, c.hookSteps(config.HookPostCreate, s, nil)...)
 	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(steps); err != nil {
 		return nil, err
 	}
@@ -676,7 +679,7 @@ func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branc
 			return err
 		}})
 	}
-	steps = append(steps, memberHookSteps(s, mem, src, "setup", mem.Setup)...)
+	steps = append(steps, c.memberHookSteps(s, mem, src, "setup", mem.Setup)...)
 	return steps
 }
 

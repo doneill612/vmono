@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -50,10 +51,92 @@ type Config struct {
 	Launcher       string             `toml:"launcher"`
 	TmuxSwitch     bool               `toml:"tmux_switch"`
 	Harness        map[string]Harness `toml:"harness"`
+	// Hooks are the commands run at points in every session's life, by name.
+	Hooks map[string]Hook `toml:"hooks,omitempty"`
+
+	// NoHooks turns every hook off, members' setup and teardown included. It
+	// comes from VMONO_NO_HOOKS or --no-hooks and is never saved.
+	NoHooks bool `toml:"-"`
 
 	// Loaded reports whether a config file existed on disk. It is false on
 	// first run, which triggers the setup flow.
 	Loaded bool `toml:"-"`
+}
+
+// Names of the global hooks.
+const (
+	// HookPostCreate runs once a session has been created.
+	HookPostCreate = "post_create"
+	// HookPreRemove runs before a session is removed.
+	HookPreRemove = "pre_remove"
+	// HookPostFinish runs once a session's work has landed.
+	HookPostFinish = "post_finish"
+)
+
+// HookNames lists every global hook.
+func HookNames() []string { return []string{HookPostCreate, HookPreRemove, HookPostFinish} }
+
+// What happens when a hook's command fails.
+const (
+	// OnFailureWarn reports it and carries on; the default.
+	OnFailureWarn = "warn"
+	// OnFailureAbort fails the operation the hook belongs to.
+	OnFailureAbort = "abort"
+)
+
+// Hook is one global hook. In config.toml it is a command, or a table when it
+// needs more than that; saving the config always writes the table.
+type Hook struct {
+	Command string `toml:"command"`
+	// Timeout is a Go duration such as "30s"; empty means the default.
+	Timeout string `toml:"timeout,omitempty"`
+	// OnFailure is OnFailureWarn or OnFailureAbort; empty means warn.
+	OnFailure string `toml:"on_failure,omitempty"`
+}
+
+// UnmarshalTOML implements toml.Unmarshaler.
+func (h *Hook) UnmarshalTOML(v any) error {
+	if s, ok := v.(string); ok {
+		*h = Hook{Command: s}
+		return nil
+	}
+	table, ok := v.(map[string]any)
+	if !ok {
+		return errors.New("a hook is a command, or a table with one")
+	}
+	*h = Hook{}
+	for key, val := range table {
+		dst := map[string]*string{"command": &h.Command, "timeout": &h.Timeout, "on_failure": &h.OnFailure}[key]
+		if dst == nil {
+			return fmt.Errorf("unknown hook key %q (have command, timeout, on_failure)", key)
+		}
+		if *dst, ok = val.(string); !ok {
+			return fmt.Errorf("hook key %q must be a string", key)
+		}
+	}
+	return nil
+}
+
+// Limit returns the hook's timeout, zero when it sets none.
+func (h Hook) Limit() time.Duration {
+	d, _ := time.ParseDuration(h.Timeout)
+	return d
+}
+
+// validate checks one hook's values.
+func (h Hook) validate() error {
+	if strings.TrimSpace(h.Command) == "" {
+		return errors.New("command is empty")
+	}
+	if h.Timeout != "" {
+		if d, err := time.ParseDuration(h.Timeout); err != nil || d <= 0 {
+			return fmt.Errorf("timeout %q is not a duration such as 30s", h.Timeout)
+		}
+	}
+	if h.OnFailure != "" && h.OnFailure != OnFailureWarn && h.OnFailure != OnFailureAbort {
+		return fmt.Errorf("on_failure %q is not %s or %s", h.OnFailure, OnFailureWarn, OnFailureAbort)
+	}
+	return nil
 }
 
 // Launcher names say where a harness is started when a session is opened.
@@ -192,6 +275,9 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 	if present["tmux_switch"] {
 		dst.TmuxSwitch = src.TmuxSwitch
 	}
+	if present["hooks"] {
+		dst.Hooks = src.Hooks
+	}
 	if present["harness"] && len(src.Harness) > 0 {
 		dst.Harness = src.Harness
 	}
@@ -242,6 +328,7 @@ func applyEnv(c *Config) error {
 		"VMONO_AUTO_COMMIT":     &c.AutoCommit,
 		"VMONO_RETURN_TO_TUI":   &c.ReturnToTUI,
 		"VMONO_TMUX_SWITCH":     &c.TmuxSwitch,
+		"VMONO_NO_HOOKS":        &c.NoHooks,
 	} {
 		if v := os.Getenv(name); v != "" {
 			b, err := strconv.ParseBool(v)
@@ -264,6 +351,14 @@ func (c Config) Validate() error {
 	}
 	if c.Launcher != "" && !slices.Contains(Launchers(), c.Launcher) {
 		return fmt.Errorf("config: launcher %q is not one of %s", c.Launcher, strings.Join(Launchers(), ", "))
+	}
+	for name, h := range c.Hooks {
+		if !slices.Contains(HookNames(), name) {
+			return fmt.Errorf("config: unknown hook %q (have %s)", name, strings.Join(HookNames(), ", "))
+		}
+		if err := h.validate(); err != nil {
+			return fmt.Errorf("config: hook %s: %w", name, err)
+		}
 	}
 	if c.DefaultHarness != "" {
 		if _, ok := c.Harness[c.DefaultHarness]; !ok {

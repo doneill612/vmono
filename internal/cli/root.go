@@ -27,6 +27,7 @@ func NewRoot(runTUI func() error) *cobra.Command {
 			return runTUI()
 		},
 	}
+	root.PersistentFlags().BoolVar(&noHooks, "no-hooks", false, "skip setup, teardown and the hooks in config.toml")
 	root.SetVersionTemplate("{{vmonoVersion .}}\n")
 	root.AddCommand(
 		newInitCmd(),

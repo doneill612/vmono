@@ -44,6 +44,9 @@ func ExitCode(err error) int {
 	}
 }
 
+// noHooks holds the --no-hooks flag.
+var noHooks bool
+
 // loadCore reads config and builds a Core. It is a variable so tests could
 // substitute it, but commands normally just call it.
 func loadCore() (*core.Core, error) {
@@ -51,6 +54,7 @@ func loadCore() (*core.Core, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.NoHooks = cfg.NoHooks || noHooks
 	return core.New(cfg)
 }
 

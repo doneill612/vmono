@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/doneill612/vmono/internal/apply"
+	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/gitx"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
@@ -458,6 +459,15 @@ func (c *Core) Finish(s *Session, opts FinishOptions) (FinishResult, error) {
 		return res, err
 	}
 	res.Finished = true
+
+	var landed []string
+	for _, l := range touched {
+		landed = append(landed, l.Name+":"+l.Into)
+	}
+	post := c.hookSteps(config.HookPostFinish, s, map[string]string{"VMONO_LANDED": strings.Join(landed, " ")})
+	if err := (&apply.Runner{Events: c.Events}).Run(post); err != nil {
+		return res, fmt.Errorf("landed, but %w", err)
+	}
 
 	if opts.Close {
 		del, err := c.DeleteSession(s, DeleteOptions{DeleteBranches: true})

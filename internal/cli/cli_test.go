@@ -1095,3 +1095,18 @@ func TestSessionNewTrack(t *testing.T) {
 		t.Errorf("missing branch = %v", err)
 	}
 }
+
+func TestNoHooksFlag(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	testutil.WriteFile(t, filepath.Join(env.Root, "cfg", "config.toml"), "[hooks.pre_remove]\ncommand = \"exit 1\"\non_failure = \"abort\"\n")
+	if _, _, err := run(t, "new", "demo", "--active", a, "--session", "work"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run(t, "session", "rm", "demo/work"); ExitCode(err) != ExitRefused {
+		t.Errorf("want a veto, got %v", err)
+	}
+	if _, _, err := run(t, "session", "rm", "demo/work", "--no-hooks"); err != nil {
+		t.Errorf("--no-hooks: %v", err)
+	}
+}

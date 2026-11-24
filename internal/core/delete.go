@@ -201,7 +201,8 @@ func labelSteps(steps []apply.Step, session string) {
 }
 
 // DeleteSession tears one session down: it checks every member for lost work
-// (returning a *RefusedError unless forced), removes each worktree and
+// (returning a *RefusedError unless forced), runs the pre_remove hook, which may
+// veto it, removes each worktree and
 // prunes its source, optionally deletes merged branches, then removes the
 // session directory. Source repos' working trees and checked-out branches
 // are never touched, and the package and its other sessions are left alone.
@@ -212,6 +213,9 @@ func (c *Core) DeleteSession(s *Session, opts DeleteOptions) (DeleteResult, erro
 	}
 	if bad := unsafeOf(c.SafetyCheck(s)); len(bad) > 0 && !opts.Force {
 		return res, &RefusedError{Unsafe: bad}
+	}
+	if err := c.preRemove(s); err != nil {
+		return res, err
 	}
 	steps, err := c.sessionSteps(s, opts, &res, false)
 	if err != nil {
@@ -240,6 +244,9 @@ func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
 	}
 	if bad := unsafeOf(c.safetyAcross(sessions, p.M.Members)); len(bad) > 0 && !opts.Force {
 		return res, &RefusedError{Unsafe: bad}
+	}
+	if err := c.preRemove(sessions...); err != nil {
+		return res, err
 	}
 	var steps []apply.Step
 	for _, s := range sessions {
@@ -293,7 +300,7 @@ func (c *Core) removeMemberSteps(s *Session, mem manifest.Member, force, deleteB
 		return nil, err
 	}
 	dir := s.MemberDir(mem)
-	steps := append(memberHookSteps(s, mem, src, "teardown", mem.Teardown), apply.Step{Member: mem.Name, Name: "worktree remove", Run: func(warn func(string)) error {
+	steps := append(c.memberHookSteps(s, mem, src, "teardown", mem.Teardown), apply.Step{Member: mem.Name, Name: "worktree remove", Run: func(warn func(string)) error {
 		if _, err := os.Stat(dir); err == nil {
 			if err := gitx.WorktreeRemove(src, dir, force); err != nil {
 				return err
