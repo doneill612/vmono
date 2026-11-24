@@ -226,8 +226,16 @@ func (m *pickerModel) selection() []pickSel {
 	return out
 }
 
-// View implements screen.
-func (m *pickerModel) View(w, h int) string { return m.tb.view(w, h) }
+// View implements screen. While the repo scan is still running and the table
+// already has rows (the current members of a package being edited), the
+// table's empty-state placeholder never shows, so a spinner line is drawn
+// beneath the rows to tell the user more repos are still being discovered.
+func (m *pickerModel) View(w, h int) string {
+	if m.loaded || len(m.tb.rows) == 0 || h < 3 {
+		return m.tb.view(w, h)
+	}
+	return m.tb.view(w, h-2) + "\n\n " + styleDim.Render(scanningLabel(m.spin, "scanning for more repos…"))
+}
 
 // samePath compares two paths after resolving symlinks.
 func samePath(a, b string) bool {
