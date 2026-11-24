@@ -119,7 +119,7 @@ func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
 	}
 	switch k.String() {
 	case "esc":
-		return m, pop()
+		return m, pop(m)
 	case "tab", "down":
 		return m, m.setFocus(m.focus + 1)
 	case "shift+tab", "up":
@@ -159,7 +159,7 @@ func (m *sessionPrompt) submit() (screen, tea.Cmd) {
 		return m, m.setFocus(0)
 	}
 	branch, into := strings.TrimSpace(m.branch.Value()), m.into.values()
-	return m, goTo(newProgress(m.e, operation{
+	return m, goTo(m, newProgress(m.e, operation{
 		title:   "Start " + pkg + "/" + name,
 		pkg:     pkg,
 		session: name,

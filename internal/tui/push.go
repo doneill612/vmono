@@ -38,8 +38,8 @@ func newPushConfirm(e *env, pkg, session string, members []string, plan core.Pus
 // session that is not finished gets a dialog saying so, which offers to finish
 // it unless uncommitted work stops it from finishing; a member named that is
 // not an active one is flashed. members limits the push, and is empty for all.
-// back builds the screen the push returns to.
-func startPush(e *env, pkg, session string, members []string, back func() screen) tea.Cmd {
+// back builds the screen the push returns to; from is the screen asking.
+func startPush(from screen, e *env, pkg, session string, members []string, back func() screen) tea.Cmd {
 	c := e.core
 	s, err := c.ResolveSession(pkg + "/" + session)
 	if err != nil {
@@ -49,11 +49,11 @@ func startPush(e *env, pkg, session string, members []string, back func() screen
 	var nf *core.PushNotFinishedError
 	switch {
 	case errors.As(err, &nf):
-		return push(newPushNotFinished(e, pkg, session, unfinishable(c.Status(s))))
+		return push(from, newPushNotFinished(e, pkg, session, unfinishable(c.Status(s))))
 	case err != nil:
 		return flashErr(err.Error())
 	}
-	return push(newPushConfirm(e, pkg, session, members, plan, back))
+	return push(from, newPushConfirm(e, pkg, session, members, plan, back))
 }
 
 // ready counts the members that have commits to push.
@@ -101,10 +101,10 @@ func (m *pushConfirm) Update(msg tea.Msg) (screen, tea.Cmd) {
 	}
 	switch k.String() {
 	case "esc", "n":
-		return m, pop()
+		return m, pop(m)
 	case "y":
 		if m.ready() > 0 {
-			return m, goTo(m.run())
+			return m, goTo(m, m.run())
 		}
 	}
 	return m, nil
@@ -259,7 +259,7 @@ func (m *pushNotFinished) Update(msg tea.Msg) (screen, tea.Cmd) {
 	}
 	switch k.String() {
 	case "esc", "enter", "n", "q":
-		return m, pop()
+		return m, pop(m)
 	case "F":
 		if len(m.blockers) > 0 {
 			return m, nil
@@ -269,7 +269,7 @@ func (m *pushNotFinished) Update(msg tea.Msg) (screen, tea.Cmd) {
 		if err != nil {
 			return m, flashErr(err.Error())
 		}
-		return m, goTo(newFinishConfirm(m.e, m.pkg, m.session, c.PlanFinish(s, core.FinishOptions{})))
+		return m, goTo(m, newFinishConfirm(m.e, m.pkg, m.session, c.PlanFinish(s, core.FinishOptions{})))
 	}
 	return m, nil
 }

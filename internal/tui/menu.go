@@ -66,6 +66,10 @@ type actionMenu struct {
 	subtitle string
 	items    []action
 	cursor   int
+	// closing is set once a choice is made. Keys already queued behind the
+	// choosing one still reach the menu before its pop is applied; they are
+	// ignored so a double Enter performs the action only once.
+	closing bool
 }
 
 // newActionMenu builds the menu for one row. kind names what the row is
@@ -101,19 +105,20 @@ func (m *actionMenu) Hints() []hint { return nil }
 // sequence matters: the pop reveals the list view, and only then does the
 // action message reach it.
 func (m *actionMenu) choose(id string) tea.Cmd {
+	m.closing = true
 	msg := actionMsg{owner: m.owner, subject: m.subject, id: id}
-	return tea.Sequence(pop(), func() tea.Msg { return msg })
+	return tea.Sequence(pop(m), func() tea.Msg { return msg })
 }
 
 // Update implements screen.
 func (m *actionMenu) Update(msg tea.Msg) (screen, tea.Cmd) {
 	k, ok := msg.(tea.KeyMsg)
-	if !ok {
+	if !ok || m.closing {
 		return m, nil
 	}
 	switch s := k.String(); s {
 	case "esc", "q":
-		return m, pop()
+		return m, pop(m)
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--

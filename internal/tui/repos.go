@@ -286,15 +286,15 @@ func (m *reposModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			m.setFilter("")
 			return m, nil
 		}
-		return m, pop()
+		return m, pop(m)
 	case "a":
-		return m, push(newFinder(m.e, m))
+		return m, push(m, newFinder(m.e, m))
 	}
 	if !has {
 		return m, nil
 	}
 	if k.String() == "enter" {
-		return m, push(newActionMenu(m, "repo", sel.Path, paths.Contract(sel.Path), repoActions).named(sel.Name))
+		return m, push(m, newActionMenu(m, "repo", sel.Path, paths.Contract(sel.Path), repoActions).named(sel.Name))
 	}
 	if a, ok := findAction(repoActions, k.String()); ok {
 		return m.act(a.id, sel)
@@ -307,9 +307,9 @@ func (m *reposModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 func (m *reposModel) act(id string, sel discover.Repo) (screen, tea.Cmd) {
 	switch id {
 	case "packages":
-		return m, push(newScopedPackages(m.e, sel.Path, sel.Name))
+		return m, push(m, newScopedPackages(m.e, sel.Path, sel.Name))
 	case "new-package":
-		return m, push(newEditorWithRepo(m.e, sel))
+		return m, push(m, newEditorWithRepo(m.e, sel))
 	case "copy":
 		if err := clipboard.WriteAll(sel.Path); err != nil {
 			return m, flashErr("could not copy: " + err.Error() + " — " + sel.Path)

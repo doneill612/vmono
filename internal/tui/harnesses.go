@@ -156,14 +156,14 @@ func (m *harnessesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			m.setFilter("")
 			return m, nil
 		}
-		return m, pop()
+		return m, pop(m)
 	}
 	r, ok := m.tb.selected()
 	if !ok {
 		return m, nil
 	}
 	if k.String() == "enter" {
-		return m, push(newActionMenu(m, "harness", r.id, "", harnessActions))
+		return m, push(m, newActionMenu(m, "harness", r.id, "", harnessActions))
 	}
 	if a, ok := findAction(harnessActions, k.String()); ok {
 		return m.act(a.id, r.id)

@@ -187,11 +187,11 @@ func (m *pickerModel) updateKeys(k tea.KeyMsg) (screen, tea.Cmd) {
 			m.setFilter("")
 			return m, nil
 		}
-		return m, goTo(m.cancel())
+		return m, goTo(m, m.cancel())
 	case "enter":
-		return m, goTo(m.done(m.selection()))
+		return m, goTo(m, m.done(m.selection()))
 	case "p":
-		return m, push(newFinder(m.e, m))
+		return m, push(m, newFinder(m.e, m))
 	case " ", "space":
 		if has {
 			if _, on := m.chosen[cur.id]; on {

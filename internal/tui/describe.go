@@ -146,10 +146,10 @@ func (m *describeModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	case tea.KeyMsg:
 		switch t.String() {
 		case "esc", "q":
-			return m, pop()
+			return m, pop(m)
 		case "e":
 			if m.member == "" && m.pkg != nil {
-				return m, push(newEditor(m.e, m.pkg))
+				return m, push(m, newEditor(m.e, m.pkg))
 			}
 			return m, nil
 		case "g", "home":

@@ -87,13 +87,23 @@ func (e *env) setPackages(list []core.Summary) {
 
 // Navigation and notification messages. Screens return commands that
 // produce these; the App applies them to its screen stack.
+//
+// Every navigation message names the screen that issued it (from). A command
+// runs asynchronously, so its message is queued behind any keys that were
+// already waiting, and those keys are still delivered to the screen that
+// issued it. Without the origin a held or double-pressed key would push the
+// same view several times ("packages > pay > pay > pay"), or close the view
+// revealed beneath the one it was meant for. The App therefore applies a
+// navigation message only while its origin is still where the message
+// expects it: a push or pop only from the top screen, a goto only from a
+// screen still in the stack. Anything else is stale and dropped.
 type (
-	// gotoMsg replaces the top screen.
-	gotoMsg struct{ s screen }
-	// pushMsg shows a screen above the current one.
-	pushMsg struct{ s screen }
-	// popMsg removes the top screen and refreshes the one revealed.
-	popMsg struct{}
+	// gotoMsg replaces the screen from with s.
+	gotoMsg struct{ from, s screen }
+	// pushMsg shows s above from, the top screen.
+	pushMsg struct{ from, s screen }
+	// popMsg removes from, the top screen, and refreshes the one revealed.
+	popMsg struct{ from screen }
 	// homeMsg returns to the packages view, reloading it, and flashes text.
 	homeMsg struct{ text string }
 	// flashMsg shows a one-line notice in the status bar until the next key.
@@ -107,14 +117,14 @@ type (
 	launchMsg struct{ req LaunchRequest }
 )
 
-// goTo returns a command that replaces the top screen.
-func goTo(s screen) tea.Cmd { return func() tea.Msg { return gotoMsg{s} } }
+// goTo returns a command that replaces the screen from with s.
+func goTo(from, s screen) tea.Cmd { return func() tea.Msg { return gotoMsg{from, s} } }
 
-// push returns a command that shows a screen above the current one.
-func push(s screen) tea.Cmd { return func() tea.Msg { return pushMsg{s} } }
+// push returns a command that shows s above from.
+func push(from, s screen) tea.Cmd { return func() tea.Msg { return pushMsg{from, s} } }
 
-// pop returns a command that closes the top screen.
-func pop() tea.Cmd { return func() tea.Msg { return popMsg{} } }
+// pop returns a command that closes from.
+func pop(from screen) tea.Cmd { return func() tea.Msg { return popMsg{from} } }
 
 // goHome returns a command that goes back to the packages view.
 func goHome(text string) tea.Cmd { return func() tea.Msg { return homeMsg{text} } }
@@ -153,6 +163,17 @@ func NewApp(c *core.Core, message string) *App {
 // top returns the screen on top of the stack.
 func (a *App) top() screen { return a.stack[len(a.stack)-1] }
 
+// indexOf returns the position of s in the stack, or -1 when it is no longer
+// there.
+func (a *App) indexOf(s screen) int {
+	for i, t := range a.stack {
+		if t == s {
+			return i
+		}
+	}
+	return -1
+}
+
 // Init implements tea.Model.
 func (a *App) Init() tea.Cmd { return a.top().Init() }
 
@@ -190,13 +211,31 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.notice, a.noticeEr = m.text, m.err
 		return a, nil
 	case gotoMsg:
-		a.stack[len(a.stack)-1] = m.s
+		i := a.indexOf(m.from)
+		if i < 0 {
+			return a, nil
+		}
+		a.stack[i] = m.s
+		if i < len(a.stack)-1 {
+			return a, m.s.Init()
+		}
 		return a, tea.Batch(m.s.Init(), a.refreshBeneath(m.s))
 	case pushMsg:
+		if m.from != a.top() {
+			return a, nil
+		}
 		a.stack = append(a.stack, m.s)
 		return a, m.s.Init()
 	case popMsg:
+		if m.from != a.top() {
+			return a, nil
+		}
 		return a, a.pop()
+	case actionMsg:
+		if m.owner != a.top() {
+			return a, nil
+		}
+		return a, a.updateTop(m)
 	case homeMsg:
 		a.notice, a.noticeEr = m.text, false
 		return a, a.home()
@@ -308,13 +347,13 @@ func (a *App) globalKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	}
 	switch k.String() {
 	case ":", "ctrl+p":
-		return push(newPalette(a.paletteEntries())), true
+		return push(a.top(), newPalette(a.paletteEntries())), true
 	case "/":
 		if f, ok := a.top().(filterable); ok {
 			return a.bar.open(f.filterValue()), true
 		}
 	case "?":
-		return push(newHelp(a.top().Hints())), true
+		return push(a.top(), newHelp(a.top().Hints())), true
 	case "ctrl+r":
 		return a.updateTop(refreshMsg{}), true
 	case "q":

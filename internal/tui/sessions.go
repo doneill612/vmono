@@ -299,14 +299,14 @@ func (m *sessionsModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			m.setFilter("")
 			return m, nil
 		}
-		return m, pop()
+		return m, pop(m)
 	case "n":
-		return m, push(newSessionPrompt(m.e, m.name))
+		return m, push(m, newSessionPrompt(m.e, m.name))
 	case "e":
 		if m.pkg == nil {
 			return m, nil
 		}
-		return m, push(newEditor(m.e, m.pkg))
+		return m, push(m, newEditor(m.e, m.pkg))
 	case "f":
 		return m, m.fetch()
 	}
@@ -315,7 +315,7 @@ func (m *sessionsModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		return m, nil
 	}
 	if k.String() == "enter" {
-		return m, push(newActionMenu(m, "session", sel.Name, m.name, sessionActions))
+		return m, push(m, newActionMenu(m, "session", sel.Name, m.name, sessionActions))
 	}
 	if a, ok := findAction(sessionActions, k.String()); ok {
 		return m.act(a.id, sel)
@@ -338,13 +338,13 @@ func (m *sessionsModel) act(id string, sel core.SessionSummary) (screen, tea.Cmd
 	case "fetch":
 		return m, m.fetch()
 	case "launch-with":
-		return m, push(newLaunchPicker(m.e, m.name, sel.Name, "Launch with"))
+		return m, push(m, newLaunchPicker(m.e, m.name, sel.Name, "Launch with"))
 	case "members":
-		return m, push(newMembers(m.e, m.name, sel.Name))
+		return m, push(m, newMembers(m.e, m.name, sel.Name))
 	case "describe":
-		return m, push(newDescribe(m.e, m.name, sel.Name, ""))
+		return m, push(m, newDescribe(m.e, m.name, sel.Name, ""))
 	case "sync":
-		return m, push(newProgress(m.e, syncSessionOp(m.e.core, m.name, sel.Name)))
+		return m, push(m, newProgress(m.e, syncSessionOp(m.e.core, m.name, sel.Name)))
 	case "copy":
 		if err := clipboard.WriteAll(sel.Path); err != nil {
 			return m, flashErr("could not copy: " + err.Error() + " — " + sel.Path)
@@ -357,11 +357,11 @@ func (m *sessionsModel) act(id string, sel core.SessionSummary) (screen, tea.Cmd
 		if err != nil {
 			return m, flashErr(err.Error())
 		}
-		return m, push(ed)
+		return m, push(m, ed)
 	case "finish":
 		return m, m.startFinish(sel.Name)
 	case "push":
-		return m, startPush(m.e, m.name, sel.Name, nil, func() screen { return newSessions(m.e, m.name) })
+		return m, startPush(m, m.e, m.name, sel.Name, nil, func() screen { return newSessions(m.e, m.name) })
 	}
 	return m, nil
 }
@@ -375,7 +375,7 @@ func (m *sessionsModel) startFinish(session string) tea.Cmd {
 	if err != nil {
 		return flashErr(err.Error())
 	}
-	return push(newFinishConfirm(m.e, m.name, session, c.PlanFinish(s, core.FinishOptions{})))
+	return push(m, newFinishConfirm(m.e, m.name, session, c.PlanFinish(s, core.FinishOptions{})))
 }
 
 // syncSessionOp builds the sync operation for one session. Like create it
@@ -405,7 +405,7 @@ func (m *sessionsModel) startDelete(session string) tea.Cmd {
 		return flashErr(err.Error())
 	}
 	rows := c.SafetyCheck(s)
-	return push(newConfirm(m.e, "Delete session", session, rows, true,
+	return push(m, newConfirm(m.e, "Delete session", session, rows, true,
 		func(force, deleteBranches bool) screen {
 			return newProgress(m.e, operation{
 				title: "Delete " + m.name + "/" + session,

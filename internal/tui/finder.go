@@ -261,7 +261,7 @@ func (m *finderModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 func (m *finderModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	switch k.String() {
 	case "esc":
-		return m, pop()
+		return m, pop(m)
 	case "up", "ctrl+p":
 		if m.cursor > 0 {
 			m.cursor--

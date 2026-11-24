@@ -44,7 +44,7 @@ func (h *helpModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	if k, ok := msg.(tea.KeyMsg); ok {
 		switch k.String() {
 		case "esc", "q", "?", "enter":
-			return h, pop()
+			return h, pop(h)
 		}
 	}
 	return h, nil

@@ -114,7 +114,7 @@ func (m *setupModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		switch k.String() {
 		case "esc":
 			if m.reconfig {
-				return m, pop()
+				return m, pop(m)
 			}
 			return m, tea.Quit
 		case "shift+tab", "up", "down":
