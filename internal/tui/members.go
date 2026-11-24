@@ -277,11 +277,11 @@ func (m *membersModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			m.setFilter("")
 			return m, nil
 		}
-		return m, pop()
+		return m, pop(m)
 	}
 	if k.String() == "enter" {
 		if ms, ok := m.selectedMember(); ok {
-			return m, push(newActionMenu(m, "member", ms.Name, m.id(), memberActions))
+			return m, push(m, newActionMenu(m, "member", ms.Name, m.id(), memberActions))
 		}
 		return m, nil
 	}
@@ -319,18 +319,18 @@ func (m *membersModel) act(id, member string) (screen, tea.Cmd) {
 	case "launch":
 		return m, func() tea.Msg { return launchMsg{LaunchRequest{Package: m.name, Session: m.session}} }
 	case "launch-with":
-		return m, push(newLaunchPicker(m.e, m.name, m.session, "Launch with"))
+		return m, push(m, newLaunchPicker(m.e, m.name, m.session, "Launch with"))
 	case "sync":
-		return m, push(newProgress(m.e, syncSessionOp(m.e.core, m.name, m.session)))
+		return m, push(m, newProgress(m.e, syncSessionOp(m.e.core, m.name, m.session)))
 	case "fetch":
 		return m, tea.Batch(flash("fetching "+m.name+"…"), fetchAll(m.e.core, m.name))
 	case "edit":
 		if m.sess == nil {
 			return m, nil
 		}
-		return m, push(newEditor(m.e, m.sess.Pkg))
+		return m, push(m, newEditor(m.e, m.sess.Pkg))
 	case "push-all":
-		return m, startPush(m.e, m.name, m.session, nil, m.reopen)
+		return m, startPush(m, m.e, m.name, m.session, nil, m.reopen)
 	case "push":
 		ms, ok := m.memberByName(member)
 		switch {
@@ -339,10 +339,10 @@ func (m *membersModel) act(id, member string) (screen, tea.Cmd) {
 		case ms.Mode == manifest.ModeReference:
 			return m, flashErr(member + " is a reference member, which has no work of its own to push")
 		}
-		return m, startPush(m.e, m.name, m.session, []string{member}, m.reopen)
+		return m, startPush(m, m.e, m.name, m.session, []string{member}, m.reopen)
 	case "describe":
 		if member != "" {
-			return m, push(newDescribe(m.e, m.name, m.session, member))
+			return m, push(m, newDescribe(m.e, m.name, m.session, member))
 		}
 	case "copy":
 		if member == "" || m.sess == nil {

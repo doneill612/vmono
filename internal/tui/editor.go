@@ -220,7 +220,7 @@ func (m *editorModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	case "ctrl+s":
 		return m.save()
 	case "esc":
-		return m, pop()
+		return m, pop(m)
 	case "tab":
 		m.focus = (m.focus + 1) % fieldCount
 		return m, m.applyFocus()
@@ -319,7 +319,7 @@ func (m *editorModel) openPicker() tea.Cmd {
 		initial[src] = mem.Mode
 		extra = append(extra, discover.Repo{Name: filepath.Base(src), Path: src, Remote: mem.Remote})
 	}
-	return goTo(newPicker(m.e, initial, extra,
+	return goTo(m, newPicker(m.e, initial, extra,
 		func(sel []pickSel) screen { m.applySelection(sel); return m },
 		func() screen { return m }))
 }
@@ -460,7 +460,7 @@ func (m *editorModel) saveCreate() (screen, tea.Cmd) {
 		Purpose: strings.TrimSpace(m.purpose.Value()), Context: strings.TrimSpace(m.context.Value()),
 		Members: append([]manifest.Member(nil), m.members...),
 	}
-	return m, goTo(newProgress(m.e, operation{
+	return m, goTo(m, newProgress(m.e, operation{
 		title: "Create " + name,
 		run: func(force, reuse bool) error {
 			_, err := c.CreatePackage(nm)
@@ -504,11 +504,11 @@ func (m *editorModel) saveEdit() (screen, tea.Cmd) {
 		})
 	}
 	if len(ep.Unsafe) > 0 {
-		return m, goTo(newConfirm(m.e, "Discard unsaved work?", name, ep.Unsafe, false,
+		return m, goTo(m, newConfirm(m.e, "Discard unsaved work?", name, ep.Unsafe, false,
 			func(force, _ bool) screen { return apply(force) },
 			func() screen { return m }))
 	}
-	return m, goTo(apply(false))
+	return m, goTo(m, apply(false))
 }
 
 // memberRows is how many member lines the editor shows: all of them up to

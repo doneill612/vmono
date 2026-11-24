@@ -67,9 +67,9 @@ func (m *confirmModel) allClean() bool {
 // to the one underneath when onCancel is nil.
 func (m *confirmModel) cancel() tea.Cmd {
 	if m.onCancel == nil {
-		return pop()
+		return pop(m)
 	}
-	return goTo(m.onCancel())
+	return goTo(m, m.onCancel())
 }
 
 // modal implements modalScreen.
@@ -110,7 +110,7 @@ func (m *confirmModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	if clean {
 		switch k.String() {
 		case "y":
-			return m, goTo(m.onConfirm(false, m.deleteBranches))
+			return m, goTo(m, m.onConfirm(false, m.deleteBranches))
 		case "n":
 			return m, m.cancel()
 		case "b":
@@ -122,7 +122,7 @@ func (m *confirmModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	}
 	if k.String() == "enter" {
 		if m.typed.Value() == m.name {
-			return m, goTo(m.onConfirm(true, m.deleteBranches))
+			return m, goTo(m, m.onConfirm(true, m.deleteBranches))
 		}
 		m.msg = "type the " + m.noun + " name exactly to confirm"
 		return m, nil

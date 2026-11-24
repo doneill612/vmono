@@ -324,13 +324,13 @@ func (m *packagesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		case m.filter != "":
 			m.setFilter("")
 		case m.scopeRepo != "":
-			return m, pop()
+			return m, pop(m)
 		}
 		return m, nil
 	case "n":
-		return m, push(newEditor(m.e, nil))
+		return m, push(m, newEditor(m.e, nil))
 	case "c":
-		return m, push(newReconfigure(m.e))
+		return m, push(m, newReconfigure(m.e))
 	}
 	if !has {
 		return m, nil
@@ -345,7 +345,7 @@ func (m *packagesModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		return m, nil
 	}
 	if k.String() == "enter" {
-		return m, push(newActionMenu(m, "package", sel.Name, "", packageActions))
+		return m, push(m, newActionMenu(m, "package", sel.Name, "", packageActions))
 	}
 	if a, ok := findAction(packageActions, k.String()); ok {
 		return m.act(a.id, sel)
@@ -365,15 +365,15 @@ func findKey(items []action, key string) bool {
 func (m *packagesModel) act(id string, sel core.Summary) (screen, tea.Cmd) {
 	switch id {
 	case "sessions":
-		return m, push(newSessions(m.e, sel.Name))
+		return m, push(m, newSessions(m.e, sel.Name))
 	case "launch":
 		return m, m.openLatest(sel.Name, false)
 	case "launch-with":
 		return m, m.openLatest(sel.Name, true)
 	case "new-session":
-		return m, push(newSessionPrompt(m.e, sel.Name))
+		return m, push(m, newSessionPrompt(m.e, sel.Name))
 	case "describe":
-		return m, push(newDescribe(m.e, sel.Name, "", ""))
+		return m, push(m, newDescribe(m.e, sel.Name, "", ""))
 	case "copy":
 		if err := clipboard.WriteAll(sel.Path); err != nil {
 			return m, flashErr("could not copy: " + err.Error() + " — " + sel.Path)
@@ -386,9 +386,9 @@ func (m *packagesModel) act(id string, sel core.Summary) (screen, tea.Cmd) {
 		if err != nil {
 			return m, flashErr(err.Error())
 		}
-		return m, push(newEditor(m.e, p))
+		return m, push(m, newEditor(m.e, p))
 	case "sync":
-		return m, push(newProgress(m.e, syncOp(m.e.core, sel.Name)))
+		return m, push(m, newProgress(m.e, syncOp(m.e.core, sel.Name)))
 	case "delete":
 		return m, m.startDelete(sel.Name)
 	}
@@ -410,11 +410,11 @@ func (m *packagesModel) openLatest(name string, pick bool) tea.Cmd {
 		return flashErr(err.Error())
 	}
 	if len(rows) == 0 {
-		return tea.Batch(flash(name+" has no sessions yet; start one"), push(newSessionPrompt(m.e, name)))
+		return tea.Batch(flash(name+" has no sessions yet; start one"), push(m, newSessionPrompt(m.e, name)))
 	}
 	session := rows[0].Name
 	if pick {
-		return push(newLaunchPicker(m.e, name, session, "Launch with"))
+		return push(m, newLaunchPicker(m.e, name, session, "Launch with"))
 	}
 	return func() tea.Msg { return launchMsg{LaunchRequest{Package: name, Session: session}} }
 }
@@ -448,7 +448,7 @@ func (m *packagesModel) startDelete(name string) tea.Cmd {
 	if err != nil {
 		return flashErr(err.Error())
 	}
-	return push(newConfirm(m.e, "Delete package", name, rows, true,
+	return push(m, newConfirm(m.e, "Delete package", name, rows, true,
 		func(force, deleteBranches bool) screen {
 			return newProgress(m.e, operation{
 				title:   "Delete " + name,

@@ -68,7 +68,7 @@ func (p *harnessPicker) Update(msg tea.Msg) (screen, tea.Cmd) {
 	}
 	switch k.String() {
 	case "esc", "q", "n":
-		return p, pop()
+		return p, pop(p)
 	case "up", "k":
 		if p.cursor > 0 {
 			p.cursor--

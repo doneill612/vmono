@@ -80,13 +80,13 @@ func newIntoEditorFor(e *env, pkg, session string) (*intoEditor, error) {
 // replaces it with the screen back builds.
 func (m *intoEditor) leave(extra ...tea.Cmd) (screen, tea.Cmd) {
 	if m.back == nil {
-		return m, tea.Batch(append([]tea.Cmd{pop()}, extra...)...)
+		return m, tea.Batch(append([]tea.Cmd{pop(m)}, extra...)...)
 	}
 	prev, err := m.back()
 	if err != nil {
 		return m, flashErr(err.Error())
 	}
-	return m, tea.Batch(append([]tea.Cmd{goTo(prev)}, extra...)...)
+	return m, tea.Batch(append([]tea.Cmd{goTo(m, prev)}, extra...)...)
 }
 
 // modal implements modalScreen.

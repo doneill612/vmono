@@ -57,6 +57,9 @@ type palette struct {
 	cursor int
 	offset int
 	rows   int
+	// closing is set once an entry is chosen, so keys queued behind the
+	// choosing Enter cannot run a second entry before the pop is applied.
+	closing bool
 }
 
 // newPalette builds the palette over a list of entries.
@@ -109,12 +112,12 @@ func (p *palette) refilter() {
 // Update implements screen.
 func (p *palette) Update(msg tea.Msg) (screen, tea.Cmd) {
 	k, ok := msg.(tea.KeyMsg)
-	if !ok {
+	if !ok || p.closing {
 		return p, nil
 	}
 	switch k.String() {
 	case "esc", "ctrl+p":
-		return p, pop()
+		return p, pop(p)
 	case "up", "ctrl+k":
 		if p.cursor > 0 {
 			p.cursor--
@@ -126,7 +129,8 @@ func (p *palette) Update(msg tea.Msg) (screen, tea.Cmd) {
 	case "enter":
 		if p.cursor < len(p.shown) {
 			e := p.shown[p.cursor]
-			return p, tea.Sequence(pop(), func() tea.Msg { return e.msg })
+			p.closing = true
+			return p, tea.Sequence(pop(p), func() tea.Msg { return e.msg })
 		}
 	default:
 		var cmd tea.Cmd
@@ -215,7 +219,7 @@ func (a *App) paletteEntries() []paletteEntry {
 	}
 	return append(out,
 		paletteEntry{label: "Reload", group: "view", key: "ctrl+r", msg: reloadMsg{}},
-		paletteEntry{label: "Keyboard shortcuts", group: "view", key: "?", msg: pushMsg{newHelp(top.Hints())}},
+		paletteEntry{label: "Keyboard shortcuts", group: "view", key: "?", msg: pushMsg{from: top, s: newHelp(top.Hints())}},
 		paletteEntry{label: "Quit", group: "app", key: "q", msg: tea.QuitMsg{}},
 	)
 }

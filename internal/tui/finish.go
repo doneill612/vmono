@@ -71,7 +71,7 @@ func (m *finishConfirm) Update(msg tea.Msg) (screen, tea.Cmd) {
 	}
 	switch k.String() {
 	case "esc", "n":
-		return m, pop()
+		return m, pop(m)
 	case "l":
 		if m.blocked() {
 			req := LaunchRequest{Package: m.pkg, Session: m.session}
@@ -79,7 +79,7 @@ func (m *finishConfirm) Update(msg tea.Msg) (screen, tea.Cmd) {
 		}
 	case "i":
 		if len(m.plan.Members) > 0 {
-			return m, goTo(newIntoEditorFromPlan(m.e, m.pkg, m.session, m.plan))
+			return m, goTo(m, newIntoEditorFromPlan(m.e, m.pkg, m.session, m.plan))
 		}
 	case "c":
 		if !m.blocked() {
@@ -87,7 +87,7 @@ func (m *finishConfirm) Update(msg tea.Msg) (screen, tea.Cmd) {
 		}
 	case "y":
 		if !m.blocked() {
-			return m, goTo(m.run())
+			return m, goTo(m, m.run())
 		}
 	}
 	return m, nil

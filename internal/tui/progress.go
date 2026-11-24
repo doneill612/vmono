@@ -218,7 +218,7 @@ func (m *progressModel) finish(err error) (screen, tea.Cmd) {
 			return m, goHome(m.op.title + " done")
 		}
 		if m.op.pkg != "" {
-			return m, goTo(newLaunchPicker(m.e, m.op.pkg, m.op.session, "Launch now?"))
+			return m, goTo(m, newLaunchPicker(m.e, m.op.pkg, m.op.session, "Launch now?"))
 		}
 	case errors.As(err, &be) && !m.op.reuse:
 		m.state, m.fail = progAskReuse, err
@@ -254,7 +254,7 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		switch k.String() {
 		case "enter", "esc", "q":
 			if m.op.done != nil {
-				return m, goTo(m.op.done())
+				return m, goTo(m, m.op.done())
 			}
 			return m, goHome(m.op.title + " done")
 		}
@@ -265,7 +265,7 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 // leave returns to the screen the operation came from.
 func (m *progressModel) leave() (screen, tea.Cmd) {
 	if m.op.back != nil {
-		return m, goTo(m.op.back())
+		return m, goTo(m, m.op.back())
 	}
 	return m, goHome("")
 }
