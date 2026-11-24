@@ -30,6 +30,17 @@ type Launch struct {
 	Args []string
 	// Env is the complete environment for the process.
 	Env []string
+	// Package and Session name the session being launched. A launcher that
+	// starts the harness somewhere other than the current terminal, such as
+	// a tmux session, uses them to name and later find that place.
+	Package string
+	Session string
+	// Overrides are the variables vmono sets on top of the inherited
+	// environment: the VMONO_* variables and the harness's own env. Env
+	// already contains them; they are kept apart for launchers that hand the
+	// process a fresh environment of their own, such as tmux, which starts
+	// it from its server's environment and only adds what it is told.
+	Overrides map[string]string
 }
 
 // ExitError carries a child harness's exit status so vmono can exit with
@@ -82,18 +93,22 @@ func Prepare(c *core.Core, s *core.Session, harnessFlag string, extraArgs []stri
 
 	args := append(append([]string(nil), h.Args...), extraArgs...)
 	return &Launch{
-		Name:    name,
-		Harness: h,
-		Dir:     s.Dir,
-		Path:    path,
-		Args:    args,
-		Env:     buildEnv(os.Environ(), s, name, h),
+		Name:      name,
+		Harness:   h,
+		Dir:       s.Dir,
+		Path:      path,
+		Args:      args,
+		Env:       buildEnv(os.Environ(), s, name, h),
+		Package:   s.Pkg.Name,
+		Session:   s.Name,
+		Overrides: envOverrides(s, name, h),
 	}, nil
 }
 
-// buildEnv layers vmono's variables and the harness's own env over base.
-// Later entries win, and duplicates of overridden keys are dropped.
-func buildEnv(base []string, s *core.Session, name string, h config.Harness) []string {
+// envOverrides returns the variables vmono sets for a harness: the session's
+// identity, the author stamped on notes it writes, then the harness's own
+// env from config, which wins over vmono's on a clash.
+func envOverrides(s *core.Session, name string, h config.Harness) map[string]string {
 	overrides := map[string]string{
 		"VMONO_PACKAGE": s.Pkg.Name,
 		"VMONO_SESSION": s.Name,
@@ -103,6 +118,13 @@ func buildEnv(base []string, s *core.Session, name string, h config.Harness) []s
 	for k, v := range h.Env {
 		overrides[k] = v
 	}
+	return overrides
+}
+
+// buildEnv layers vmono's variables and the harness's own env over base.
+// Later entries win, and duplicates of overridden keys are dropped.
+func buildEnv(base []string, s *core.Session, name string, h config.Harness) []string {
+	overrides := envOverrides(s, name, h)
 	out := make([]string, 0, len(base)+len(overrides))
 	for _, kv := range base {
 		key, _, _ := strings.Cut(kv, "=")
