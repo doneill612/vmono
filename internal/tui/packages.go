@@ -69,14 +69,18 @@ type packagesModel struct {
 
 // newPackages builds the unscoped packages view.
 func newPackages(e *env) *packagesModel {
-	tb := newTable([]column{
+	cols := []column{
 		{title: "name", flex: true},
 		{title: "members"},
 		{title: "sessions"},
 		{title: "harness"},
 		{title: "state"},
 		{title: "opened"},
-	})
+	}
+	if e.agents != nil {
+		cols = append(cols, column{title: "agents"})
+	}
+	tb := newTable(cols)
 	m := &packagesModel{e: e, tb: tb, spin: newSpinner()}
 	m.fill()
 	return m
@@ -175,7 +179,11 @@ func (m *packagesModel) fill() {
 		if m.scopeRepo != "" && !m.uses(s) {
 			continue
 		}
-		rows = append(rows, packageRow(s))
+		r := packageRow(s)
+		if m.e.agents != nil {
+			r.cells = append(r.cells, agentsCell(m.e.sessionStates(s.Name)))
+		}
+		rows = append(rows, r)
 	}
 	switch {
 	case !m.loaded:
@@ -282,6 +290,9 @@ func (m *packagesModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		return m, flashErr("package " + t.subject + " no longer exists")
 	case packageRemovedMsg:
 		m.drop(t.name)
+		return m, nil
+	case agentStateMsg:
+		m.fill()
 		return m, nil
 	case refreshMsg:
 		return m, m.loadPackages()

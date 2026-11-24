@@ -689,9 +689,15 @@ func StatusOf(path string) (Status, error) {
 // local branches in landedOn are not counted either: they have landed in the
 // source repo, which outlives the worktree. Names of branches that do not
 // exist are ignored.
+//
+// A detached HEAD, which is how reference members are checked out, has no
+// branch of its own to publish. Removing its worktree only loses commits that
+// nothing else holds, so commits on any branch or tag are not counted.
 func Unpushed(path string, landedOn ...string) (int, error) {
 	args := []string{"rev-list", "--count", "HEAD", "--not"}
-	if _, err := run(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil {
+	if _, err := run(path, "symbolic-ref", "--quiet", "HEAD"); err != nil {
+		args = append(args, "--remotes", "--branches", "--tags")
+	} else if _, err := run(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil {
 		args = append(args, "@{upstream}")
 	} else {
 		args = append(args, "--remotes")

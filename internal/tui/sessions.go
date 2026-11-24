@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -9,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/doneill612/vmono/internal/core"
+	"github.com/doneill612/vmono/internal/herdr"
 	"github.com/doneill612/vmono/internal/paths"
 )
 
@@ -55,16 +57,23 @@ type sessionsModel struct {
 	filter string
 	pv     previewPane
 	spin   spinner.Model
+	// updating is the session an update was asked for while its agent was
+	// working; asking again goes ahead.
+	updating string
 }
 
 // newSessions builds the sessions view of a package.
 func newSessions(e *env, name string) *sessionsModel {
-	m := &sessionsModel{e: e, name: name, spin: newSpinner(), tb: newTable([]column{
+	cols := []column{
 		{title: "session", max: 28},
 		{title: "branch", flex: true},
 		{title: "state"},
 		{title: "opened"},
-	})}
+	}
+	if e.agents != nil {
+		cols = append(cols, column{title: "agent"})
+	}
+	m := &sessionsModel{e: e, name: name, spin: newSpinner(), tb: newTable(cols)}
 	m.fill()
 	return m
 }
@@ -122,7 +131,18 @@ func (m *sessionsModel) filterValue() string { return m.filter }
 func (m *sessionsModel) previewSync() tea.Cmd { return m.pv.sync(m, m.tb.selectedID()) }
 
 // previewView implements previewer.
-func (m *sessionsModel) previewView(w, h int) string { return m.pv.view(m.tb.selectedID(), w, h) }
+//
+// The agent's state goes in as the pane is drawn, under the heading: it changes
+// far more often than the rest, which is loaded once.
+func (m *sessionsModel) previewView(w, h int) string {
+	id := m.tb.selectedID()
+	state := m.e.sessionStates(m.name)[id]
+	if state == "" {
+		return m.pv.view(id, w, h)
+	}
+	head, rest, _ := strings.Cut(m.pv.view(id, w, h-1), "\n")
+	return head + "\n" + strings.TrimRight(previewField("agent", agentGlyphs[state]+" "+state, w), "\n") + "\n" + rest
+}
 
 // loadPreview reads one session's live status, off the UI goroutine, for the
 // preview pane.
@@ -220,8 +240,13 @@ func inProgressFirst(list []core.SessionSummary) []core.SessionSummary {
 // fill rebuilds the rows from the loaded list.
 func (m *sessionsModel) fill() {
 	var rows []row
+	states := m.e.sessionStates(m.name)
 	for _, s := range inProgressFirst(m.list) {
-		rows = append(rows, sessionRow(s))
+		r := sessionRow(s)
+		if m.e.agents != nil {
+			r.cells = append(r.cells, agentCell(states[s.Name]))
+		}
+		rows = append(rows, r)
 	}
 	switch {
 	case m.err != "":
@@ -261,6 +286,9 @@ func (m *sessionsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 			return m, flashErr(m.err)
 		}
 		m.err, m.pkg, m.list = "", t.pkg, t.list
+		m.fill()
+		return m, nil
+	case agentStateMsg:
 		m.fill()
 		return m, nil
 	case refreshMsg:
@@ -347,6 +375,11 @@ func (m *sessionsModel) act(id string, sel core.SessionSummary) (screen, tea.Cmd
 	case "sync":
 		return m, push(m, newProgress(m.e, syncSessionOp(m.e.core, m.name, sel.Name)))
 	case "update":
+		if m.e.sessionStates(m.name)[sel.Name] == herdr.Working && m.updating != sel.Name {
+			m.updating = sel.Name
+			return m, flashErr("an agent is working in " + sel.Name + " and updating rewrites its branch; u again to update anyway")
+		}
+		m.updating = ""
 		return m, push(m, newProgress(m.e, updateOp(m.e.core, m.name, sel.Name)))
 	case "copy":
 		if err := clipboard.WriteAll(sel.Path); err != nil {

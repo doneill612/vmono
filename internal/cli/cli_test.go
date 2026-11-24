@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -1108,5 +1109,33 @@ func TestNoHooksFlag(t *testing.T) {
 	}
 	if _, _, err := run(t, "session", "rm", "demo/work", "--no-hooks"); err != nil {
 		t.Errorf("--no-hooks: %v", err)
+	}
+}
+
+// TestUninstallKeepsALauncherAnotherIntegrationUses covers tmux and herdr
+// sharing the auto launcher.
+func TestUninstallKeepsALauncherAnotherIntegrationUses(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("herdr is not offered on Windows")
+	}
+	testutil.NewEnv(t)
+	t.Setenv("HERDR_CONFIG_PATH", "")
+	for _, args := range [][]string{{"install", "tmux"}, {"install", "herdr"}, {"uninstall", "tmux"}} {
+		if _, _, err := run(t, append([]string{"integration"}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := config.Load()
+	if err != nil || cfg.Launcher != config.LauncherAuto {
+		t.Errorf("launcher = %q, %v", cfg.Launcher, err)
+	}
+	if _, _, err := run(t, "integration", "uninstall", "herdr"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ = config.Load(); cfg.Launcher != config.LauncherDirect {
+		t.Errorf("launcher = %q", cfg.Launcher)
+	}
+	if _, _, err := run(t, "integration", "install", "tmux", "--key", "x"); err == nil {
+		t.Error("--key is only for herdr")
 	}
 }

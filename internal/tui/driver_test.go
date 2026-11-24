@@ -68,7 +68,7 @@ func (d *driver) run(cmd tea.Cmd) {
 	var msg tea.Msg
 	select {
 	case msg = <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(30 * time.Second):
 		return
 	}
 	if strings.HasPrefix(fmt.Sprintf("%T", msg), "cursor.") {
@@ -84,7 +84,7 @@ func (d *driver) run(cmd tea.Cmd) {
 	}
 	switch m := msg.(type) {
 	case nil:
-	case spinner.TickMsg:
+	case spinner.TickMsg, agentTickMsg:
 		// Timer-driven animation; feeding it back would recurse forever.
 	case tea.QuitMsg:
 		d.quit = true

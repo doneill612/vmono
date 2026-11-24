@@ -172,7 +172,9 @@ You rarely need a key. **`enter` opens a menu of everything you can do to the hi
 | repos | palette | Every known repo and how many packages use it; `→` lists those packages |
 | harnesses | palette | Configured harnesses, whether each is on `PATH`, and the default |
 
-`esc` goes back. `:` (or `ctrl+p`) opens the command palette, a fuzzy-filtered list of everything you can do from where you are: go to a view (`repos`, `harnesses`, `settings`, `new package`, `sessions of <package>`), any action on the highlighted row, sort the list by a column, reload, quit. `/` filters the current list as you type. Nothing refreshes by itself: `ctrl+r` reloads the current view, and a view reloads when you come back to it.
+`esc` goes back. `:` (or `ctrl+p`) opens the command palette, a fuzzy-filtered list of everything you can do from where you are: go to a view (`repos`, `harnesses`, `settings`, `new package`, `sessions of <package>`), any action on the highlighted row, sort the list by a column, reload, quit. `/` filters the current list as you type. Nothing refreshes by itself, except agent state below: `ctrl+r` reloads the current view, and a view reloads when you come back to it.
+
+When sessions launch in herdr or tmux, the sessions view has an `agent` column, and the packages view counts them. Under herdr it says what each agent is doing (`▲ blocked`, `● working`, `○ idle`, `✓ done`); under tmux, only that one is `running`. It is read every few seconds while one of those views is open. Updating a session whose agent is working asks for `u` a second time.
 
 The shortcuts, none of which you have to use:
 
@@ -358,7 +360,7 @@ vmono integration install tmux
 tmux source-file ~/.tmux.conf     # or wherever the install says it wired
 ```
 
-Every session gets a tmux session of its own, named `package/session`, with the harness as its only process. Opening a session creates it, or switches to it when it already exists, and never starts a second harness. Inside tmux the current client is switched; outside tmux vmono attaches. When the harness exits, tmux closes the session, as a direct launch returns you to your shell.
+Every session gets a tmux session of its own, named `package/session`, with the harness as its only process. Opening a session creates it, or switches to it when it already exists, and never starts a second harness. Inside tmux the current client is switched; outside tmux vmono attaches. When the harness exits, tmux closes the session, as a direct launch returns you to your shell. Removing the vmono session (`session rm`, `finish --close`, `delete`) closes its tmux session too, unless vmono itself is running in it, in which case it says so and leaves it open.
 
 The install also adds `prefix + V`, which opens the vmono TUI in a popup. Launching a session from it switches the client to that session's tmux session and closes the popup, so the TUI works as a control panel for every running agent.
 
@@ -374,7 +376,22 @@ Switching is the default, but it moves your terminal out of the tmux session you
 
 Sessions are found by a `@vmono_session` tag that vmono sets on the tmux session, not by name, so renaming one in tmux does not lose it. A tmux session name cannot contain `.` or `:`, so those become `_`. Arguments after `--` in `vmono open` only apply when the session is created. tmux 3.0 or newer is needed. Native Windows has no tmux, so `auto` stays direct there.
 
-`launcher` takes `direct` (the default), `auto` (tmux when vmono runs inside tmux, direct otherwise) and `tmux` (always, and an error if tmux is missing). `VMONO_LAUNCHER` overrides it for one command, such as `VMONO_LAUNCHER=direct vmono open pkg/session` to see why a harness exits at once.
+### herdr
+
+```sh
+vmono integration install herdr
+herdr server reload-config
+```
+
+[herdr](https://herdr.dev) is a terminal workspace manager for coding agents. Every session gets a herdr workspace of its own, labeled `package/session` and rooted at the session. Opening a session creates it, or goes to it when it already exists, and never starts a second harness. When the harness exits, its shell stays, and opening the session again starts the harness there. Removing the vmono session closes its workspace, unless vmono is running in it.
+
+The install also binds `prefix + shift + v`, which opens the vmono TUI in a popup, by adding one marked block to herdr's config (`$HERDR_CONFIG_PATH`, else `~/.config/herdr/config.toml`). It refuses a key that config already uses; `--key` picks another. It sets `launcher = "auto"` as the tmux install does. `vmono integration uninstall herdr` removes the block. Keep your own settings above it: a key written after the block would belong to its table.
+
+A launch from inside an agent does not move you; it prints the command that shows the workspace. Set `herdr_focus = false` (or `VMONO_HERDR_FOCUS=false` for one command) for the same on every launch. Sessions are found by a token vmono sets on the workspace, so renaming it does not lose it. After a herdr restart, which drops tokens, they are found by label and directory instead. Checked against herdr 0.9.5; not supported on Windows.
+
+### Launchers
+
+`launcher` takes `direct` (the default), `auto` (herdr or tmux when vmono runs inside one, direct otherwise), and `tmux` or `herdr` (always, and an error if it is missing). `VMONO_LAUNCHER` overrides it for one command, such as `VMONO_LAUNCHER=direct vmono open pkg/session` to see why a harness exits at once.
 
 ## Commands
 
@@ -409,7 +426,7 @@ Every read command takes `--json`. Anything that could discard work refuses unle
 | `vmono doctor [--fix]` | Find drift, migrate packages from before sessions, and rebuild the index |
 | `vmono shell-init zsh\|bash\|fish\|pwsh` | Print a `vcd <pkg>[/session]` function |
 | `vmono integration ls [--json]` | List integrations and whether each is installed |
-| `vmono integration install <name> [--no-launcher]` | Write an integration's files, wire them into the tool, and turn on its launcher. See Integrations |
+| `vmono integration install <name> [--no-launcher] [--key K]` | Write an integration's files, wire them into the tool, and turn on its launcher. See Integrations |
 | `vmono integration uninstall <name>` | Remove what install added |
 | `vmono integration print <name>` | Print an integration's files instead of installing them |
 
@@ -429,8 +446,9 @@ fetch_on_create = true      # fetch source repos before adding worktrees; failur
 default_harness = "claude"
 auto_commit     = true      # commit every package change to the package's own repo
 return_to_tui   = false     # always true on Windows
-launcher        = "direct"  # or "auto" / "tmux": where a session's harness starts (see Integrations)
+launcher        = "direct"  # or "auto" / "tmux" / "herdr": where a session's harness starts (see Integrations)
 tmux_switch     = true      # tmux launcher: switch to the session's tmux session; false only notifies
+herdr_focus     = true      # herdr launcher: focus the session's herdr workspace; false only notifies
 
 [harness.claude]
 command = "claude"

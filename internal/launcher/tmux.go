@@ -127,6 +127,36 @@ func (t Tmux) Launch(l *harness.Launch, opts Opts) (Result, error) {
 	return HandedOff, tmuxAttach(id, opts.Replace)
 }
 
+// Find implements Closer. The tmux session must carry the tag and have been
+// started at dir, so one that belongs to a package of the same name under
+// another package root is left alone.
+func (Tmux) Find(tag, dir string) (string, func() error, error) {
+	out, err := tmuxRun("list-sessions", "-F", "#{session_id}\t#{"+TagOption+"}\t#{session_path}")
+	if err != nil {
+		return "", nil, nil // no server, so nothing is running
+	}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.SplitN(strings.TrimRight(line, "\r"), "\t", 3)
+		if len(f) != 3 || f[1] != tag || !samePath(f[2], dir) {
+			continue
+		}
+		if os.Getenv("TMUX") != "" {
+			here, err := tmuxRun("display-message", "-p", "#{session_id}")
+			if err != nil {
+				return "", nil, err
+			}
+			if strings.TrimSpace(here) == f[0] {
+				return "", nil, errInside
+			}
+		}
+		return fmt.Sprintf("tmux session %q", TmuxSessionName(tag)), func() error {
+			_, err := tmuxRun("kill-session", "-t", f[0])
+			return err
+		}, nil
+	}
+	return "", nil, nil
+}
+
 // notifyTmux tells the user which tmux session the harness runs in when
 // they were not taken there. Inside tmux it also shows the message in the
 // client's status line, best effort: a failure to show it is not a failure

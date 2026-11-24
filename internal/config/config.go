@@ -50,6 +50,7 @@ type Config struct {
 	ReturnToTUI    bool               `toml:"return_to_tui"`
 	Launcher       string             `toml:"launcher"`
 	TmuxSwitch     bool               `toml:"tmux_switch"`
+	HerdrFocus     bool               `toml:"herdr_focus"`
 	Harness        map[string]Harness `toml:"harness"`
 	// Hooks are the commands run at points in every session's life, by name.
 	Hooks map[string]Hook `toml:"hooks,omitempty"`
@@ -144,13 +145,15 @@ func (h Hook) validate() error {
 // LauncherDirect runs it in the terminal vmono was started from, replacing
 // vmono on macOS and Linux. LauncherTmux gives every session its own tmux
 // session, named after it, and switches to it, so several sessions run side
-// by side and the TUI stays a control panel. LauncherAuto picks tmux when
-// vmono itself runs inside tmux ($TMUX is set) and direct otherwise, which is
-// what `vmono integration install tmux` sets so a terminal outside tmux keeps
-// working as before.
+// by side and the TUI stays a control panel. LauncherHerdr does the same with
+// herdr workspaces. LauncherAuto picks herdr or tmux when vmono itself runs
+// inside one ($HERDR_ENV or $TMUX is set) and direct otherwise, which is what
+// `vmono integration install` sets so a terminal outside them keeps working as
+// before.
 const (
 	LauncherDirect = "direct"
 	LauncherTmux   = "tmux"
+	LauncherHerdr  = "herdr"
 	LauncherAuto   = "auto"
 )
 
@@ -158,7 +161,7 @@ const (
 // means LauncherDirect.
 //
 // Launchers lists every valid launcher value, in the order they are offered.
-func Launchers() []string { return []string{LauncherDirect, LauncherAuto, LauncherTmux} }
+func Launchers() []string { return []string{LauncherDirect, LauncherAuto, LauncherTmux, LauncherHerdr} }
 
 // DefaultHarnesses returns the built-in harness definitions used when the
 // config file defines none.
@@ -183,6 +186,7 @@ func Defaults() Config {
 		ReturnToTUI:    runtime.GOOS == "windows",
 		Launcher:       LauncherDirect,
 		TmuxSwitch:     true,
+		HerdrFocus:     true,
 		Harness:        DefaultHarnesses(),
 	}
 }
@@ -275,6 +279,9 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 	if present["tmux_switch"] {
 		dst.TmuxSwitch = src.TmuxSwitch
 	}
+	if present["herdr_focus"] {
+		dst.HerdrFocus = src.HerdrFocus
+	}
 	if present["hooks"] {
 		dst.Hooks = src.Hooks
 	}
@@ -328,6 +335,7 @@ func applyEnv(c *Config) error {
 		"VMONO_AUTO_COMMIT":     &c.AutoCommit,
 		"VMONO_RETURN_TO_TUI":   &c.ReturnToTUI,
 		"VMONO_TMUX_SWITCH":     &c.TmuxSwitch,
+		"VMONO_HERDR_FOCUS":     &c.HerdrFocus,
 		"VMONO_NO_HOOKS":        &c.NoHooks,
 	} {
 		if v := os.Getenv(name); v != "" {
