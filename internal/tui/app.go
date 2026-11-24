@@ -72,6 +72,11 @@ type env struct {
 	pkgNames           []string
 	pkgCount, pkgDirty int
 	pkgKnown           bool
+	// agents looks at what is running; nil when the launcher cannot tell. live
+	// is what it last saw, and agentsFailed is set while it fails.
+	agents       func() (launcher.Live, error)
+	live         launcher.Live
+	agentsFailed bool
 }
 
 // setPackages records the package list for completion and the header.
@@ -189,7 +194,7 @@ func (a *App) indexOf(s screen) int {
 }
 
 // Init implements tea.Model.
-func (a *App) Init() tea.Cmd { return a.top().Init() }
+func (a *App) Init() tea.Cmd { return tea.Batch(a.top().Init(), a.pollAgents()) }
 
 // Update implements tea.Model. After handling a message it lets the list on
 // screen start loading the preview of whatever row the message left
@@ -265,6 +270,10 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.broadcast(m)
 	case navigateMsg:
 		return a, a.navigate(m.build())
+	case agentTickMsg:
+		return a, a.pollAgents()
+	case agentStateMsg:
+		return a, a.receiveAgents(m)
 	case reloadMsg:
 		return a, a.updateTop(refreshMsg{})
 	case sortMsg:
@@ -602,7 +611,11 @@ func Run() error {
 			return err
 		}
 		c.CloseSession = launcher.CloseSession
-		final, err := tea.NewProgram(NewApp(c, message), tea.WithAltScreen()).Run()
+		app := NewApp(c, message)
+		if launcher.HasLive(cfg) {
+			app.watchAgents(launcher.TakeLive)
+		}
+		final, err := tea.NewProgram(app, tea.WithAltScreen()).Run()
 		if err != nil {
 			return err
 		}

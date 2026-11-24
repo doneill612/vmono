@@ -58,10 +58,16 @@ func CloseSession(pkg, session, dir string) []string {
 // where they can be resolved.
 func samePath(a, b string) bool { return resolvePath(a) == resolvePath(b) }
 
-// resolvePath cleans a path and resolves its symlinks when it exists.
+// resolvePath cleans a path and resolves the symlinks in as much of it as
+// exists, so that a directory that is already gone still compares equal.
 func resolvePath(p string) string {
+	p = filepath.Clean(p)
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		return r
 	}
-	return filepath.Clean(p)
+	parent := filepath.Dir(p)
+	if parent == p {
+		return p
+	}
+	return filepath.Join(resolvePath(parent), filepath.Base(p))
 }

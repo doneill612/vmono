@@ -84,7 +84,7 @@ func (d *driver) run(cmd tea.Cmd) {
 	}
 	switch m := msg.(type) {
 	case nil:
-	case spinner.TickMsg:
+	case spinner.TickMsg, agentTickMsg:
 		// Timer-driven animation; feeding it back would recurse forever.
 	case tea.QuitMsg:
 		d.quit = true

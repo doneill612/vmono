@@ -172,7 +172,9 @@ You rarely need a key. **`enter` opens a menu of everything you can do to the hi
 | repos | palette | Every known repo and how many packages use it; `→` lists those packages |
 | harnesses | palette | Configured harnesses, whether each is on `PATH`, and the default |
 
-`esc` goes back. `:` (or `ctrl+p`) opens the command palette, a fuzzy-filtered list of everything you can do from where you are: go to a view (`repos`, `harnesses`, `settings`, `new package`, `sessions of <package>`), any action on the highlighted row, sort the list by a column, reload, quit. `/` filters the current list as you type. Nothing refreshes by itself: `ctrl+r` reloads the current view, and a view reloads when you come back to it.
+`esc` goes back. `:` (or `ctrl+p`) opens the command palette, a fuzzy-filtered list of everything you can do from where you are: go to a view (`repos`, `harnesses`, `settings`, `new package`, `sessions of <package>`), any action on the highlighted row, sort the list by a column, reload, quit. `/` filters the current list as you type. Nothing refreshes by itself, except agent state below: `ctrl+r` reloads the current view, and a view reloads when you come back to it.
+
+When sessions launch in herdr or tmux, the sessions view has an `agent` column, and the packages view counts them. Under herdr it says what each agent is doing (`▲ blocked`, `● working`, `○ idle`, `✓ done`); under tmux, only that one is `running`. It is read every few seconds while one of those views is open. Updating a session whose agent is working asks for `u` a second time.
 
 The shortcuts, none of which you have to use:
 
