@@ -24,6 +24,14 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # The tests run git thousands of times. Git\cmd\git.exe is a launcher
+      # that starts the real git, so put that one first.
+      - name: use git without its launcher (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = 'C:\Program Files\Git\mingw64\bin'
+          if (Test-Path "$dir\git.exe") { Add-Content $env:GITHUB_PATH $dir }
       - name: git version
         run: git --version
       - name: vet
