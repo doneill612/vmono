@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to a pull request cancels the run it replaces. Runs on main each
+# get a group of their own, so they always finish.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test (${{ matrix.os }})
