@@ -260,3 +260,34 @@ func TestIntoByMemberOverridesTheCheckedOutBranch(t *testing.T) {
 		t.Error("a refused session must leave no directory")
 	}
 }
+
+// TestReferenceOnALocalBranchIsSafeToDelete covers a source with no
+// origin/HEAD, whose reference members sit on the branch it has checked out.
+// Its commits stay in the source repo, so removing the worktree loses nothing,
+// but commits made on the detached HEAD itself would be lost.
+func TestReferenceOnALocalBranchIsSafeToDelete(t *testing.T) {
+	c, env := newCore(t)
+	a, ref := env.NewSource(t, "alpha"), env.NewSource(t, "contracts")
+	testutil.Git(t, ref, "remote", "set-head", "origin", "--delete")
+	testutil.Git(t, ref, "checkout", "--quiet", "-b", "feature")
+	commitIn(t, ref, "local.txt")
+	_, s := newWork(t, c, request("refs", []string{a}, []string{ref}))
+	wt := filepath.Join(s.Dir, "_ref", "contracts")
+	if sha(t, wt, "HEAD") != sha(t, ref, "feature") {
+		// git 2.48 and newer set origin/HEAD again on fetch.
+		testutil.Git(t, wt, "checkout", "--quiet", "--detach", "feature")
+	}
+	if bad := unsafeOf(c.SafetyCheck(s)); len(bad) != 0 {
+		t.Errorf("unsafe = %+v", bad)
+	}
+
+	commitIn(t, wt, "stray.txt")
+	bad := unsafeOf(c.SafetyCheck(s))
+	if len(bad) != 1 || bad[0].Name != "contracts" || bad[0].Unpushed != 1 {
+		t.Errorf("a commit only the worktree holds must be unsafe: %+v", bad)
+	}
+	testutil.Git(t, wt, "reset", "--quiet", "--hard", "HEAD~1")
+	if _, err := c.Finish(s, FinishOptions{Close: true}); err != nil {
+		t.Errorf("finish and close: %v", err)
+	}
+}
