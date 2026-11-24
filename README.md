@@ -298,6 +298,35 @@ If your organization blocks skills-directory plugins, or your Claude Code predat
 
 The other harnesses have no plugin strategy yet, so they get the same `SKILL.md` on its own, with the guidance behind the three commands (checking status, proposing a note before writing it, finishing) in it: OpenCode under `.opencode/skills/vmono/`, and Codex and Pi under `.agents/skills/vmono/`, which both scan from the session root. They do not get the live state at the start of a conversation; the skill tells the agent to run `vmono show --json` and `vmono status --json` instead.
 
+## Integrations
+
+By default, opening a session runs the harness in the terminal you are in and replaces vmono, so each agent needs a terminal of its own. An integration changes where the harness starts. The files each one installs live in [`integrations/`](integrations/), are embedded in the binary, and are written out by `vmono integration install`, so they always match the version you run.
+
+### tmux
+
+```sh
+vmono integration install tmux
+tmux source-file ~/.tmux.conf     # or wherever the install says it wired
+```
+
+Every session gets a tmux session of its own, named `package/session`, with the harness as its only process. Opening a session creates it, or switches to it when it already exists, and never starts a second harness. Inside tmux the current client is switched; outside tmux vmono attaches. When the harness exits, tmux closes the session, as a direct launch returns you to your shell.
+
+The install also adds `prefix + V`, which opens the vmono TUI in a popup. Launching a session from it switches the client to that session's tmux session and closes the popup, so the TUI works as a control panel for every running agent.
+
+| Does | Where |
+| --- | --- |
+| Writes the key bindings | `~/.config/vmono/integrations/tmux/vmono.tmux` |
+| Adds one marked line that sources it | The first of `~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf` and `~/.config/tmux/tmux.conf` that exists, or `~/.tmux.conf` if none does. A symlinked file stays a symlink |
+| Sets `launcher = "auto"` | `config.toml`, unless a launcher is already set or you pass `--no-launcher` |
+
+Nothing is reloaded for you. `vmono integration uninstall tmux` removes the marked line and vmono's own directory and puts `launcher` back to `direct`; `vmono integration print tmux` prints the file if you would rather manage it in your dotfiles.
+
+Switching is the default, but it moves your terminal out of the tmux session you were working in (it keeps running; `prefix + L` goes back, `prefix + s` lists them). Set `tmux_switch = false` to stay put: vmono still creates or finds the session, then shows `vmono: claude is running in tmux session "pkg/session" (prefix + s to switch)` in the tmux status line (and on standard error), and a TUI opened from the popup closes. Outside tmux the notice gives the `tmux attach` command instead, and nothing is attached. `VMONO_TMUX_SWITCH=false` does the same for one command.
+
+Sessions are found by a `@vmono_session` tag that vmono sets on the tmux session, not by name, so renaming one in tmux does not lose it. A tmux session name cannot contain `.` or `:`, so those become `_`. Arguments after `--` in `vmono open` only apply when the session is created. tmux 3.0 or newer is needed. Native Windows has no tmux, so `auto` stays direct there.
+
+`launcher` takes `direct` (the default), `auto` (tmux when vmono runs inside tmux, direct otherwise) and `tmux` (always, and an error if tmux is missing). `VMONO_LAUNCHER` overrides it for one command, such as `VMONO_LAUNCHER=direct vmono open pkg/session` to see why a harness exits at once.
+
 ## Commands
 
 Every read command takes `--json`. Anything that could discard work refuses unless given `--force`. Inside a session, the package and session arguments are optional. Commands that act on a session take `pkg/session`; a bare `pkg` works when it has exactly one session, and otherwise the error lists them.
@@ -329,6 +358,10 @@ Every read command takes `--json`. Anything that could discard work refuses unle
 | `vmono inspect [pkg[/session]]` | A session's full resolved model as JSON, including each member's `git_common_dir` |
 | `vmono doctor [--fix]` | Find drift, migrate packages from before sessions, and rebuild the index |
 | `vmono shell-init zsh\|bash\|fish\|pwsh` | Print a `vcd <pkg>[/session]` function |
+| `vmono integration ls [--json]` | List integrations and whether each is installed |
+| `vmono integration install <name> [--no-launcher]` | Write an integration's files, wire them into the tool, and turn on its launcher. See Integrations |
+| `vmono integration uninstall <name>` | Remove what install added |
+| `vmono integration print <name>` | Print an integration's files instead of installing them |
 
 Exit codes: `0` success, `1` error, `2` refused because work would be lost (or, for `session finish`, because a member cannot land yet), `3` not found. When a harness started with `vmono open` exits, vmono exits with its status.
 
@@ -346,6 +379,8 @@ fetch_on_create = true      # fetch source repos before adding worktrees; failur
 default_harness = "claude"
 auto_commit     = true      # commit every package change to the package's own repo
 return_to_tui   = false     # always true on Windows
+launcher        = "direct"  # or "auto" / "tmux": where a session's harness starts (see Integrations)
+tmux_switch     = true      # tmux launcher: switch to the session's tmux session; false only notifies
 
 [harness.claude]
 command = "claude"

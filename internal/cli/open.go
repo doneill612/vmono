@@ -6,14 +6,20 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/doneill612/vmono/internal/harness"
+	"github.com/doneill612/vmono/internal/launcher"
 )
 
-// launchHarness starts a prepared harness. It is a variable so tests can
-// observe a launch without replacing the test process.
+// launchHarness starts a prepared harness in the current terminal, for the
+// direct launcher. It is a variable so tests can observe a launch without
+// replacing the test process.
 var launchHarness = harness.Run
 
 // newOpenCmd builds `vmono open`, which launches a harness at a session
 // root. Everything after `--` is passed through to the harness.
+//
+// Where the harness runs is up to the configured launcher (see package
+// launcher): in this terminal, replacing vmono, by default; or in a tmux
+// session of its own, which `open` creates or switches to.
 func newOpenCmd() *cobra.Command {
 	var harnessName string
 	cmd := &cobra.Command{
@@ -39,7 +45,8 @@ func newOpenCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return launchHarness(l, true)
+			_, err = launcher.Launch(c.Cfg, l, launcher.Opts{Replace: true, RunDirect: launchHarness})
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&harnessName, "harness", "", "harness to launch (default: the package's, then the global default)")

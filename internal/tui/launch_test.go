@@ -8,6 +8,7 @@ import (
 	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/harness"
+	"github.com/doneill612/vmono/internal/launcher"
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
@@ -72,6 +73,59 @@ func TestHandoffReturnsToTUIAsChild(t *testing.T) {
 	stubRun(t, func(*harness.Launch, bool) error { return errors.New("could not start") })
 	if msg, again, _ = handoff(c, &LaunchRequest{Package: "p"}); !again || msg != "could not start" {
 		t.Errorf("start failure should reopen Home with a message: %q, %v", msg, again)
+	}
+}
+
+// fakeLauncher stands in for tmux in handoff tests.
+type fakeLauncher struct {
+	res     launcher.Result
+	err     error
+	replace bool
+	called  bool
+}
+
+func (f *fakeLauncher) Name() string { return "fake" }
+
+func (f *fakeLauncher) Launch(_ *harness.Launch, o launcher.Opts) (launcher.Result, error) {
+	f.called, f.replace = true, o.Replace
+	return f.res, f.err
+}
+
+// stubLauncher makes handoff use ln for the duration of a test.
+func stubLauncher(t *testing.T, ln launcher.Launcher) {
+	t.Helper()
+	orig := resolveLauncher
+	resolveLauncher = func(config.Config) (launcher.Launcher, error) { return ln, nil }
+	t.Cleanup(func() { resolveLauncher = orig })
+}
+
+// TestHandoffWithAMultiplexer pins what the TUI does after a non-direct
+// launch: quit once the client was switched elsewhere, even with
+// return_to_tui; follow return_to_tui after an attach; and show a launch
+// failure on Home rather than exit to a bare shell.
+func TestHandoffWithAMultiplexer(t *testing.T) {
+	stubRun(t, func(*harness.Launch, bool) error { t.Fatal("must not run in place"); return nil })
+
+	c := handoffEnv(t, true)
+	f := &fakeLauncher{res: launcher.Elsewhere}
+	stubLauncher(t, f)
+	if msg, again, err := handoff(c, &LaunchRequest{Package: "p"}); !f.called || again || msg != "" || err != nil {
+		t.Errorf("switched elsewhere should quit: %q %v %v", msg, again, err)
+	}
+
+	f = &fakeLauncher{res: launcher.HandedOff}
+	stubLauncher(t, f)
+	if _, again, _ := handoff(c, &LaunchRequest{Package: "p"}); !again || f.replace {
+		t.Errorf("attach with return_to_tui should run as a child and reopen: again=%v replace=%v", again, f.replace)
+	}
+	c.Cfg.ReturnToTUI = false
+	if _, again, _ := handoff(c, &LaunchRequest{Package: "p"}); again || !f.replace {
+		t.Errorf("attach without return_to_tui should replace vmono: again=%v replace=%v", again, f.replace)
+	}
+
+	stubLauncher(t, &fakeLauncher{err: errors.New("tmux new-session: duplicate session")})
+	if msg, again, err := handoff(c, &LaunchRequest{Package: "p"}); !again || msg == "" || err != nil {
+		t.Errorf("a launch failure should reopen Home with a message: %q %v %v", msg, again, err)
 	}
 }
 
