@@ -28,10 +28,18 @@ type operation struct {
 	// force and reuse are passed to run; reuse is also set when the user
 	// answers the branch-exists prompt.
 	force, reuse bool
-	// back builds the screen to return to when the operation fails.
+	// reveal is set when the progress screen sits directly above the screen
+	// the operation came from, whether it was pushed there or put in place of
+	// a dialog that was. Leaving it, after a failure or once success is
+	// acknowledged, then pops it and reveals that screen reloaded. Building a
+	// new screen for it instead would stack a second copy of that view above
+	// the first, nesting the breadcrumb once more every time.
+	reveal bool
+	// back builds the screen to return to when the operation fails. It is for
+	// an operation that replaced its origin; see reveal otherwise.
 	back func() screen
 	// done builds the screen to show once the user acknowledges success. Nil
-	// means Home.
+	// means Home. Like back, it is for an operation that replaced its origin.
 	done func() screen
 	// fixIn, when set, is the session where a failure can be fixed: the
 	// failed screen offers l to launch the default harness there.
@@ -253,6 +261,9 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	case progDone:
 		switch k.String() {
 		case "enter", "esc", "q":
+			if m.op.reveal {
+				return m, pop(m)
+			}
 			if m.op.done != nil {
 				return m, goTo(m, m.op.done())
 			}
@@ -262,8 +273,13 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	return m, nil
 }
 
-// leave returns to the screen the operation came from.
+// leave returns to the screen the operation came from: it pops itself when
+// that screen is still beneath it, and otherwise goes to the screen back
+// builds, or Home.
 func (m *progressModel) leave() (screen, tea.Cmd) {
+	if m.op.reveal {
+		return m, pop(m)
+	}
 	if m.op.back != nil {
 		return m, goTo(m, m.op.back())
 	}

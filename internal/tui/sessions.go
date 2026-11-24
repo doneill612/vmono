@@ -413,7 +413,7 @@ func (m *sessionsModel) startDelete(session string) tea.Cmd {
 					_, err := c.DeleteSession(s, core.DeleteOptions{Force: force, DeleteBranches: deleteBranches})
 					return err
 				},
-				back: func() screen { return newSessions(m.e, m.name) },
+				reveal: true,
 			})
 		},
 		nil).about("session"))
