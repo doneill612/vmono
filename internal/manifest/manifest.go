@@ -53,7 +53,37 @@ type Member struct {
 	Ref    string   `toml:"ref,omitempty"`
 	Role   string   `toml:"role,omitempty"`
 	Copy   []string `toml:"copy,omitempty"`
-	Hooks  bool     `toml:"hooks,omitempty"`
+	// Hooks merges the member's own Claude Code hooks into the session's. It is
+	// unrelated to Setup and Teardown.
+	Hooks bool `toml:"hooks,omitempty"`
+	// Setup runs in each new worktree of the member, and Teardown before one
+	// is removed.
+	Setup    Commands `toml:"setup,omitempty"`
+	Teardown Commands `toml:"teardown,omitempty"`
+}
+
+// Commands is one or more shell commands, run in order. The manifest may hold
+// a single string or a list of them.
+type Commands []string
+
+// UnmarshalTOML implements toml.Unmarshaler.
+func (c *Commands) UnmarshalTOML(v any) error {
+	list, ok := v.([]any)
+	if !ok {
+		list = []any{v}
+	}
+	*c = nil
+	for _, item := range list {
+		s, ok := item.(string)
+		if !ok {
+			return errors.New("expected a command, or a list of commands")
+		}
+		if strings.TrimSpace(s) == "" {
+			return errors.New("a command is empty")
+		}
+		*c = append(*c, s)
+	}
+	return nil
 }
 
 // Note is one dated entry in the package log.

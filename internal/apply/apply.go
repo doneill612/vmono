@@ -20,6 +20,8 @@ const (
 	StatusFailed  Status = "failed"
 	StatusWarn    Status = "warn"
 	StatusUndone  Status = "undone"
+	// StatusOutput carries one line printed by a command the step runs.
+	StatusOutput Status = "output"
 )
 
 // Event reports progress on one step of one member. Member is empty for
@@ -39,8 +41,11 @@ type Step struct {
 	Member string
 	Name   string
 	// Run does the work. It may call warn to report a non-fatal problem.
-	Run  func(warn func(msg string)) error
-	Undo func() error
+	Run func(warn func(msg string)) error
+	// RunOut is used instead of Run when set, by steps that run a command. It
+	// may also call out with each line the command prints.
+	RunOut func(warn, out func(msg string)) error
+	Undo   func() error
 }
 
 // Runner executes steps. Events may be nil. The runner never closes the
@@ -93,7 +98,15 @@ func (r *Runner) Run(steps []Step) error {
 		warn := func(msg string) {
 			r.emit(Event{Member: s.Member, Step: s.Name, Status: StatusWarn, Message: msg})
 		}
-		if err := s.Run(warn); err != nil {
+		run := s.Run
+		if s.RunOut != nil {
+			run = func(warn func(string)) error {
+				return s.RunOut(warn, func(line string) {
+					r.emit(Event{Member: s.Member, Step: s.Name, Status: StatusOutput, Message: line})
+				})
+			}
+		}
+		if err := run(warn); err != nil {
 			r.emit(Event{Member: s.Member, Step: s.Name, Status: StatusFailed, Err: err})
 			se := &StepError{Member: s.Member, Step: s.Name, Err: err}
 			if r.Rollback {

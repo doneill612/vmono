@@ -203,7 +203,7 @@ func (m *progressModel) apply(ev apply.Event) {
 		m.index[key] = i
 	}
 	r := &m.rows[i]
-	if ev.Status == apply.StatusWarn {
+	if ev.Status == apply.StatusWarn || ev.Status == apply.StatusOutput {
 		r.msg = ev.Message
 		if r.status == "" {
 			r.status = apply.StatusRunning

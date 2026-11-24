@@ -14,8 +14,9 @@ import (
 const claudeSettingsPath = ".claude/settings.json"
 
 // vmonoClaudeRules are the rules the root settings always carry: reference
-// members are never edited, and the vmono commands that remove a session or
-// move branches in the source repos ask first.
+// members are never edited, and the vmono commands that remove a session,
+// move branches in the source repos, or can add commands vmono runs (a member's
+// setup and teardown) ask first.
 var vmonoClaudeRules = []struct {
 	rule   string
 	effect Effect
@@ -25,6 +26,7 @@ var vmonoClaudeRules = []struct {
 	{"Bash(vmono delete:*)", EffectAsk},
 	{"Bash(vmono session rm:*)", EffectAsk},
 	{"Bash(vmono session finish:*)", EffectAsk},
+	{"Bash(vmono edit:*)", EffectAsk},
 }
 
 // claudeFile is the subset of a Claude Code settings.json vmono reads and

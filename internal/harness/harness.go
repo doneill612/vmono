@@ -109,12 +109,8 @@ func Prepare(c *core.Core, s *core.Session, harnessFlag string, extraArgs []stri
 // identity, the author stamped on notes it writes, then the harness's own
 // env from config, which wins over vmono's on a clash.
 func envOverrides(s *core.Session, name string, h config.Harness) map[string]string {
-	overrides := map[string]string{
-		"VMONO_PACKAGE": s.Pkg.Name,
-		"VMONO_SESSION": s.Name,
-		"VMONO_ROOT":    s.Dir,
-		"VMONO_AUTHOR":  "agent:" + name,
-	}
+	overrides := core.SessionEnv(s)
+	overrides["VMONO_AUTHOR"] = "agent:" + name
 	for k, v := range h.Env {
 		overrides[k] = v
 	}

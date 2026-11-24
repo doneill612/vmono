@@ -250,6 +250,22 @@ Everything except the manifest, the session file and your own text in `AGENTS.md
 
 A branch can be checked out in only one worktree at a time, and git cannot hold both `vmono/project` and `vmono/project/spike`, which is why session branches include the package name. If a branch name in the way already exists, vmono says so and suggests `--branch`; it never renames branches.
 
+## Setup and teardown
+
+A new worktree has no installed dependencies. A member can name commands to run in each one, in the package manifest (`vmono edit`, or `ctrl+e` in the TUI editor):
+
+```toml
+[[member]]
+name     = "web"
+copy     = [".env.local"]
+setup    = ["pnpm install", "direnv allow"]   # or a single string
+teardown = "docker compose down"
+```
+
+`setup` runs after the worktree is added and `copy` files are in place: when a session starts, a member is added, or a missing worktree is recreated. `teardown` runs before a worktree is removed. Changing the commands runs nothing by itself.
+
+Commands run in the member's worktree through `sh -c` (`cmd /c` on Windows), in order, with no input, for at most 30 minutes each. Their output shows in the progress lines. They get `VMONO_PACKAGE`, `VMONO_SESSION`, `VMONO_ROOT` and `VMONO_BRANCH`, as harnesses do, plus `VMONO_MEMBER`, `VMONO_MEMBER_DIR` and `VMONO_SOURCE` (the source repo). A command that fails skips the member's remaining ones and is reported as a warning; the session is still created or removed. Interrupting one with `ctrl+c` stops the operation.
+
 ## Updating a session
 
 `vmono session update [pkg/session]`, or `u` on the session in the TUI, catches a session up with the branches its work lands on. The sources are fetched, then each active member's own commits are rebased inside the session onto its landing branch or that branch's copy on the remote, whichever is further ahead. A landing branch that does not exist yet stands for the member's base. Only the session branch moves; no branch in a source repo does.
@@ -420,10 +436,11 @@ Fetches and pushes never prompt. Starting a session, adding members, sync and th
 - `vmono session push` is the only command that pushes, and only on request. It sends one branch per member, the landing branch, never forced, and refuses a session that is not finished. A branch the remote has moved past is left alone.
 - Deleting a package or session directory by hand leaves its worktrees registered in the source repos. `vmono doctor --fix` prunes those records, and starting a session and adding or editing members release any whose directory is gone before adding a worktree, warning about each. Branches are still kept, so recreating a session of the same name asks to reuse its branch. Prefer `vmono session rm` and `vmono delete`, which remove the worktrees properly.
 - On Windows, vmono refuses to remove a session, member or package while your working directory is inside it, since Windows cannot delete a directory in use. `cd` out and run the command again, naming the session (`vmono session finish PKG/SESSION --close`). Nothing has changed when it refuses, and `--force` does not apply. Another program holding the directory open, such as an editor or a second terminal, can still make the removal fail with git's own `Permission denied`.
+- `setup` and `teardown` commands run as you, outside any sandbox the harness uses. They come only from the package manifest, so treat a change to it like a change to a script.
 - Symlinks are never followed or created.
 - Committing from a worktree writes into the source repo's git directory, outside the package. `vmono inspect --json` lists each `git_common_dir` so sandboxing wrappers can allow it.
 
-vmono enforces nothing about what an agent may do; the harness's own permission system does. The `claude-code` and `opencode` adapters add `ask` rules for `vmono rm`, `vmono session rm`, `vmono session finish` and `vmono delete` and a deny rule for edits under `_ref/`.
+vmono enforces nothing about what an agent may do; the harness's own permission system does. The `claude-code` and `opencode` adapters add `ask` rules for `vmono rm`, `vmono session rm`, `vmono session finish`, `vmono edit` and `vmono delete` and a deny rule for edits under `_ref/`.
 
 ## Development
 

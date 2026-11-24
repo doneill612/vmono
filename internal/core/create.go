@@ -611,7 +611,8 @@ func (c *Core) fetchStep(srcs ...string) []apply.Step {
 }
 
 // addMemberSteps returns the apply steps that bring one member's worktree in
-// a session into existence: worktree add and copying files. It does not fetch; callers
+// a session into existence: worktree add, copying files, and the member's setup
+// commands. It does not fetch; callers
 // put fetchStep ahead of the member steps. Rollback of the
 // worktree step removes the worktree and any branch it created.
 func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branchExists bool) []apply.Step {
@@ -675,6 +676,7 @@ func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branc
 			return err
 		}})
 	}
+	steps = append(steps, memberHookSteps(s, mem, src, "setup", mem.Setup)...)
 	return steps
 }
 

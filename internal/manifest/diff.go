@@ -17,7 +17,7 @@ type Plan struct {
 	// followed by an add of New; the branch is kept.
 	Switch []Switch
 	// Update are members whose worktree is unaffected but whose metadata
-	// (role, copy, hooks) changed.
+	// (role, copy, hooks, setup, teardown) changed.
 	Update []Member
 	// MetaChanged is true when purpose, context or harness changed.
 	MetaChanged bool
@@ -74,7 +74,8 @@ func Diff(oldM, newM *Manifest) Plan {
 		case om.Source != nm.Source || om.Path != nm.Path || om.Base != nm.Base || om.Ref != nm.Ref:
 			p.Remove = append(p.Remove, om)
 			p.Add = append(p.Add, nm)
-		case om.Role != nm.Role || om.Hooks != nm.Hooks || om.Remote != nm.Remote || !reflect.DeepEqual(nilIfEmpty(om.Copy), nilIfEmpty(nm.Copy)):
+		case om.Role != nm.Role || om.Hooks != nm.Hooks || om.Remote != nm.Remote || !reflect.DeepEqual(nilIfEmpty(om.Copy), nilIfEmpty(nm.Copy)) ||
+			!reflect.DeepEqual(nilIfEmpty(om.Setup), nilIfEmpty(nm.Setup)) || !reflect.DeepEqual(nilIfEmpty(om.Teardown), nilIfEmpty(nm.Teardown)):
 			p.Update = append(p.Update, nm)
 		}
 	}

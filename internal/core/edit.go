@@ -244,11 +244,13 @@ func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (Delete
 // a session, live status.
 type ShowMember struct {
 	MemberStatus
-	Source string   `json:"source"`
-	Remote string   `json:"remote,omitempty"`
-	Base   string   `json:"base,omitempty"`
-	Copy   []string `json:"copy,omitempty"`
-	Hooks  bool     `json:"hooks,omitempty"`
+	Source   string   `json:"source"`
+	Remote   string   `json:"remote,omitempty"`
+	Base     string   `json:"base,omitempty"`
+	Copy     []string `json:"copy,omitempty"`
+	Hooks    bool     `json:"hooks,omitempty"`
+	Setup    []string `json:"setup,omitempty"`
+	Teardown []string `json:"teardown,omitempty"`
 }
 
 // ShowNote is a note as reported by Show.
@@ -313,7 +315,7 @@ func (c *Core) Show(p *Package, s *Session) ShowResult {
 		if mem.Mode == manifest.ModeReference {
 			base = ""
 		}
-		sm := ShowMember{Source: mem.Source, Remote: mem.Remote, Base: base, Copy: mem.Copy, Hooks: mem.Hooks}
+		sm := ShowMember{Source: mem.Source, Remote: mem.Remote, Base: base, Copy: mem.Copy, Hooks: mem.Hooks, Setup: mem.Setup, Teardown: mem.Teardown}
 		if s != nil {
 			sm.MemberStatus = memberStatus(s, mem)
 		} else {

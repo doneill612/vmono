@@ -283,7 +283,7 @@ func deleteMergedBranch(src, branch, base, into string) (keptReason string, dele
 }
 
 // removeMemberSteps returns the apply steps that take one member out of a
-// session: remove its worktree (forcibly only when force is set), prune the
+// session: run its teardown commands, remove its worktree (forcibly only when force is set), prune the
 // source, and optionally delete the session branch if it is merged into its
 // base. Outcomes for branches are recorded into res. Safety checks are the
 // caller's job.
@@ -293,7 +293,7 @@ func (c *Core) removeMemberSteps(s *Session, mem manifest.Member, force, deleteB
 		return nil, err
 	}
 	dir := s.MemberDir(mem)
-	steps := []apply.Step{{Member: mem.Name, Name: "worktree remove", Run: func(warn func(string)) error {
+	steps := append(memberHookSteps(s, mem, src, "teardown", mem.Teardown), apply.Step{Member: mem.Name, Name: "worktree remove", Run: func(warn func(string)) error {
 		if _, err := os.Stat(dir); err == nil {
 			if err := gitx.WorktreeRemove(src, dir, force); err != nil {
 				return err
@@ -304,7 +304,7 @@ func (c *Core) removeMemberSteps(s *Session, mem manifest.Member, force, deleteB
 			return nil
 		}
 		return gitx.WorktreePrune(src)
-	}}}
+	}})
 	if deleteBranch && mem.Mode == manifest.ModeActive {
 		steps = append(steps, apply.Step{Member: mem.Name, Name: "delete branch", Run: func(warn func(string)) error {
 			into, _ := landingBranch(s, mem, src)

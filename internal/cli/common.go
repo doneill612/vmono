@@ -84,6 +84,8 @@ func printEvent(w io.Writer, ev apply.Event) {
 	switch ev.Status {
 	case apply.StatusDone:
 		fprintf(w, "  ok    %-14s %s\n", who, ev.Step)
+	case apply.StatusOutput:
+		fprintf(w, "  |     %-14s %s\n", who, ev.Message)
 	case apply.StatusWarn:
 		fprintf(w, "  warn  %-14s %s: %s\n", who, ev.Step, ev.Message)
 	case apply.StatusFailed:
