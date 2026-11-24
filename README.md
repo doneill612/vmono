@@ -252,7 +252,7 @@ A branch can be checked out in only one worktree at a time, and git cannot hold 
 
 ## Setup and teardown
 
-A new worktree has no installed dependencies. A member can name commands to run in each one, in the package manifest (`vmono edit`, or `ctrl+e` in the TUI editor):
+A new worktree has no installed dependencies. A member can name commands to run in each one, with `c` on the member in the TUI's package editor (`e`, then `tab` to Members), or in the package manifest (`vmono edit`):
 
 ```toml
 [[member]]

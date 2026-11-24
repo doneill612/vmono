@@ -145,7 +145,7 @@ func (m *editorModel) Hints() []hint {
 	case m.focus == fieldHarness:
 		hs = append(hs, hint{"←/→", "Choose harness"})
 	case m.focus == fieldMembers:
-		hs = append(hs, hint{"a", "Add/change repos"}, hint{"x", "Remove"}, hint{"m", "Active/ref"}, hint{"r", "Role"})
+		hs = append(hs, hint{"a", "Add/change repos"}, hint{"x", "Remove"}, hint{"m", "Active/ref"}, hint{"r", "Role"}, hint{"c", "Setup/teardown"})
 	}
 	return hs
 }
@@ -284,6 +284,12 @@ func (m *editorModel) keyMembers(k tea.KeyMsg) (screen, tea.Cmd) {
 			m.role.SetValue(m.members[m.cursor].Role)
 			m.roleEdit = true
 			return m, m.role.Focus()
+		}
+	case "c":
+		if i := m.cursor; i < len(m.members) {
+			return m, push(m, newCommandsDialog(m.members[i], func(setup, teardown manifest.Commands) {
+				m.members[i].Setup, m.members[i].Teardown = setup, teardown
+			}))
 		}
 	}
 	return m, nil
@@ -607,12 +613,27 @@ func (m *editorModel) View(w, h int) string {
 		if role == "" {
 			role = styleDim.Render("(no role)")
 		}
-		b.WriteString(fmt.Sprintf("%s%-16s %s  %s\n", cursor, truncate(mem.Name, 16), styleDim.Render(mode), truncate(role, boxW-30)))
+		b.WriteString(fmt.Sprintf("%s%-16s %s  %s\n", cursor, truncate(mem.Name, 16), styleDim.Render(mode), truncate(role, max(boxW-30-lipgloss.Width(commandsTag(mem)), 8))+commandsTag(mem)))
 	}
 	if m.roleEdit {
 		b.WriteString(" " + m.role.View() + "\n")
 	}
 	return b.String()
+}
+
+// commandsTag marks a member that has setup or teardown commands.
+func commandsTag(mem manifest.Member) string {
+	var has []string
+	if len(mem.Setup) > 0 {
+		has = append(has, "setup")
+	}
+	if len(mem.Teardown) > 0 {
+		has = append(has, "teardown")
+	}
+	if len(has) == 0 {
+		return ""
+	}
+	return styleDim.Render("  · " + strings.Join(has, ", "))
 }
 
 // box frames a text area, brighter when its field has focus.
