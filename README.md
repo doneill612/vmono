@@ -193,7 +193,7 @@ The shortcuts, none of which you have to use:
 | `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, update, copy path, landing branches, finish, push, delete |
 | `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
-| `n` | Start a new session: a name, optionally a branch (default `vmono/<package>/<session>`), and one `into` row per active member, filled in with the branch its source has checked out |
+| `n` | Start a new session: a name, optionally a branch (default `vmono/<package>/<session>`), and one `into` row per active member, filled in with the branch its source has checked out. `ctrl+t` picks a branch on the members' remotes to start from and land on |
 | `i` | Change the branch each member's work lands on, without starting a finish |
 | `F` | Finish the session: shows what would land on which branch, or what blocks it, then `y` lands it. `i` changes the members' landing branches, `c` also removes the session afterward. A conflict offers to launch the harness in the session to resolve it |
 | `P` | Push a finished session: shows each member's landing branch and the remote it goes to, or what blocks it, then `y` pushes. Never forced. A session that is not finished gets a dialog saying why, with `F` to finish it unless uncommitted work stops that |

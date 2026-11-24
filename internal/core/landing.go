@@ -4,6 +4,8 @@ import (
 	"slices"
 
 	"github.com/doneill612/vmono/internal/gitx"
+	"github.com/doneill612/vmono/internal/manifest"
+	"github.com/doneill612/vmono/internal/paths"
 )
 
 // primaryRemote returns the remote a branch of src with no upstream belongs
@@ -97,4 +99,51 @@ func replaysUpstream(src, wt, into, fork, target string) bool {
 	}
 	own, err := gitx.RevCount(wt, "HEAD", "--not", fork, target, ref)
 	return err == nil && own < all
+}
+
+// MemberBranches is one active member's branches on its remote.
+type MemberBranches struct {
+	Member   string
+	Branches []gitx.RemoteBranch
+	// FetchErr is why the remote could not be fetched; Branches then holds
+	// what the last fetch that worked saw.
+	FetchErr error
+	// ListErr is why the branches could not be listed at all.
+	ListErr error
+}
+
+// RemoteBranches lists the remote branches a session of p could start from,
+// for each active member: as of the last fetch, or after fetching when fetch
+// is true. A member that cannot be fetched or listed is reported rather than
+// failing the rest.
+func (c *Core) RemoteBranches(p *Package, fetch bool) []MemberBranches {
+	var out []MemberBranches
+	var srcs []string
+	for _, mem := range p.M.Members {
+		if mem.Mode != manifest.ModeActive {
+			continue
+		}
+		src, err := paths.Abs(mem.Source)
+		out, srcs = append(out, MemberBranches{Member: mem.Name, ListErr: err}), append(srcs, src)
+	}
+	failed := map[string]error{}
+	if fetch {
+		for _, r := range gitx.FetchMany(srcs, gitx.DefaultFetchConcurrency) {
+			for _, path := range r.Paths {
+				failed[path] = r.Err
+			}
+		}
+	}
+	for i, src := range srcs {
+		out[i].FetchErr = failed[src]
+		if out[i].ListErr != nil {
+			continue
+		}
+		if remote := primaryRemote(src); remote != "" {
+			out[i].Branches, out[i].ListErr = gitx.RemoteBranches(src, remote)
+		} else if _, err := gitx.CommonDir(src); err != nil {
+			out[i].ListErr = err
+		}
+	}
+	return out
 }

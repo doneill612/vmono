@@ -185,7 +185,7 @@ func TestSessionPromptLandingBranchCanBeEditedPerMember(t *testing.T) {
 
 	d.key("right", "n")
 	d.typeText("stacked")
-	d.key("tab", "tab") // name -> branch -> alpha's into
+	d.key("tab", "tab", "tab") // name -> branch -> start from -> alpha's into
 	for range "main" {
 		d.key("backspace")
 	}

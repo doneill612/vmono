@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Error is returned when a git invocation exits non-zero. It carries the
@@ -735,6 +736,35 @@ func UpstreamOf(repo, branch string) (Tracking, bool) {
 		return Tracking{}, false
 	}
 	return Tracking{Remote: remote, Branch: strings.TrimPrefix(ref, prefix), Ref: ref}, true
+}
+
+// RemoteBranch is a branch of a remote as of the last fetch.
+type RemoteBranch struct {
+	// Name is the branch's name on the remote, without the remote's.
+	Name string
+	// When is the time of its latest commit.
+	When time.Time
+}
+
+// RemoteBranches lists the branches of remote as of the last fetch, the one
+// with the most recent commit first.
+func RemoteBranches(repo, remote string) ([]RemoteBranch, error) {
+	prefix := "refs/remotes/" + remote + "/"
+	out, err := run(repo, "for-each-ref", "--sort=-committerdate", "--format=%(committerdate:unix) %(refname)", prefix)
+	if err != nil {
+		return nil, err
+	}
+	var list []RemoteBranch
+	for _, line := range strings.Split(out, "\n") {
+		when, ref, _ := strings.Cut(strings.TrimSpace(line), " ")
+		name := strings.TrimPrefix(ref, prefix)
+		if name == "" || name == "HEAD" {
+			continue
+		}
+		sec, _ := strconv.ParseInt(when, 10, 64)
+		list = append(list, RemoteBranch{Name: name, When: time.Unix(sec, 0)})
+	}
+	return list, nil
 }
 
 // SetUpstream makes the local branch track upstream, such as "origin/main".
