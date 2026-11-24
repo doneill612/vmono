@@ -37,8 +37,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: shellcheck install.sh
-        run: shellcheck install.sh
+      - name: shellcheck scripts/install.sh
+        run: shellcheck scripts/install.sh
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"

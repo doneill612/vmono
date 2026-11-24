@@ -38,8 +38,8 @@ checksum:
 release:
   prerelease: auto
   extra_files:
-    - glob: ./install.sh
-    - glob: ./install.ps1
+    - glob: ./scripts/install.sh
+    - glob: ./scripts/install.ps1
 
 changelog:
   use: git
