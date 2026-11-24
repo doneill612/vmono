@@ -24,22 +24,19 @@ type pushConfirm struct {
 	// the push that follows is exactly the one shown.
 	members []string
 	plan    core.PushResult
-	// back builds the screen the dialog was opened from, which is also where
-	// the push returns to when it ends.
-	back func() screen
 }
 
 // newPushConfirm builds the dialog for a plan from core.PlanPush.
-func newPushConfirm(e *env, pkg, session string, members []string, plan core.PushResult, back func() screen) *pushConfirm {
-	return &pushConfirm{e: e, pkg: pkg, session: session, members: members, plan: plan, back: back}
+func newPushConfirm(e *env, pkg, session string, members []string, plan core.PushResult) *pushConfirm {
+	return &pushConfirm{e: e, pkg: pkg, session: session, members: members, plan: plan}
 }
 
 // startPush plans a push of the session and opens the confirmation for it. A
 // session that is not finished gets a dialog saying so, which offers to finish
 // it unless uncommitted work stops it from finishing; a member named that is
 // not an active one is flashed. members limits the push, and is empty for all.
-// back builds the screen the push returns to; from is the screen asking.
-func startPush(from screen, e *env, pkg, session string, members []string, back func() screen) tea.Cmd {
+// from is the screen asking, which the push returns to, reloaded, when it ends.
+func startPush(from screen, e *env, pkg, session string, members []string) tea.Cmd {
 	c := e.core
 	s, err := c.ResolveSession(pkg + "/" + session)
 	if err != nil {
@@ -53,7 +50,7 @@ func startPush(from screen, e *env, pkg, session string, members []string, back 
 	case err != nil:
 		return flashErr(err.Error())
 	}
-	return push(from, newPushConfirm(e, pkg, session, members, plan, back))
+	return push(from, newPushConfirm(e, pkg, session, members, plan))
 }
 
 // ready counts the members that have commits to push.
@@ -113,9 +110,9 @@ func (m *pushConfirm) Update(msg tea.Msg) (screen, tea.Cmd) {
 // run builds the progress screen that pushes the session. It resolves the
 // session afresh, so it pushes what is landed now rather than what the dialog
 // was opened on. Whether it succeeds or fails, the user returns to the screen
-// the dialog came from.
+// the dialog came from, reloaded, rather than to a new copy of it.
 func (m *pushConfirm) run() screen {
-	c, pkg, session, members, back := m.e.core, m.pkg, m.session, m.members, m.back
+	c, pkg, session, members := m.e.core, m.pkg, m.session, m.members
 	return newProgress(m.e, operation{
 		title: "Push " + pkg + "/" + session,
 		run: func(_, _ bool) error {
@@ -126,8 +123,7 @@ func (m *pushConfirm) run() screen {
 			_, err = c.Push(s, core.PushOptions{Members: members})
 			return err
 		},
-		back: back,
-		done: back,
+		reveal: true,
 	})
 }
 

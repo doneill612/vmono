@@ -361,7 +361,7 @@ func (m *sessionsModel) act(id string, sel core.SessionSummary) (screen, tea.Cmd
 	case "finish":
 		return m, m.startFinish(sel.Name)
 	case "push":
-		return m, startPush(m, m.e, m.name, sel.Name, nil, func() screen { return newSessions(m.e, m.name) })
+		return m, startPush(m, m.e, m.name, sel.Name, nil)
 	}
 	return m, nil
 }
@@ -413,7 +413,7 @@ func (m *sessionsModel) startDelete(session string) tea.Cmd {
 					_, err := c.DeleteSession(s, core.DeleteOptions{Force: force, DeleteBranches: deleteBranches})
 					return err
 				},
-				back: func() screen { return newSessions(m.e, m.name) },
+				reveal: true,
 			})
 		},
 		nil).about("session"))
