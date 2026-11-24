@@ -42,7 +42,12 @@ func (f *fakeTmux) install(t *testing.T) {
 		f.attached, f.replace = target, replace
 		return nil
 	}
-	lookPath = func(string) (string, error) { return "/usr/bin/tmux", nil }
+	lookPath = func(name string) (string, error) {
+		if name != "tmux" {
+			return "", exec.ErrNotFound
+		}
+		return "/usr/bin/tmux", nil
+	}
 	t.Cleanup(func() { tmuxRun, tmuxAttach, lookPath = origRun, origAttach, origLook })
 }
 

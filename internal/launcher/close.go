@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 )
 
 // Closer is a launcher that gives a session a place of its own, which has to
@@ -27,6 +28,11 @@ func closers() []Closer {
 	var out []Closer
 	if _, err := lookPath("tmux"); err == nil {
 		out = append(out, Tmux{})
+	}
+	if runtime.GOOS != "windows" {
+		if _, err := lookPath("herdr"); err == nil {
+			out = append(out, Herdr{})
+		}
 	}
 	return out
 }

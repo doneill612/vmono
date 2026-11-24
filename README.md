@@ -374,7 +374,7 @@ Switching is the default, but it moves your terminal out of the tmux session you
 
 Sessions are found by a `@vmono_session` tag that vmono sets on the tmux session, not by name, so renaming one in tmux does not lose it. A tmux session name cannot contain `.` or `:`, so those become `_`. Arguments after `--` in `vmono open` only apply when the session is created. tmux 3.0 or newer is needed. Native Windows has no tmux, so `auto` stays direct there.
 
-`launcher` takes `direct` (the default), `auto` (tmux when vmono runs inside tmux, direct otherwise) and `tmux` (always, and an error if tmux is missing). `VMONO_LAUNCHER` overrides it for one command, such as `VMONO_LAUNCHER=direct vmono open pkg/session` to see why a harness exits at once.
+`launcher` takes `direct` (the default), `auto` (herdr or tmux when vmono runs inside one, direct otherwise), and `tmux` or `herdr` (always, and an error if it is missing). `VMONO_LAUNCHER` overrides it for one command, such as `VMONO_LAUNCHER=direct vmono open pkg/session` to see why a harness exits at once.
 
 ## Commands
 
@@ -429,8 +429,9 @@ fetch_on_create = true      # fetch source repos before adding worktrees; failur
 default_harness = "claude"
 auto_commit     = true      # commit every package change to the package's own repo
 return_to_tui   = false     # always true on Windows
-launcher        = "direct"  # or "auto" / "tmux": where a session's harness starts (see Integrations)
+launcher        = "direct"  # or "auto" / "tmux" / "herdr": where a session's harness starts (see Integrations)
 tmux_switch     = true      # tmux launcher: switch to the session's tmux session; false only notifies
+herdr_focus     = true      # herdr launcher: focus the session's herdr workspace; false only notifies
 
 [harness.claude]
 command = "claude"

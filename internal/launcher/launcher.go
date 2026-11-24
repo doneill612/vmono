@@ -14,21 +14,24 @@
 //     and never starts a second harness. Because the harness no longer takes
 //     over vmono's terminal, the TUI can be used as a control panel, for
 //     instance from a tmux popup that closes once the switch is made.
+//   - herdr does the same with a herdr workspace per session.
 //
 // The launcher is chosen by the `launcher` config value (config.Launcher*).
-// "auto" resolves to tmux when vmono runs inside tmux and to direct
+// "auto" resolves to herdr or tmux when vmono runs inside one and to direct
 // otherwise. Any multiplexer with a scriptable way to create a named place
 // at a directory, run a command in it, find it again and focus it fits the
-// same Launcher interface; herdr's workspaces are the next one planned.
+// same Launcher interface.
 package launcher
 
 import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 
 	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/harness"
+	"github.com/doneill612/vmono/internal/herdr"
 )
 
 // Result says what became of the terminal vmono was started from.
@@ -71,22 +74,36 @@ type Launcher interface {
 // pretend tmux is or is not installed.
 var lookPath = exec.LookPath
 
-// Resolve returns the launcher the config asks for. "auto" picks tmux when
-// vmono runs inside a tmux client ($TMUX is set) and tmux is on PATH, and
-// direct otherwise, so a terminal outside tmux keeps working as before. An
-// explicit "tmux" with tmux missing is an error rather than a silent
+// Resolve returns the launcher the config asks for. "auto" picks herdr when
+// vmono runs in a herdr pane, else tmux when it runs inside a tmux client ($TMUX
+// is set), if the tool is on PATH, and direct otherwise, so a terminal outside
+// both keeps working as before. An explicit launcher whose tool is missing is an
+// error rather than a silent
 // fallback, since the user asked for it by name.
 func Resolve(cfg config.Config) (Launcher, error) {
 	switch cfg.Launcher {
 	case "", config.LauncherDirect:
 		return Direct{}, nil
 	case config.LauncherAuto:
+		if herdr.Inside() && runtime.GOOS != "windows" {
+			if _, err := lookPath("herdr"); err == nil {
+				return Herdr{NoFocus: !cfg.HerdrFocus}, nil
+			}
+		}
 		if os.Getenv("TMUX") != "" {
 			if _, err := lookPath("tmux"); err == nil {
 				return Tmux{NoSwitch: !cfg.TmuxSwitch}, nil
 			}
 		}
 		return Direct{}, nil
+	case config.LauncherHerdr:
+		if runtime.GOOS == "windows" {
+			return nil, fmt.Errorf("launcher herdr is not supported on Windows")
+		}
+		if _, err := lookPath("herdr"); err != nil {
+			return nil, fmt.Errorf("launcher herdr: herdr not found on PATH")
+		}
+		return Herdr{NoFocus: !cfg.HerdrFocus}, nil
 	case config.LauncherTmux:
 		if _, err := lookPath("tmux"); err != nil {
 			return nil, fmt.Errorf("launcher tmux: tmux not found on PATH")

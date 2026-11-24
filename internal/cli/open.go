@@ -19,7 +19,7 @@ var launchHarness = harness.Run
 //
 // Where the harness runs is up to the configured launcher (see package
 // launcher): in this terminal, replacing vmono, by default; or in a tmux
-// session of its own, which `open` creates or switches to.
+// session or herdr workspace of its own, which `open` creates or goes to.
 func newOpenCmd() *cobra.Command {
 	var harnessName string
 	cmd := &cobra.Command{
