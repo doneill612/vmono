@@ -48,6 +48,7 @@ type Config struct {
 	AutoCommit     bool               `toml:"auto_commit"`
 	ReturnToTUI    bool               `toml:"return_to_tui"`
 	Launcher       string             `toml:"launcher"`
+	TmuxSwitch     bool               `toml:"tmux_switch"`
 	Harness        map[string]Harness `toml:"harness"`
 
 	// Loaded reports whether a config file existed on disk. It is false on
@@ -98,6 +99,7 @@ func Defaults() Config {
 		AutoCommit:     true,
 		ReturnToTUI:    runtime.GOOS == "windows",
 		Launcher:       LauncherDirect,
+		TmuxSwitch:     true,
 		Harness:        DefaultHarnesses(),
 	}
 }
@@ -187,6 +189,9 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 	if present["launcher"] {
 		dst.Launcher = src.Launcher
 	}
+	if present["tmux_switch"] {
+		dst.TmuxSwitch = src.TmuxSwitch
+	}
 	if present["harness"] && len(src.Harness) > 0 {
 		dst.Harness = src.Harness
 	}
@@ -236,6 +241,7 @@ func applyEnv(c *Config) error {
 		"VMONO_FETCH_ON_CREATE": &c.FetchOnCreate,
 		"VMONO_AUTO_COMMIT":     &c.AutoCommit,
 		"VMONO_RETURN_TO_TUI":   &c.ReturnToTUI,
+		"VMONO_TMUX_SWITCH":     &c.TmuxSwitch,
 	} {
 		if v := os.Getenv(name); v != "" {
 			b, err := strconv.ParseBool(v)

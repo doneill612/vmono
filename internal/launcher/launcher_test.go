@@ -212,6 +212,59 @@ func TestTmuxReportsAHarnessThatExitsAtOnce(t *testing.T) {
 	}
 }
 
+// TestTmuxNoSwitchLeavesTheUserInPlace pins that with switching off the tmux
+// session is still created and tagged, but the client is neither switched
+// nor attached: inside tmux the user is told through the status line, and
+// either way the result lets a TUI quit.
+func TestTmuxNoSwitchLeavesTheUserInPlace(t *testing.T) {
+	for _, inside := range []bool{true, false} {
+		f := &fakeTmux{newID: "$7"}
+		f.install(t)
+		env := ""
+		if inside {
+			env = "/tmp/tmux-1/default,1,0"
+		}
+		t.Setenv("TMUX", env)
+
+		res, err := Tmux{NoSwitch: true}.Launch(testLaunch(), Opts{Replace: true})
+		if err != nil || res != Elsewhere {
+			t.Fatalf("inside=%v: launch = %v, %v", inside, res, err)
+		}
+		if f.call("switch-client") != nil || f.attached != "" {
+			t.Errorf("inside=%v: must neither switch nor attach (calls %v, attached %q)", inside, f.commands(), f.attached)
+		}
+		if f.call("set-option") == nil {
+			t.Errorf("inside=%v: the session must still be created and tagged: %v", inside, f.commands())
+		}
+		msg := f.call("display-message")
+		if inside {
+			if msg == nil || !strings.Contains(msg[1], `"pay_ments/work"`) {
+				t.Errorf("inside tmux the status line should name the session: %q", msg)
+			}
+		} else if msg != nil {
+			t.Errorf("display-message needs a client; outside tmux there is none: %q", msg)
+		}
+	}
+}
+
+// TestResolveCarriesTheSwitchSetting pins that tmux_switch = false reaches
+// the launcher, for both an explicit tmux launcher and auto.
+func TestResolveCarriesTheSwitchSetting(t *testing.T) {
+	origLook := lookPath
+	lookPath = func(string) (string, error) { return "/usr/bin/tmux", nil }
+	t.Cleanup(func() { lookPath = origLook })
+	t.Setenv("TMUX", "/tmp/tmux-1/default,1,0")
+	for _, name := range []string{config.LauncherTmux, config.LauncherAuto} {
+		for _, sw := range []bool{true, false} {
+			got, err := Resolve(config.Config{Launcher: name, TmuxSwitch: sw})
+			tm, ok := got.(Tmux)
+			if err != nil || !ok || tm.NoSwitch == sw {
+				t.Errorf("launcher=%s tmux_switch=%v: got %#v, %v", name, sw, got, err)
+			}
+		}
+	}
+}
+
 func TestTmuxSessionName(t *testing.T) {
 	for in, want := range map[string]string{
 		"payments/work": "payments/work",

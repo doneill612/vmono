@@ -111,6 +111,27 @@ func TestLauncherFromFileAndEnv(t *testing.T) {
 	}
 }
 
+// TestTmuxSwitchDefaultsOnAndCanBeTurnedOff pins that switching to a
+// session's tmux session is the default, that an explicit false in the file
+// overrides it, and that VMONO_TMUX_SWITCH beats the file.
+func TestTmuxSwitchDefaultsOnAndCanBeTurnedOff(t *testing.T) {
+	cfg, err := LoadFrom(filepath.Join(t.TempDir(), "nope.toml"))
+	if err != nil || !cfg.TmuxSwitch {
+		t.Fatalf("default tmux_switch = %v, %v; want true", cfg.TmuxSwitch, err)
+	}
+	file := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(file, []byte("tmux_switch = false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = LoadFrom(file); err != nil || cfg.TmuxSwitch {
+		t.Errorf("file tmux_switch = %v, %v; want false", cfg.TmuxSwitch, err)
+	}
+	t.Setenv("VMONO_TMUX_SWITCH", "true")
+	if cfg, err = LoadFrom(file); err != nil || !cfg.TmuxSwitch {
+		t.Errorf("env tmux_switch = %v, %v; want true", cfg.TmuxSwitch, err)
+	}
+}
+
 func TestSaveRoundTrip(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "sub", "config.toml")
 	cfg := Defaults()

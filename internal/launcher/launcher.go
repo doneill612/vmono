@@ -41,8 +41,9 @@ const (
 	// does not return at all on success.
 	HandedOff Result = iota
 	// Elsewhere means the harness runs in another place, such as a tmux
-	// session the client was switched to, and vmono's own terminal was never
-	// given up. A TUI should simply quit.
+	// session the client was switched to, or one that was started and left
+	// alone because switching is turned off, and vmono's own terminal was
+	// never given up. A TUI should simply quit.
 	Elsewhere
 )
 
@@ -82,7 +83,7 @@ func Resolve(cfg config.Config) (Launcher, error) {
 	case config.LauncherAuto:
 		if os.Getenv("TMUX") != "" {
 			if _, err := lookPath("tmux"); err == nil {
-				return Tmux{}, nil
+				return Tmux{NoSwitch: !cfg.TmuxSwitch}, nil
 			}
 		}
 		return Direct{}, nil
@@ -90,7 +91,7 @@ func Resolve(cfg config.Config) (Launcher, error) {
 		if _, err := lookPath("tmux"); err != nil {
 			return nil, fmt.Errorf("launcher tmux: tmux not found on PATH")
 		}
-		return Tmux{}, nil
+		return Tmux{NoSwitch: !cfg.TmuxSwitch}, nil
 	default:
 		return nil, fmt.Errorf("unknown launcher %q", cfg.Launcher)
 	}

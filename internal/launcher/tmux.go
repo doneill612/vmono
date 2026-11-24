@@ -34,6 +34,14 @@ const TagOption = "@vmono_session"
 //     vmono attaches to it, replacing itself with `tmux attach` when
 //     Opts.Replace allows (HandedOff).
 //
+// With NoSwitch (the `tmux_switch = false` setting), step 2 is replaced by
+// a notice: the user stays in the tmux session they are in, or at their
+// shell, and is told the name of the session that was started or found.
+// Inside tmux the notice is shown in the client's status line with
+// `display-message`, since vmono may be running in a popup whose own output
+// disappears as it closes; it is also printed to standard error, which is
+// where it appears outside tmux. The result is Elsewhere, so a TUI quits.
+//
 // An existing session is reused as is, so arguments passed through
 // `vmono open -- ARGS` only apply when the session is created. The harness is
 // the session's only process: when it exits, tmux closes the session, just as
@@ -44,7 +52,11 @@ const TagOption = "@vmono_session"
 // `new-session -e`. PATH is included so the agent finds the same tools it
 // would in a direct launch, even when the tmux server was started from an
 // older shell. `-e` needs tmux 3.0 or newer.
-type Tmux struct{}
+type Tmux struct {
+	// NoSwitch leaves the user where they are after the tmux session is
+	// created or found, and reports it with a notice instead.
+	NoSwitch bool
+}
 
 // Name implements Launcher.
 func (Tmux) Name() string { return config.LauncherTmux }
@@ -90,7 +102,7 @@ var tmuxAttach = func(target string, replace bool) error {
 var errReplaceUnsupported = errors.New("exec replacement unsupported")
 
 // Launch implements Launcher. See Tmux for the steps.
-func (Tmux) Launch(l *harness.Launch, opts Opts) (Result, error) {
+func (t Tmux) Launch(l *harness.Launch, opts Opts) (Result, error) {
 	tag := l.Package + "/" + l.Session
 	id, err := findTmuxSession(tag)
 	if err != nil {
@@ -101,13 +113,34 @@ func (Tmux) Launch(l *harness.Launch, opts Opts) (Result, error) {
 			return HandedOff, err
 		}
 	}
-	if os.Getenv("TMUX") != "" {
+	inside := os.Getenv("TMUX") != ""
+	if t.NoSwitch {
+		notifyTmux(l, tag, inside)
+		return Elsewhere, nil
+	}
+	if inside {
 		if _, err := tmuxRun("switch-client", "-t", id); err != nil {
 			return HandedOff, err
 		}
 		return Elsewhere, nil
 	}
 	return HandedOff, tmuxAttach(id, opts.Replace)
+}
+
+// notifyTmux tells the user which tmux session the harness runs in when
+// they were not taken there. Inside tmux it also shows the message in the
+// client's status line, best effort: a failure to show it is not a failure
+// to launch. The standard error copy names how to get there from where the
+// user is, which differs inside and outside tmux.
+func notifyTmux(l *harness.Launch, tag string, inside bool) {
+	name := TmuxSessionName(tag)
+	if inside {
+		msg := fmt.Sprintf("vmono: %s is running in tmux session %q (prefix + s to switch)", l.Name, name)
+		_, _ = tmuxRun("display-message", msg)
+		fmt.Fprintln(os.Stderr, msg)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "vmono: %s is running in tmux session %q; attach with: tmux attach -t %s\n", l.Name, name, name)
 }
 
 // findTmuxSession returns the id (such as "$3") of the tmux session tagged
