@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,12 +47,34 @@ type Config struct {
 	DefaultHarness string             `toml:"default_harness"`
 	AutoCommit     bool               `toml:"auto_commit"`
 	ReturnToTUI    bool               `toml:"return_to_tui"`
+	Launcher       string             `toml:"launcher"`
 	Harness        map[string]Harness `toml:"harness"`
 
 	// Loaded reports whether a config file existed on disk. It is false on
 	// first run, which triggers the setup flow.
 	Loaded bool `toml:"-"`
 }
+
+// Launcher names say where a harness is started when a session is opened.
+//
+// LauncherDirect runs it in the terminal vmono was started from, replacing
+// vmono on macOS and Linux. LauncherTmux gives every session its own tmux
+// session, named after it, and switches to it, so several sessions run side
+// by side and the TUI stays a control panel. LauncherAuto picks tmux when
+// vmono itself runs inside tmux ($TMUX is set) and direct otherwise, which is
+// what `vmono integration install tmux` sets so a terminal outside tmux keeps
+// working as before.
+const (
+	LauncherDirect = "direct"
+	LauncherTmux   = "tmux"
+	LauncherAuto   = "auto"
+)
+
+// An empty launcher, as in a Config built by hand rather than from Defaults,
+// means LauncherDirect.
+//
+// Launchers lists every valid launcher value, in the order they are offered.
+func Launchers() []string { return []string{LauncherDirect, LauncherAuto, LauncherTmux} }
 
 // DefaultHarnesses returns the built-in harness definitions used when the
 // config file defines none.
@@ -74,6 +97,7 @@ func Defaults() Config {
 		DefaultHarness: "claude",
 		AutoCommit:     true,
 		ReturnToTUI:    runtime.GOOS == "windows",
+		Launcher:       LauncherDirect,
 		Harness:        DefaultHarnesses(),
 	}
 }
@@ -160,6 +184,9 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 	if present["return_to_tui"] {
 		dst.ReturnToTUI = src.ReturnToTUI
 	}
+	if present["launcher"] {
+		dst.Launcher = src.Launcher
+	}
 	if present["harness"] && len(src.Harness) > 0 {
 		dst.Harness = src.Harness
 	}
@@ -195,6 +222,9 @@ func applyEnv(c *Config) error {
 	if v := os.Getenv("VMONO_DEFAULT_HARNESS"); v != "" {
 		c.DefaultHarness = v
 	}
+	if v := os.Getenv("VMONO_LAUNCHER"); v != "" {
+		c.Launcher = v
+	}
 	if v := os.Getenv("VMONO_SCAN_DEPTH"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -225,6 +255,9 @@ func (c Config) Validate() error {
 	}
 	if c.ScanDepth < 0 {
 		return errors.New("config: scan_depth must be >= 0")
+	}
+	if c.Launcher != "" && !slices.Contains(Launchers(), c.Launcher) {
+		return fmt.Errorf("config: launcher %q is not one of %s", c.Launcher, strings.Join(Launchers(), ", "))
 	}
 	if c.DefaultHarness != "" {
 		if _, ok := c.Harness[c.DefaultHarness]; !ok {

@@ -74,6 +74,43 @@ func TestInvalidDefaultHarness(t *testing.T) {
 	}
 }
 
+// TestLauncherFromFileAndEnv pins that the launcher defaults to direct, is
+// read from the file, is overridden by VMONO_LAUNCHER, and that an unknown
+// value is refused at load rather than failing later at launch.
+func TestLauncherFromFileAndEnv(t *testing.T) {
+	cfg, err := LoadFrom(filepath.Join(t.TempDir(), "nope.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Launcher != LauncherDirect {
+		t.Errorf("default launcher = %q, want %q", cfg.Launcher, LauncherDirect)
+	}
+
+	file := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(file, []byte(`launcher = "auto"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = LoadFrom(file); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Launcher != LauncherAuto {
+		t.Errorf("file launcher = %q, want %q", cfg.Launcher, LauncherAuto)
+	}
+
+	t.Setenv("VMONO_LAUNCHER", "tmux")
+	if cfg, err = LoadFrom(file); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Launcher != LauncherTmux {
+		t.Errorf("env launcher = %q, want %q", cfg.Launcher, LauncherTmux)
+	}
+
+	t.Setenv("VMONO_LAUNCHER", "screen")
+	if _, err := LoadFrom(file); err == nil {
+		t.Error("expected an unknown launcher to be refused")
+	}
+}
+
 func TestSaveRoundTrip(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "sub", "config.toml")
 	cfg := Defaults()
