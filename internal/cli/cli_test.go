@@ -192,6 +192,57 @@ func TestOpenPassesArgsAndHarness(t *testing.T) {
 	}
 }
 
+// TestIntegrationInstallAndUninstallTmux pins the CLI around the tmux
+// integration: install wires ~/.tmux.conf and turns on the auto launcher,
+// keeps a launcher the user chose, and uninstall puts direct back.
+func TestIntegrationInstallAndUninstallTmux(t *testing.T) {
+	env := testutil.NewEnv(t)
+	conf := filepath.Join(env.Home, ".tmux.conf")
+
+	out, _, err := run(t, "integration", "install", "tmux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "tmux source-file") {
+		t.Errorf("install should print the reload hint: %q", out)
+	}
+	if b, err := os.ReadFile(conf); err != nil || !strings.Contains(string(b), "# vmono integration: tmux") {
+		t.Fatalf("~/.tmux.conf = %q, %v", b, err)
+	}
+	cfg, err := config.Load()
+	if err != nil || cfg.Launcher != config.LauncherAuto {
+		t.Fatalf("launcher after install = %q, %v", cfg.Launcher, err)
+	}
+	if out, _, _ := run(t, "integration", "ls"); !strings.Contains(out, "installed") {
+		t.Errorf("ls = %q", out)
+	}
+	if out, _, _ := run(t, "integration", "print", "tmux"); !strings.Contains(out, "bind-key V") {
+		t.Errorf("print = %q", out)
+	}
+
+	if _, _, err := run(t, "integration", "uninstall", "tmux"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(conf); strings.Contains(string(b), "vmono") {
+		t.Errorf("~/.tmux.conf after uninstall = %q", b)
+	}
+	if cfg, _ = config.Load(); cfg.Launcher != config.LauncherDirect {
+		t.Errorf("launcher after uninstall = %q", cfg.Launcher)
+	}
+
+	testutil.WriteFile(t, filepath.Join(env.Root, "cfg", "config.toml"), "launcher = \"tmux\"\n")
+	if _, _, err := run(t, "integration", "install", "tmux"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ = config.Load(); cfg.Launcher != config.LauncherTmux {
+		t.Errorf("install must keep a launcher the user set: %q", cfg.Launcher)
+	}
+
+	if _, _, err := run(t, "integration", "install", "screen"); ExitCode(err) != ExitNotFound {
+		t.Errorf("unknown integration exit = %d (%v)", ExitCode(err), err)
+	}
+}
+
 // TestOpenRoutesThroughTheLauncher pins that open honors the launcher
 // setting: "auto" outside tmux launches in place, and an unknown launcher is
 // refused when the config loads, before anything starts.

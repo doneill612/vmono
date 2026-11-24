@@ -45,6 +45,7 @@ func NewRoot(runTUI func() error) *cobra.Command {
 		newAddCmd(),
 		newRmCmd(),
 		newShellInitCmd(),
+		newIntegrationCmd(),
 		newEditCmd(),
 		newSyncCmd(),
 		newDoctorCmd(),
