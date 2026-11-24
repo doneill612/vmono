@@ -24,9 +24,13 @@ install: build
 uninstall:
 	rm -f $(BINDIR)/$(BINARY)
 
+# On macOS, /usr/bin/git is a shim that finds the real git on every call. The
+# tests run git thousands of times, so they go straight to it when it is known.
+GITDIR  := $(if $(filter Darwin,$(shell uname -s)),$(patsubst %/,%,$(dir $(shell xcrun -f git 2>/dev/null))))
+
 ## test: run vet and the test suite
 test: vet
-	go test ./...
+	$(if $(GITDIR),PATH="$(GITDIR):$$PATH" )go test ./...
 
 vet:
 	go vet ./...
