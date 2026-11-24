@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"slices"
 
@@ -13,7 +14,7 @@ import (
 )
 
 // integrationEnv builds the integrations.Env for the real user: vmono's
-// config directory, the home directory and $XDG_CONFIG_HOME.
+// config directory, the home directory, $XDG_CONFIG_HOME and $HERDR_CONFIG_PATH.
 func integrationEnv() (integrations.Env, error) {
 	dir, err := paths.ConfigDir()
 	if err != nil {
@@ -23,7 +24,7 @@ func integrationEnv() (integrations.Env, error) {
 	if err != nil {
 		return integrations.Env{}, err
 	}
-	return integrations.Env{ConfigDir: dir, Home: home, XDGConfigHome: os.Getenv("XDG_CONFIG_HOME")}, nil
+	return integrations.Env{ConfigDir: dir, Home: home, XDGConfigHome: os.Getenv("XDG_CONFIG_HOME"), HerdrConfig: os.Getenv("HERDR_CONFIG_PATH")}, nil
 }
 
 // newIntegrationCmd builds `vmono integration`, which installs vmono's
@@ -33,7 +34,7 @@ func integrationEnv() (integrations.Env, error) {
 func newIntegrationCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "integration",
-		Short: "Install, remove and list integrations with other tools, such as tmux",
+		Short: "Install, remove and list integrations with other tools, such as tmux and herdr",
 	}
 	cmd.AddCommand(newIntegrationLsCmd(), newIntegrationInstallCmd(), newIntegrationUninstallCmd(), newIntegrationPrintCmd())
 	return cmd
@@ -85,8 +86,9 @@ func newIntegrationLsCmd() *cobra.Command {
 // other than direct is already set.
 func newIntegrationInstallCmd() *cobra.Command {
 	var noLauncher bool
+	var key string
 	cmd := &cobra.Command{
-		Use:       "install <name> [--no-launcher]",
+		Use:       "install <name> [--no-launcher] [--key K]",
 		Short:     "Install an integration: write its files and wire them into the tool",
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: integrationNames(),
@@ -95,10 +97,14 @@ func newIntegrationInstallCmd() *cobra.Command {
 			if err != nil {
 				return core.NotFound("%s", err.Error())
 			}
+			if key != "" && i.Name != "herdr" {
+				return fmt.Errorf("--key is only for the herdr integration")
+			}
 			e, err := integrationEnv()
 			if err != nil {
 				return err
 			}
+			e.Key = key
 			changes, err := i.Install(e)
 			out := cmd.OutOrStdout()
 			for _, c := range changes {
@@ -123,19 +129,25 @@ func newIntegrationInstallCmd() *cobra.Command {
 					fprintf(out, "set      launcher = %q in %s\n", i.Launcher, configFileForDisplay())
 				}
 			}
-			if st := i.Status(e); st.Wired != "" && i.Name == "tmux" {
-				fprintf(out, "\nReload tmux to pick it up: tmux source-file %s\n", paths.Contract(st.Wired))
+			if st := i.Status(e); st.Wired != "" && i.Reload != "" {
+				reload := i.Reload
+				if i.Name == "tmux" {
+					reload += " " + paths.Contract(st.Wired)
+				}
+				fprintf(out, "\nReload %s to pick it up: %s\n", i.Name, reload)
 			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&key, "key", "", "herdr: the key that opens vmono (default prefix+shift+v)")
 	cmd.Flags().BoolVar(&noLauncher, "no-launcher", false, "only install the files; leave the launcher setting alone")
 	return cmd
 }
 
 // newIntegrationUninstallCmd builds `vmono integration uninstall`. It
 // removes what install added and, when the launcher setting is the one the
-// integration turns on (or names its tool), puts it back to direct.
+// integration turns on (or names its tool), puts it back to direct, unless
+// another installed integration relies on it.
 func newIntegrationUninstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:       "uninstall <name>",
@@ -164,6 +176,11 @@ func newIntegrationUninstallCmd() *cobra.Command {
 			}
 			if i.Launcher == "" {
 				return nil
+			}
+			for _, other := range integrations.All() {
+				if other.Name != i.Name && other.Launcher == i.Launcher && other.Status(e).Installed {
+					return nil
+				}
 			}
 			cfg, err := config.Load()
 			if err != nil {

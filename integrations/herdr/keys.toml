@@ -1,0 +1,9 @@
+# vmono:begin (managed by `vmono integration install herdr`; --key changes the key)
+[[keys.command]]
+key = "prefix+shift+v"
+type = "popup"
+command = "env VMONO_LAUNCHER=herdr vmono"
+width = "90%"
+height = "85%"
+description = "vmono"
+# vmono:end

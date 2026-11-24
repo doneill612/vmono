@@ -35,6 +35,7 @@ var tmuxIntegration = Integration{
 	Summary:   "prefix+V opens vmono in a popup; sessions launch in their own tmux sessions",
 	Tool:      "tmux",
 	Launcher:  "auto",
+	Reload:    "tmux source-file",
 	Files:     []string{"vmono.tmux"},
 	install:   installTmux,
 	uninstall: uninstallTmux,
