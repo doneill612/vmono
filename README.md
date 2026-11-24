@@ -186,7 +186,7 @@ The shortcuts, none of which you have to use:
 | `s` / `f` | Sync every session / fetch every member's source |
 | `ctrl+d` | Delete the package and all its sessions (asks first; typed confirmation if work would be lost in any of them) |
 | `y` | Copy the package path |
-| `c` | Edit the config (package root, source roots, default harness) |
+| `c` | Edit the config (package root, source roots, hooks) |
 
 | Key (sessions) | Does |
 | --- | --- |
@@ -268,7 +268,7 @@ Commands run in the member's worktree through `sh -c` (`cmd /c` on Windows), in 
 
 ### Hooks
 
-Hooks in `config.toml` run for every session of every package:
+Hooks run for every session of every package. Set them in the TUI's settings (`c` on the packages view; `ctrl+o` switches a hook between warn and abort), or in `config.toml`:
 
 ```toml
 [hooks]
