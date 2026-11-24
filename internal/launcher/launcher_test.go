@@ -12,10 +12,11 @@ import (
 )
 
 // fakeTmux records every tmux command and answers list-sessions with
-// sessions and new-session with newID.
+// sessions, new-session with newID and display-message with here.
 type fakeTmux struct {
 	sessions string
 	newID    string
+	here     string
 	calls    [][]string
 	attached string
 	replace  bool
@@ -30,6 +31,8 @@ func (f *fakeTmux) install(t *testing.T) {
 		switch args[0] {
 		case "list-sessions":
 			return f.sessions, nil
+		case "display-message":
+			return f.here + "\n", nil
 		case "new-session":
 			return f.newID + "\n", nil
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/discover"
 	"github.com/doneill612/vmono/internal/harness"
+	"github.com/doneill612/vmono/internal/launcher"
 )
 
 // Exit codes from the spec.
@@ -55,7 +56,12 @@ func loadCore() (*core.Core, error) {
 		return nil, err
 	}
 	cfg.NoHooks = cfg.NoHooks || noHooks
-	return core.New(cfg)
+	c, err := core.New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	c.CloseSession = launcher.CloseSession
+	return c, nil
 }
 
 // withEvents runs fn with a progress channel attached to c and prints each

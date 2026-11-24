@@ -43,6 +43,10 @@ type Core struct {
 	// Events receives progress from apply steps. May be nil. The caller
 	// owns the channel and must drain it.
 	Events chan<- apply.Event
+	// CloseSession closes wherever a session's harness runs, such as a tmux
+	// session, before the session is removed, and returns lines to report. The
+	// front ends set it, since launchers are built on core. May be nil.
+	CloseSession func(pkg, session, dir string) []string
 }
 
 // New builds a Core from a loaded config, reading the index cache.

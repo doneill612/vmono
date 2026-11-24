@@ -166,12 +166,22 @@ type DeleteResult struct {
 	BranchesKept    []string `json:"branches_kept"`
 }
 
-// sessionSteps returns the apply steps that tear one session down: remove
-// each member's worktree, then the session directory. Safety checks are the
+// sessionSteps returns the apply steps that tear one session down: close
+// the terminal its harness runs in, remove each member's worktree, then the session directory. Safety checks are the
 // caller's job. With prefix set, each step's member is labeled
 // "session/member" so a package-wide run reads clearly.
 func (c *Core) sessionSteps(s *Session, opts DeleteOptions, res *DeleteResult, prefix bool) ([]apply.Step, error) {
 	var steps []apply.Step
+	if c.CloseSession != nil {
+		// First, so that no harness is left working in a directory that is
+		// going away, or on Windows holding it open.
+		steps = append(steps, apply.Step{Name: "close terminal", Run: func(warn func(string)) error {
+			for _, note := range c.CloseSession(s.Pkg.Name, s.Name, s.Dir) {
+				warn(note)
+			}
+			return nil
+		}})
+	}
 	for _, mem := range s.Pkg.M.Members {
 		ms, err := c.removeMemberSteps(s, mem, opts.Force, opts.DeleteBranches, res)
 		if err != nil {

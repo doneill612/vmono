@@ -601,6 +601,7 @@ func Run() error {
 		if err != nil {
 			return err
 		}
+		c.CloseSession = launcher.CloseSession
 		final, err := tea.NewProgram(NewApp(c, message), tea.WithAltScreen()).Run()
 		if err != nil {
 			return err
