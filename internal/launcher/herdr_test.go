@@ -160,7 +160,7 @@ func TestHerdrErrors(t *testing.T) {
 	if _, err := (Herdr{}).Launch(herdrLaunch(t.TempDir()), Opts{}); err == nil || !strings.Contains(err.Error(), "not running") {
 		t.Errorf("launch = %v", err)
 	}
-	if notes := CloseSession("pay", "work", "/x"); notes != nil {
+	if notes := closeNow("pay", "work", "/x"); notes != nil {
 		t.Errorf("a server that is down has nothing to close: %v", notes)
 	}
 }
@@ -178,7 +178,7 @@ func TestCloseSessionClosesItsHerdrWorkspace(t *testing.T) {
 		{name: "tagged", snap: tagged(dir), tries: true, note: "closed herdr workspace"},
 		{name: "another package root", snap: tagged("/elsewhere")},
 		{name: "from inside", snap: tagged(dir), here: "w1", note: "running inside it"},
-		{name: "grouped", snap: tagged(dir), fail: errors.New("group"), tries: true, note: "left its herdr open: group"},
+		{name: "grouped", snap: tagged(dir), fail: errors.New("group"), tries: true, note: "left its herdr workspace \"pay/work\" open: group"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeHerdr{snap: tc.snap, fail: map[string]error{"workspace close": tc.fail}}
@@ -187,7 +187,7 @@ func TestCloseSessionClosesItsHerdrWorkspace(t *testing.T) {
 				t.Setenv("HERDR_ENV", "1")
 				t.Setenv("HERDR_WORKSPACE_ID", tc.here)
 			}
-			notes := strings.Join(CloseSession("pay", "work", dir), "\n")
+			notes := strings.Join(closeNow("pay", "work", dir), "\n")
 			if tc.note == "" && notes != "" || !strings.Contains(notes, tc.note) || f.ran("workspace close") != tc.tries {
 				t.Errorf("notes = %q, calls %v", notes, f.calls)
 			}

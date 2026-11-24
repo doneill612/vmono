@@ -60,7 +60,7 @@ func loadCore() (*core.Core, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.CloseSession = launcher.CloseSession
+	c.FindTerminal = launcher.FindSession
 	return c, nil
 }
 

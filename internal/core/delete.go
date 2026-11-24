@@ -166,22 +166,12 @@ type DeleteResult struct {
 	BranchesKept    []string `json:"branches_kept"`
 }
 
-// sessionSteps returns the apply steps that tear one session down: close
-// the terminal its harness runs in, remove each member's worktree, then the session directory. Safety checks are the
+// sessionSteps returns the apply steps that tear one session down: remove
+// each member's worktree, then the session directory. Safety checks are the
 // caller's job. With prefix set, each step's member is labeled
 // "session/member" so a package-wide run reads clearly.
 func (c *Core) sessionSteps(s *Session, opts DeleteOptions, res *DeleteResult, prefix bool) ([]apply.Step, error) {
 	var steps []apply.Step
-	if c.CloseSession != nil {
-		// First, so that no harness is left working in a directory that is
-		// going away, or on Windows holding it open.
-		steps = append(steps, apply.Step{Name: "close terminal", Run: func(warn func(string)) error {
-			for _, note := range c.CloseSession(s.Pkg.Name, s.Name, s.Dir) {
-				warn(note)
-			}
-			return nil
-		}})
-	}
 	for _, mem := range s.Pkg.M.Members {
 		ms, err := c.removeMemberSteps(s, mem, opts.Force, opts.DeleteBranches, res)
 		if err != nil {
@@ -196,6 +186,35 @@ func (c *Core) sessionSteps(s *Session, opts DeleteOptions, res *DeleteResult, p
 		labelSteps(steps, s.Name)
 	}
 	return steps, nil
+}
+
+// terminals finds the terminals the sessions' harnesses run in, and returns
+// the function that closes them. It must be called before the sessions are
+// removed, and the function after everything else has been done and saved:
+// vmono may be running in one of them, for instance in a popup over it, and
+// closing it then ends vmono.
+func (c *Core) terminals(sessions ...*Session) func() {
+	var steps []apply.Step
+	for _, s := range sessions {
+		if c.FindTerminal == nil {
+			break
+		}
+		closeIt := c.FindTerminal(s.Pkg.Name, s.Name, s.Dir)
+		if closeIt == nil {
+			continue
+		}
+		step := apply.Step{Name: "close terminal", RunOut: func(_, out func(string)) error {
+			for _, note := range closeIt() {
+				out(note)
+			}
+			return nil
+		}}
+		if len(sessions) > 1 {
+			step.Member = s.Name
+		}
+		steps = append(steps, step)
+	}
+	return func() { _ = (&apply.Runner{Events: c.Events}).Run(steps) }
 }
 
 // labelSteps prefixes each step's member with the session name, giving
@@ -231,11 +250,13 @@ func (c *Core) DeleteSession(s *Session, opts DeleteOptions) (DeleteResult, erro
 	if err != nil {
 		return res, err
 	}
+	closeTerminals := c.terminals(s)
 	if err := (&apply.Runner{Events: c.Events}).Run(steps); err != nil {
 		return res, err
 	}
 	c.Idx.RemoveSession(s.Pkg.Name, s.Name)
 	_ = c.Idx.Save()
+	closeTerminals()
 	return res, nil
 }
 
@@ -269,11 +290,13 @@ func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
 	steps = append(steps, apply.Step{Name: "remove package", Run: func(func(string)) error {
 		return os.RemoveAll(p.Dir)
 	}})
+	closeTerminals := c.terminals(sessions...)
 	if err := (&apply.Runner{Events: c.Events}).Run(steps); err != nil {
 		return res, err
 	}
 	c.Idx.RemovePackage(p.Name)
 	_ = c.Idx.Save()
+	closeTerminals()
 	return res, nil
 }
 

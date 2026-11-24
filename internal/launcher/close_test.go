@@ -22,7 +22,7 @@ func TestCloseSessionKillsItsTmuxSession(t *testing.T) {
 			t.Setenv("TMUX", tc.tmux)
 			f := &fakeTmux{sessions: tc.sessions, here: tc.here}
 			f.install(t)
-			notes := strings.Join(CloseSession("pay", "work", dir), "\n")
+			notes := strings.Join(closeNow("pay", "work", dir), "\n")
 			if tc.note == "" && notes != "" || !strings.Contains(notes, tc.note) {
 				t.Errorf("notes = %q", notes)
 			}
@@ -31,5 +31,23 @@ func TestCloseSessionKillsItsTmuxSession(t *testing.T) {
 				t.Errorf("kill = %v", kill)
 			}
 		})
+	}
+}
+
+// closeNow finds a session and closes it straight away.
+func closeNow(pkg, session, dir string) []string {
+	if f := FindSession(pkg, session, dir); f != nil {
+		return f()
+	}
+	return nil
+}
+
+func TestFindSessionClosesNothingYet(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeTmux{sessions: "$3\tpay/work\t" + dir}
+	f.install(t)
+	t.Setenv("TMUX", "")
+	if FindSession("pay", "work", dir) == nil || f.call("kill-session") != nil {
+		t.Errorf("calls = %v", f.calls)
 	}
 }

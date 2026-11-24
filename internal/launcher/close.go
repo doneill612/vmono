@@ -11,14 +11,15 @@ import (
 // be closed when the session is removed.
 type Closer interface {
 	Launcher
-	// Close closes the place the session "pkg/session" at dir runs in, if
-	// there is one, killing the harness in it. It returns what it closed, ""
-	// for nothing, and errInside when vmono itself runs there.
-	Close(tag, dir string) (closed string, err error)
+	// Find looks for the place the session "pkg/session" at dir runs in and
+	// returns its name and how to close it, killing the harness in it. close
+	// is nil when there is none. The error is errInside when vmono is known to
+	// run there itself.
+	Find(tag, dir string) (place string, close func() error, err error)
 }
 
-// errInside is returned instead of closing the place vmono runs in, which
-// would kill vmono halfway through removing the session.
+// errInside is returned for the place vmono itself runs in. Closing it would
+// take away the terminal the user is reading vmono's result in.
 var errInside = errors.New("vmono is running inside it")
 
 // closers returns every launcher that may have a place to close and can run
@@ -37,21 +38,40 @@ func closers() []Closer {
 	return out
 }
 
-// CloseSession closes wherever the session is running, under any launcher, and
-// reports what it closed or had to leave open, one line each. It never fails:
-// a place that cannot be closed should not keep a session from being removed.
-func CloseSession(pkg, session, dir string) []string {
+// FindSession finds wherever the session is running, under any launcher, and
+// returns a function that closes it and reports what it closed or had to leave
+// open, one line each. It is nil when there is nothing to close or report.
+//
+// The two are separate because finding needs the session's directory to
+// exist, while closing has to come after everything else. Not every terminal
+// tells vmono where it is (a herdr popup does not), so closing one can kill
+// vmono. A place that cannot be closed never fails the removal.
+func FindSession(pkg, session, dir string) func() []string {
 	var notes []string
+	var found []func() string
 	for _, c := range closers() {
-		closed, err := c.Close(pkg+"/"+session, dir)
+		place, closePlace, err := c.Find(pkg+"/"+session, dir)
 		switch {
 		case err != nil:
 			notes = append(notes, fmt.Sprintf("left its %s open: %v", c.Name(), err))
-		case closed != "":
-			notes = append(notes, "closed "+closed)
+		case closePlace != nil:
+			found = append(found, func() string {
+				if err := closePlace(); err != nil {
+					return fmt.Sprintf("left its %s open: %v", place, err)
+				}
+				return "closed " + place
+			})
 		}
 	}
-	return notes
+	if len(notes)+len(found) == 0 {
+		return nil
+	}
+	return func() []string {
+		for _, f := range found {
+			notes = append(notes, f())
+		}
+		return notes
+	}
 }
 
 // samePath reports whether two paths are the same directory, through symlinks

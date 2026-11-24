@@ -610,7 +610,7 @@ func Run() error {
 		if err != nil {
 			return err
 		}
-		c.CloseSession = launcher.CloseSession
+		c.FindTerminal = launcher.FindSession
 		app := NewApp(c, message)
 		if launcher.HasLive(cfg) {
 			app.watchAgents(launcher.TakeLive)

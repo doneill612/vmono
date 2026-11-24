@@ -189,25 +189,22 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// Close implements Closer.
-func (Herdr) Close(tag, dir string) (string, error) {
+// Find implements Closer.
+func (Herdr) Find(tag, dir string) (string, func() error, error) {
 	snap, err := herdr.TakeSnapshot()
 	if herdr.IsCode(err, herdr.CodeNotRunning) {
-		return "", nil
+		return "", nil, nil
 	}
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	id := findHerdrWorkspace(snap, tag, dir)
 	// The token alone does not say which package root it is for.
 	if id == "" || !hasPaneIn(snap, id, dir) {
-		return "", nil
+		return "", nil, nil
 	}
 	if id == herdr.CurrentWorkspace() {
-		return "", errInside
+		return "", nil, errInside
 	}
-	if err := herdr.Close(id); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("herdr workspace %q", tag), nil
+	return fmt.Sprintf("herdr workspace %q", tag), func() error { return herdr.Close(id) }, nil
 }
