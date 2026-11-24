@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/doneill612/vmono/internal/apply"
+	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/gitx"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
@@ -229,25 +230,11 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 		return
 	}
 
-	if gitx.RebaseInProgress(l.wt) {
-		if files, _ := gitx.ConflictedFiles(l.wt); len(files) > 0 {
-			l.Status, l.Conflicts = LandConflict, files
-			l.Reason = "a rebase is stopped on conflicts; resolve them, `git add`, `git rebase --continue`, then finish again"
-			return
+	if p := checkWorktree(s, l.wt, "finish"); p != nil {
+		l.block("%s", p.reason)
+		if len(p.conflicts) > 0 {
+			l.Status, l.Conflicts = LandConflict, p.conflicts
 		}
-		l.block("a rebase is in progress; run `git rebase --continue` in %s, then finish again", l.wt)
-		return
-	}
-	st, err := gitx.StatusOf(l.wt)
-	switch {
-	case err != nil:
-		l.block("cannot read its state: %v", err)
-		return
-	case st.Detached || st.Branch != s.S.Branch:
-		l.block("its worktree is on %s, not the session branch %s", firstNonEmpty(st.Branch, "a detached HEAD"), s.S.Branch)
-		return
-	case st.Dirty > 0 || st.Untracked > 0:
-		l.block("uncommitted changes (%d modified, %d untracked); commit them first", st.Dirty, st.Untracked)
 		return
 	}
 
@@ -266,7 +253,7 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 		}
 	}
 
-	if l.Commits, err = ownCommits(l.wt, base, l.target); err != nil {
+	if l.Commits, err = ownCommits(src, l.wt, l.Into, base, l.target); err != nil {
 		l.block("cannot count its commits: %v", err)
 		return
 	}
@@ -278,6 +265,10 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 	if !gitx.IsMerged(l.wt, l.target, "HEAD") {
 		if l.fork, err = forkPoint(l.wt, base, l.target); err != nil {
 			l.block("%v", err)
+			return
+		}
+		if replaysUpstream(src, l.wt, l.Into, l.fork, l.target) {
+			l.block("%s has moved since the session took in commits from %s, and rebasing would duplicate those; run `vmono session update --merge`, then finish again", l.Into, shortRef(remoteCounterpart(src, l.Into)))
 			return
 		}
 	}
@@ -299,31 +290,45 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 				return
 			}
 		}
-		if behind, err := gitx.RevCount(src, l.Into+"@{upstream}", "--not", l.target); err == nil && behind > 0 {
+		if behind, err := gitx.RevCount(src, l.Into+"@{upstream}", "--not", l.target, "refs/heads/"+s.S.Branch); err == nil && behind > 0 {
+			if _, diverged := freshest(src, l.Into); diverged {
+				l.Notes = append(l.Notes, fmt.Sprintf("%s has diverged from its upstream, so pushing it will be refused; `vmono session update --merge` first lands both sides", l.Into))
+				return
+			}
 			l.Notes = append(l.Notes, fmt.Sprintf("%s is %d commit(s) behind its upstream; `git -C %s pull --ff-only` first if you want them", l.Into, behind, src))
 		}
 	}
 }
 
-// landingTarget returns the ref a member's work is measured and rebased
-// against, and whether the landing branch exists as a local branch. A branch
-// that exists only on origin stands in for it, and one that exists nowhere
-// is measured against the member's base, since finish will create it there.
-func landingTarget(src, into, base string) (target string, exists bool) {
-	switch {
-	case gitx.BranchExists(src, into):
-		return "refs/heads/" + into, true
-	case gitx.RefExists(src, "refs/remotes/origin/"+into):
-		return "refs/remotes/origin/" + into, false
-	}
-	return base, false
+// worktreeProblem is why a member's worktree cannot be rebased as it stands.
+type worktreeProblem struct {
+	reason string
+	// conflicts lists the files a rebase already under way is stopped on.
+	conflicts []string
+	// uncommitted is true when uncommitted work is all that is in the way.
+	uncommitted bool
 }
 
-// ownCommits counts the commits in the worktree that are reachable from HEAD
-// but from neither the member's base nor the landing target: the session's own
-// work still to land.
-func ownCommits(wt, base, target string) (int, error) {
-	return gitx.RevCount(wt, "HEAD", "--not", base, target)
+// checkWorktree returns what keeps the member worktree at wt from being
+// rebased, or nil when it is clean and on the session branch. then is the
+// command the reason tells the user to run again.
+func checkWorktree(s *Session, wt, then string) *worktreeProblem {
+	if gitx.RebaseInProgress(wt) {
+		if files, _ := gitx.ConflictedFiles(wt); len(files) > 0 {
+			return &worktreeProblem{conflicts: files, reason: "a rebase is stopped on conflicts; resolve them, `git add`, `git rebase --continue`, then " + then + " again"}
+		}
+		return &worktreeProblem{reason: fmt.Sprintf("a rebase is in progress; run `git rebase --continue` in %s, then %s again", wt, then)}
+	}
+	st, err := gitx.StatusOf(wt)
+	switch {
+	case err != nil:
+		return &worktreeProblem{reason: fmt.Sprintf("cannot read its state: %v", err)}
+	case st.Detached || st.Branch != s.S.Branch:
+		return &worktreeProblem{reason: fmt.Sprintf("its worktree is on %s, not the session branch %s", firstNonEmpty(st.Branch, "a detached HEAD"), s.S.Branch)}
+	case st.Dirty > 0 || st.Untracked > 0:
+		return &worktreeProblem{uncommitted: true, reason: fmt.Sprintf("uncommitted changes (%d modified, %d untracked); commit them first", st.Dirty, st.Untracked)}
+	}
+	return nil
 }
 
 // firstNonEmpty returns the first argument that is not empty.
@@ -440,6 +445,13 @@ func (c *Core) Finish(s *Session, opts FinishOptions) (FinishResult, error) {
 	}
 	for _, l := range touched {
 		l.Status = LandLanded
+		// A branch that so far existed only on its remote should track it, as
+		// one made with `git switch` would. Push copes without it.
+		if remote, ok := strings.CutPrefix(l.target, "refs/remotes/"); ok && l.Create {
+			if err := gitx.SetUpstream(l.src, l.Into, remote); err != nil {
+				c.warnEvent(l.Name, "update "+l.Into, "could not make it track "+remote+": "+oneLine(err.Error()))
+			}
+		}
 	}
 	res.Members = membersOf(plan)
 
@@ -447,6 +459,15 @@ func (c *Core) Finish(s *Session, opts FinishOptions) (FinishResult, error) {
 		return res, err
 	}
 	res.Finished = true
+
+	var landed []string
+	for _, l := range touched {
+		landed = append(landed, l.Name+":"+l.Into)
+	}
+	post := c.hookSteps(config.HookPostFinish, s, map[string]string{"VMONO_LANDED": strings.Join(landed, " ")})
+	if err := (&apply.Runner{Events: c.Events}).Run(post); err != nil {
+		return res, fmt.Errorf("landed, but %w", err)
+	}
 
 	if opts.Close {
 		del, err := c.DeleteSession(s, DeleteOptions{DeleteBranches: true})

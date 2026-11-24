@@ -300,3 +300,16 @@ func TestListsShowASpinnerNotACountUntilLoaded(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateRunsFromTheSessionsViewAndReturnsToIt(t *testing.T) {
+	env := testutil.NewEnv(t)
+	seed(t, env, "pay", env.NewSource(t, "alpha"))
+	d := newDriver(t, env, "")
+
+	d.key("right", "u")
+	d.eventually(func() bool { return containsView(d, "done") }, "the update to finish")
+	d.has("Update pay/work")
+	d.key("enter")
+	d.has("clean")
+	d.lacks("Update pay/work")
+}

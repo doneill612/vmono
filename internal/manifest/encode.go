@@ -47,6 +47,8 @@ func Encode(m *Manifest) []byte {
 		if mem.Hooks {
 			b.WriteString("hooks  = true\n")
 		}
+		writeCommands(&b, "setup", mem.Setup)
+		writeCommands(&b, "teardown", mem.Teardown)
 	}
 	for _, n := range m.Notes {
 		b.WriteString("\n[[note]]\n")
@@ -55,6 +57,22 @@ func Encode(m *Manifest) []byte {
 		fmt.Fprintf(&b, "text = %s\n", quote(n.Text))
 	}
 	return []byte(b.String())
+}
+
+// writeCommands emits a commands key, as a plain string when there is one.
+func writeCommands(b *strings.Builder, key string, cmds Commands) {
+	if len(cmds) == 0 {
+		return
+	}
+	parts := make([]string, len(cmds))
+	for i, c := range cmds {
+		parts[i] = quote(c)
+	}
+	val := parts[0]
+	if len(parts) > 1 {
+		val = "[" + strings.Join(parts, ", ") + "]"
+	}
+	fmt.Fprintf(b, "%-6s = %s\n", key, val)
 }
 
 // writeText emits a top-level string key, using a multi-line literal block

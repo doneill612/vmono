@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -175,5 +176,46 @@ command = "claude-wrapper"
 		if got := cfg.Harness[name].Adapter; got != want {
 			t.Errorf("%s adapter = %q, want %q", name, got, want)
 		}
+	}
+}
+
+func TestHooksRoundTripAndValidate(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.toml")
+	load := func(text string) (Config, error) {
+		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return LoadFrom(file)
+	}
+	cfg, err := load("[hooks]\npost_create = \"code .\"\n[hooks.pre_remove]\ncommand = \"x\"\ntimeout = \"30s\"\non_failure = \"abort\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(file); err != nil {
+		t.Fatal(err)
+	}
+	again, err := LoadFrom(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []Config{cfg, again} {
+		if c.Hooks[HookPostCreate].Command != "code ." || c.Hooks[HookPreRemove] != (Hook{Command: "x", Timeout: "30s", OnFailure: OnFailureAbort}) {
+			t.Errorf("hooks = %+v", c.Hooks)
+		}
+	}
+	for _, bad := range []string{
+		"[hooks]\npost_creat = \"x\"\n", "[hooks]\npost_create = \"\"\n", "[hooks]\npost_create = 3\n",
+		"[hooks.pre_remove]\ncommand = \"x\"\ntimeout = \"soon\"\n", "[hooks.pre_remove]\ncommand = \"x\"\non_failure = \"explode\"\n",
+		"[hooks.pre_remove]\ncommand = \"x\"\nonfailure = \"abort\"\n",
+	} {
+		if _, err := load(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if err := Defaults().SaveTo(file); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(file); strings.Contains(string(data), "hooks") {
+		t.Errorf("no hooks should write no table:\n%s", data)
 	}
 }

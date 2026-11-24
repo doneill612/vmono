@@ -290,3 +290,39 @@ func TestCompletePath(t *testing.T) {
 		t.Errorf("empty input = %q", got)
 	}
 }
+
+func TestEditMemberCommands(t *testing.T) {
+	env := testutil.NewEnv(t)
+	seed(t, env, "cmds", env.NewSource(t, "alpha"))
+	d := newDriver(t, env, "")
+
+	d.key("e", "tab", "tab", "tab", "c")
+	d.has("setup and teardown", "member alpha")
+	d.typeText("pnpm install")
+	d.key("enter")
+	d.typeText("make")
+	d.key("tab")
+	d.typeText("rm -rf out")
+	d.key("ctrl+s")
+	d.has("Edit · cmds", "setup, teardown")
+	d.key("c")
+	d.has("pnpm install", "rm -rf out")
+	d.typeText("oops")
+	d.key("esc", "ctrl+s") // a cancelled dialog changes nothing
+	d.eventually(func() bool { return containsView(d, "enter back to packages") }, "edit to finish")
+
+	mem := loadPkg(t, "cmds").M.Members[0]
+	if strings.Join(mem.Setup, "|") != "pnpm install|make" || strings.Join(mem.Teardown, "|") != "rm -rf out" {
+		t.Errorf("member = %+v", mem)
+	}
+	d.key("enter", "e", "tab", "tab", "tab", "c")
+	d.has("pnpm install", "make") // and it can be taken out again
+	for range "pnpm install\nmake" {
+		d.key("backspace")
+	}
+	d.key("ctrl+s", "ctrl+s")
+	d.eventually(func() bool { return containsView(d, "enter back to packages") }, "edit to finish")
+	if mem := loadPkg(t, "cmds").M.Members[0]; len(mem.Setup) != 0 || len(mem.Teardown) != 1 {
+		t.Errorf("after clearing = %+v", mem)
+	}
+}

@@ -33,6 +33,7 @@ var sessionActions = []action{
 	{id: "describe", label: "Describe", key: "d"},
 	{id: "sync", label: "Sync", key: "s"},
 	{id: "fetch", label: "Fetch", key: "f"},
+	{id: "update", label: "Update from landing branches", key: "u"},
 	{id: "copy", label: "Copy path", key: "y"},
 	{id: "into", label: "Landing branches", key: "i"},
 	{id: "finish", label: "Finish", key: "F"},
@@ -103,7 +104,7 @@ func (m *sessionsModel) Hints() []hint {
 	return []hint{
 		{"enter", "Actions"}, {"o", "Launch"}, {"l", "Launch with…"}, {"n", "New session"}, {"m", "Members"},
 		{"d", "Describe"}, {"y", "Copy path"}, {"e", "Edit package"}, {"s", "Sync"},
-		{"f", "Fetch"}, {"i", "Landing branches"}, {"F", "Finish"}, {"P", "Push"}, {"ctrl+d", "Delete"},
+		{"f", "Fetch"}, {"u", "Update"}, {"i", "Landing branches"}, {"F", "Finish"}, {"P", "Push"}, {"ctrl+d", "Delete"},
 		{"esc", "Back"},
 	}
 }
@@ -345,6 +346,8 @@ func (m *sessionsModel) act(id string, sel core.SessionSummary) (screen, tea.Cmd
 		return m, push(m, newDescribe(m.e, m.name, sel.Name, ""))
 	case "sync":
 		return m, push(m, newProgress(m.e, syncSessionOp(m.e.core, m.name, sel.Name)))
+	case "update":
+		return m, push(m, newProgress(m.e, updateOp(m.e.core, m.name, sel.Name)))
 	case "copy":
 		if err := clipboard.WriteAll(sel.Path); err != nil {
 			return m, flashErr("could not copy: " + err.Error() + " — " + sel.Path)
@@ -393,6 +396,26 @@ func syncSessionOp(c *core.Core, pkg, session string) operation {
 			_, err = c.Sync(s, core.SyncOptions{})
 			return err
 		},
+	}
+}
+
+// updateOp builds the operation that rebases one session's members onto the
+// latest of their landing branches. Nothing is asked first: a member that
+// cannot be updated cleanly is left as it was. A failure offers to launch the
+// harness in the session, which is where a conflict gets resolved.
+func updateOp(c *core.Core, pkg, session string) operation {
+	return operation{
+		title: "Update " + pkg + "/" + session,
+		run: func(_, _ bool) error {
+			s, err := c.ResolveSession(pkg + "/" + session)
+			if err != nil {
+				return err
+			}
+			_, err = c.Update(s, core.UpdateOptions{})
+			return err
+		},
+		reveal: true,
+		fixIn:  &LaunchRequest{Package: pkg, Session: session},
 	}
 }
 

@@ -80,6 +80,16 @@ func (f *intoFields) values() map[string]string {
 	return out
 }
 
+// set replaces the value of the named member's field.
+func (f *intoFields) set(member, v string) {
+	for i, name := range f.members {
+		if name == member {
+			f.inputs[i].SetValue(v)
+			f.inputs[i].CursorEnd()
+		}
+	}
+}
+
 // view renders the fields, one per line.
 func (f *intoFields) view() string {
 	var b strings.Builder

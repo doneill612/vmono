@@ -201,7 +201,8 @@ func labelSteps(steps []apply.Step, session string) {
 }
 
 // DeleteSession tears one session down: it checks every member for lost work
-// (returning a *RefusedError unless forced), removes each worktree and
+// (returning a *RefusedError unless forced), runs the pre_remove hook, which may
+// veto it, removes each worktree and
 // prunes its source, optionally deletes merged branches, then removes the
 // session directory. Source repos' working trees and checked-out branches
 // are never touched, and the package and its other sessions are left alone.
@@ -212,6 +213,9 @@ func (c *Core) DeleteSession(s *Session, opts DeleteOptions) (DeleteResult, erro
 	}
 	if bad := unsafeOf(c.SafetyCheck(s)); len(bad) > 0 && !opts.Force {
 		return res, &RefusedError{Unsafe: bad}
+	}
+	if err := c.preRemove(s); err != nil {
+		return res, err
 	}
 	steps, err := c.sessionSteps(s, opts, &res, false)
 	if err != nil {
@@ -240,6 +244,9 @@ func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
 	}
 	if bad := unsafeOf(c.safetyAcross(sessions, p.M.Members)); len(bad) > 0 && !opts.Force {
 		return res, &RefusedError{Unsafe: bad}
+	}
+	if err := c.preRemove(sessions...); err != nil {
+		return res, err
 	}
 	var steps []apply.Step
 	for _, s := range sessions {
@@ -283,7 +290,7 @@ func deleteMergedBranch(src, branch, base, into string) (keptReason string, dele
 }
 
 // removeMemberSteps returns the apply steps that take one member out of a
-// session: remove its worktree (forcibly only when force is set), prune the
+// session: run its teardown commands, remove its worktree (forcibly only when force is set), prune the
 // source, and optionally delete the session branch if it is merged into its
 // base. Outcomes for branches are recorded into res. Safety checks are the
 // caller's job.
@@ -293,7 +300,7 @@ func (c *Core) removeMemberSteps(s *Session, mem manifest.Member, force, deleteB
 		return nil, err
 	}
 	dir := s.MemberDir(mem)
-	steps := []apply.Step{{Member: mem.Name, Name: "worktree remove", Run: func(warn func(string)) error {
+	steps := append(c.memberHookSteps(s, mem, src, "teardown", mem.Teardown), apply.Step{Member: mem.Name, Name: "worktree remove", Run: func(warn func(string)) error {
 		if _, err := os.Stat(dir); err == nil {
 			if err := gitx.WorktreeRemove(src, dir, force); err != nil {
 				return err
@@ -304,7 +311,7 @@ func (c *Core) removeMemberSteps(s *Session, mem manifest.Member, force, deleteB
 			return nil
 		}
 		return gitx.WorktreePrune(src)
-	}}}
+	}})
 	if deleteBranch && mem.Mode == manifest.ModeActive {
 		steps = append(steps, apply.Step{Member: mem.Name, Name: "delete branch", Run: func(warn func(string)) error {
 			into, _ := landingBranch(s, mem, src)

@@ -1055,3 +1055,58 @@ func TestSessionPush(t *testing.T) {
 		t.Errorf("pushing again = %q, %v", text, err)
 	}
 }
+
+func TestSessionUpdate(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	out, stderr, err := run(t, "new", "demo", "--active", a, "--session", "work")
+	if err != nil {
+		t.Fatalf("new: %v\n%s", err, stderr)
+	}
+	wt := filepath.Join(strings.TrimSpace(out), "alpha")
+	testutil.WriteFile(t, filepath.Join(a, "new.txt"), "new\n")
+	testutil.Git(t, a, "add", "-A")
+	testutil.Git(t, a, "commit", "--quiet", "-m", "new")
+
+	testutil.WriteFile(t, filepath.Join(wt, "README.md"), "edited\n")
+	out, _, err = run(t, "session", "update", "demo/work", "--json")
+	var res core.UpdateResult
+	if ExitCode(err) != ExitRefused || json.Unmarshal([]byte(out), &res) != nil || res.Members[0].Status != core.UpdateSkipped {
+		t.Errorf("dirty update = %q, %v", out, err)
+	}
+	testutil.Git(t, wt, "checkout", "--quiet", "README.md")
+	out, _, err = run(t, "session", "update", "demo/work")
+	if err != nil || !strings.Contains(out, "updated onto main (1 behind") {
+		t.Errorf("update = %q, %v", out, err)
+	}
+}
+
+func TestSessionNewTrack(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	testutil.Git(t, a, "push", "--quiet", "origin", "main:feat/x")
+	if _, _, err := run(t, "new", "demo", "--active", a, "--session", "one", "--track", "feat/x"); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, err := run(t, "session", "into", "demo/one"); err != nil || !strings.Contains(out, "feat/x") {
+		t.Errorf("into = %q, %v", out, err)
+	}
+	if _, _, err := run(t, "session", "new", "demo", "two", "--track", "alpha=nope"); ExitCode(err) != ExitNotFound {
+		t.Errorf("missing branch = %v", err)
+	}
+}
+
+func TestNoHooksFlag(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	testutil.WriteFile(t, filepath.Join(env.Root, "cfg", "config.toml"), "[hooks.pre_remove]\ncommand = \"exit 1\"\non_failure = \"abort\"\n")
+	if _, _, err := run(t, "new", "demo", "--active", a, "--session", "work"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run(t, "session", "rm", "demo/work"); ExitCode(err) != ExitRefused {
+		t.Errorf("want a veto, got %v", err)
+	}
+	if _, _, err := run(t, "session", "rm", "demo/work", "--no-hooks"); err != nil {
+		t.Errorf("--no-hooks: %v", err)
+	}
+}

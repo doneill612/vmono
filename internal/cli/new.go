@@ -16,20 +16,24 @@ import (
 func newNewCmd() *cobra.Command {
 	var active, refs []string
 	var purposeFile, contextFile, branch, harness, session string
-	var into []string
+	var into, track []string
 	var reuse bool
 	cmd := &cobra.Command{
-		Use:   "new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--branch B] [--into B]]",
+		Use:   "new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--branch B] [--into B] [--track B]]",
 		Short: "Define a package, and optionally start its first session",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(active)+len(refs) == 0 {
 				return errors.New("a package needs at least one member: pass --active and/or --ref")
 			}
-			if session == "" && (branch != "" || len(into) > 0 || reuse) {
-				return errors.New("--branch, --into and --reuse-branch belong to a session: pass --session NAME, or use `vmono session new`")
+			if session == "" && (branch != "" || len(into) > 0 || len(track) > 0 || reuse) {
+				return errors.New("--branch, --into, --track and --reuse-branch belong to a session: pass --session NAME, or use `vmono session new`")
 			}
-			intoAll, intoBy, err := parseInto(into)
+			intoAll, intoBy, err := parseBranches("--into", into)
+			if err != nil {
+				return err
+			}
+			trackAll, trackBy, err := parseBranches("--track", track)
 			if err != nil {
 				return err
 			}
@@ -72,7 +76,7 @@ func newNewCmd() *cobra.Command {
 					return cerr
 				}
 				if session != "" {
-					s, cerr = c.CreateSession(p, session, core.SessionOptions{Branch: branch, Into: intoAll, IntoByMember: intoBy, ReuseBranch: reuse})
+					s, cerr = c.CreateSession(p, session, core.SessionOptions{Branch: branch, Into: intoAll, IntoByMember: intoBy, Track: trackAll, TrackByMember: trackBy, ReuseBranch: reuse})
 				}
 				return cerr
 			})
@@ -99,6 +103,7 @@ func newNewCmd() *cobra.Command {
 	f.StringVar(&session, "session", "", "also start a first session with this name")
 	f.StringVar(&branch, "branch", "", "with --session: the session branch (default: <branch_prefix><pkg>/<session>)")
 	f.StringArrayVar(&into, "into", nil, "with --session: "+intoHelp+"; default is the branch each source has checked out")
+	f.StringArrayVar(&track, "track", nil, "with --session: "+trackHelp)
 	f.BoolVar(&reuse, "reuse-branch", false, "with --session: check out the branch if it already exists in a source repo")
 	return cmd
 }

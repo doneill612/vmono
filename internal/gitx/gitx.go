@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Error is returned when a git invocation exits non-zero. It carries the
@@ -551,6 +552,28 @@ func RebaseOnto(worktree, onto, upstream string) error {
 	return err
 }
 
+// RebaseAbort gives up a rebase in progress in the worktree, putting its branch
+// and files back as they were before it started.
+func RebaseAbort(worktree string) error {
+	_, err := run(worktree, "rebase", "--abort")
+	return err
+}
+
+// Merge merges ref into the worktree's checked-out branch, without opening an
+// editor. On a conflict git stops and leaves the merge in progress. A missing
+// commit identity is filled in the same way CommitAll fills it.
+func Merge(worktree, ref string) error {
+	_, err := run(worktree, append(identityArgs(worktree), "merge", "--no-edit", "--quiet", ref)...)
+	return err
+}
+
+// MergeAbort gives up a merge in progress in the worktree, putting its branch
+// and files back as they were before it started.
+func MergeAbort(worktree string) error {
+	_, err := run(worktree, "merge", "--abort")
+	return err
+}
+
 // RebaseInProgress reports whether the worktree is in the middle of a
 // rebase, stopped on a conflict or waiting on `git rebase --continue`.
 func RebaseInProgress(worktree string) bool {
@@ -713,6 +736,41 @@ func UpstreamOf(repo, branch string) (Tracking, bool) {
 		return Tracking{}, false
 	}
 	return Tracking{Remote: remote, Branch: strings.TrimPrefix(ref, prefix), Ref: ref}, true
+}
+
+// RemoteBranch is a branch of a remote as of the last fetch.
+type RemoteBranch struct {
+	// Name is the branch's name on the remote, without the remote's.
+	Name string
+	// When is the time of its latest commit.
+	When time.Time
+}
+
+// RemoteBranches lists the branches of remote as of the last fetch, the one
+// with the most recent commit first.
+func RemoteBranches(repo, remote string) ([]RemoteBranch, error) {
+	prefix := "refs/remotes/" + remote + "/"
+	out, err := run(repo, "for-each-ref", "--sort=-committerdate", "--format=%(committerdate:unix) %(refname)", prefix)
+	if err != nil {
+		return nil, err
+	}
+	var list []RemoteBranch
+	for _, line := range strings.Split(out, "\n") {
+		when, ref, _ := strings.Cut(strings.TrimSpace(line), " ")
+		name := strings.TrimPrefix(ref, prefix)
+		if name == "" || name == "HEAD" {
+			continue
+		}
+		sec, _ := strconv.ParseInt(when, 10, 64)
+		list = append(list, RemoteBranch{Name: name, When: time.Unix(sec, 0)})
+	}
+	return list, nil
+}
+
+// SetUpstream makes the local branch track upstream, such as "origin/main".
+func SetUpstream(repo, branch, upstream string) error {
+	_, err := run(repo, "branch", "--set-upstream-to="+upstream, branch)
+	return err
 }
 
 // Remotes returns the names of the repo's remotes, in git's order.

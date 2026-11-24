@@ -120,7 +120,7 @@ func TestPassThroughArgsAndMissingCommand(t *testing.T) {
 }
 
 func TestBuildEnvOverridesInherited(t *testing.T) {
-	s := &core.Session{Pkg: &core.Package{Name: "n", Dir: "/d"}, Name: "w", Dir: "/d/w"}
+	s := &core.Session{Pkg: &core.Package{Name: "n", Dir: "/d"}, Name: "w", Dir: "/d/w", S: &manifest.Session{Branch: "vmono/p/s"}}
 	env := buildEnv([]string{"A=1", "VMONO_PACKAGE=stale", "VMONO_AUTHOR=user"}, s, "claude", config.Harness{})
 	var pkg, author []string
 	for _, kv := range env {

@@ -253,3 +253,33 @@ func TestFindFromInsideSession(t *testing.T) {
 		t.Errorf("Find via session VMONO_ROOT = %q, %v; want %q", got, err, pkg)
 	}
 }
+
+func TestMemberCommandsTakeAStringOrAList(t *testing.T) {
+	base := "schema = 2\nname = \"x\"\ncreated = 2026-01-01T00:00:00Z\n[[member]]\nname = \"a\"\nsource = \"~/a\"\nmode = \"active\"\npath = \"a\"\n"
+	m, err := Parse([]byte(base + "setup = \"one\"\nteardown = [\"two\", \"three \\\"q\\\"\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := Parse(Encode(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, got := range []*Manifest{m, again} {
+		mem := got.Members[0]
+		if len(mem.Setup) != 1 || mem.Setup[0] != "one" || len(mem.Teardown) != 2 || mem.Teardown[1] != `three "q"` {
+			t.Errorf("member = %+v", mem)
+		}
+	}
+	plain, err := Parse([]byte(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Diff(plain, m); len(d.Update) != 1 || len(d.Add) != 0 {
+		t.Errorf("diff = %+v", d)
+	}
+	for _, bad := range []string{"setup = \" \"", "setup = [\"ok\", 3]", "setup = 4"} {
+		if _, err := Parse([]byte(base + bad + "\n")); err == nil {
+			t.Errorf("%s: accepted", bad)
+		}
+	}
+}

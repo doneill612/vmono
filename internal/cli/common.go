@@ -44,6 +44,9 @@ func ExitCode(err error) int {
 	}
 }
 
+// noHooks holds the --no-hooks flag.
+var noHooks bool
+
 // loadCore reads config and builds a Core. It is a variable so tests could
 // substitute it, but commands normally just call it.
 func loadCore() (*core.Core, error) {
@@ -51,6 +54,7 @@ func loadCore() (*core.Core, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.NoHooks = cfg.NoHooks || noHooks
 	return core.New(cfg)
 }
 
@@ -84,6 +88,8 @@ func printEvent(w io.Writer, ev apply.Event) {
 	switch ev.Status {
 	case apply.StatusDone:
 		fprintf(w, "  ok    %-14s %s\n", who, ev.Step)
+	case apply.StatusOutput:
+		fprintf(w, "  |     %-14s %s\n", who, ev.Message)
 	case apply.StatusWarn:
 		fprintf(w, "  warn  %-14s %s: %s\n", who, ev.Step, ev.Message)
 	case apply.StatusFailed:
@@ -96,21 +102,24 @@ func printEvent(w io.Writer, ev apply.Event) {
 // intoHelp describes the repeatable --into flag.
 const intoHelp = "landing branch: BRANCH for every member, or MEMBER=BRANCH for one (repeatable)"
 
-// parseInto splits --into values into the branch for every member and the
+// trackHelp describes the repeatable --track flag.
+const trackHelp = "start from a branch on the members' remotes and land back on it: BRANCH for every member whose remote has it, or MEMBER=BRANCH for one (repeatable); fetches first"
+
+// parseBranches splits the values of flag, --into or --track, into the branch for every member and the
 // branches for individual members. A value is MEMBER=BRANCH when it has an
 // "=" with a member name before it, and otherwise a branch for every member.
-func parseInto(vals []string) (all string, byMember map[string]string, err error) {
+func parseBranches(flag string, vals []string) (all string, byMember map[string]string, err error) {
 	for _, v := range vals {
 		member, branch, ok := strings.Cut(v, "=")
 		if !ok {
 			if all != "" {
-				return "", nil, fmt.Errorf("--into names two branches for every member (%q and %q); use MEMBER=BRANCH for one member", all, v)
+				return "", nil, fmt.Errorf("%s names two branches for every member (%q and %q); use MEMBER=BRANCH for one member", flag, all, v)
 			}
 			all = v
 			continue
 		}
 		if member == "" || branch == "" {
-			return "", nil, fmt.Errorf("--into %q: expected MEMBER=BRANCH", v)
+			return "", nil, fmt.Errorf("%s %q: expected MEMBER=BRANCH", flag, v)
 		}
 		if byMember == nil {
 			byMember = map[string]string{}

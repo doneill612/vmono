@@ -148,7 +148,7 @@ The user ran this command, so they have said the work is done. If you are not
 inside a vmono session (see "Recognize a session" in the ` + "`vmono`" + ` skill), say so and
 stop.
 
-` + finishSection,
+` + finishSection + updateSection,
 	},
 	{
 		name:         "note",
