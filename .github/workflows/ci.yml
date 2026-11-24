@@ -32,6 +32,16 @@ jobs:
         run: |
           $dir = 'C:\Program Files\Git\mingw64\bin'
           if (Test-Path "$dir\git.exe") { Add-Content $env:GITHUB_PATH $dir }
+      # D: is usually faster than C:, where the temp directory is.
+      - name: keep temp files on D (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path 'D:\') {
+            New-Item -ItemType Directory -Force 'D:\tmp' | Out-Null
+            Add-Content $env:GITHUB_ENV "TEMP=D:\tmp"
+            Add-Content $env:GITHUB_ENV "TMP=D:\tmp"
+          }
       - name: git version
         run: git --version
       - name: vet
