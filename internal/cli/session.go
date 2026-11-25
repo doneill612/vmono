@@ -118,7 +118,7 @@ func newSessionLsCmd() *cobra.Command {
 				if opened == "" {
 					opened = "-"
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Name, r.Branch, r.State, dirty, opened)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Name, r.Branch, r.Label(), dirty, opened)
 			}
 			return tw.Flush()
 		},

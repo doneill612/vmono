@@ -190,21 +190,12 @@ func (m *sessionsModel) selected() (core.SessionSummary, bool) {
 	return core.SessionSummary{}, false
 }
 
-// sessionRow builds one table row. A finished session is drawn dim, with
-// when it finished in place of its dirty marker, since a finished session is
-// clean by definition.
+// sessionRow builds one table row. A merged session is drawn dim, since it is
+// done with.
 func sessionRow(s core.SessionSummary) row {
-	state, stateKey := styled("clean", styleOK), "0"
+	state, stateKey := sessionState(s)
 	name := plain(s.Name)
-	if s.Dirty {
-		state, stateKey = styled("dirty", styleWarn), "1"
-	}
-	if s.State == core.SessionFinished {
-		label := "finished"
-		if t, err := time.Parse(time.RFC3339, s.FinishedAt); err == nil {
-			label += " " + ago(t)
-		}
-		state, stateKey = styled(label, styleDim), "2"
+	if s.State == core.SessionMerged {
 		name = styled(s.Name, styleDim)
 	}
 	state.key = stateKey
@@ -219,13 +210,29 @@ func sessionRow(s core.SessionSummary) row {
 	}
 }
 
-// inProgressFirst returns the sessions with finished ones moved below the
-// rest, each group keeping its order.
-func inProgressFirst(list []core.SessionSummary) []core.SessionSummary {
+// sessionState returns the state cell of a session and its sort key, the states
+// that want attention first.
+func sessionState(s core.SessionSummary) (c cell, key string) {
+	switch {
+	case s.Dirty:
+		return styled("dirty", styleWarn), "0"
+	case len(s.RemoteDeleted) > 0:
+		return styled("remote deleted", styleWarn), "1"
+	case s.State == core.SessionPushed:
+		return styled(s.Label(), styleOK), "3"
+	case s.State == core.SessionMerged:
+		return styled(s.Label(), styleDim), "4"
+	}
+	return styled("clean", styleOK), "2"
+}
+
+// mergedLast returns the sessions with merged ones moved below the rest, each
+// group keeping its order.
+func mergedLast(list []core.SessionSummary) []core.SessionSummary {
 	out := make([]core.SessionSummary, 0, len(list))
-	for _, finished := range []bool{false, true} {
+	for _, merged := range []bool{false, true} {
 		for _, s := range list {
-			if (s.State == core.SessionFinished) == finished {
+			if (s.State == core.SessionMerged) == merged {
 				out = append(out, s)
 			}
 		}
@@ -237,7 +244,7 @@ func inProgressFirst(list []core.SessionSummary) []core.SessionSummary {
 func (m *sessionsModel) fill() {
 	var rows []row
 	states := m.e.sessionStates(m.name)
-	for _, s := range inProgressFirst(m.list) {
+	for _, s := range mergedLast(m.list) {
 		r := sessionRow(s)
 		if m.e.agents != nil {
 			r.cells = append(r.cells, agentCell(states[s.Name]))

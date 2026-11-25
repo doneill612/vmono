@@ -279,8 +279,7 @@ type ShowSession struct {
 	Name   string `json:"name"`
 	Path   string `json:"path"`
 	Branch string `json:"branch"`
-	// State is SessionFinished or SessionInProgress.
-	State string `json:"state"`
+	SessionProgress
 }
 
 // ShowResult is everything an agent needs to know about its package and, when
@@ -293,8 +292,8 @@ type ShowResult struct {
 	// Session and Branch are set only when Show was given a session.
 	Session string `json:"session,omitempty"`
 	Branch  string `json:"branch,omitempty"`
-	// State is SessionFinished or SessionInProgress; set with Session.
-	State    string        `json:"state,omitempty"`
+	// SessionProgress is that of Session, and empty without one.
+	SessionProgress
 	Harness  string        `json:"harness,omitempty"`
 	Purpose  string        `json:"purpose"`
 	Context  string        `json:"context"`
@@ -342,7 +341,7 @@ func (c *Core) Show(p *Package, s *Session) ShowResult {
 	}
 	if sessions, err := c.LoadSessions(p); err == nil {
 		for _, sess := range sessions {
-			out.Sessions = append(out.Sessions, ShowSession{Name: sess.Name, Path: sess.Dir, Branch: sess.S.Branch, State: c.SessionState(sess)})
+			out.Sessions = append(out.Sessions, ShowSession{Name: sess.Name, Path: sess.Dir, Branch: sess.S.Branch, SessionProgress: c.Status(sess).SessionProgress})
 		}
 	}
 	for _, mem := range p.M.Members {
@@ -363,7 +362,7 @@ func (c *Core) Show(p *Package, s *Session) ShowResult {
 		for i, m := range out.Members {
 			statuses[i] = m.MemberStatus
 		}
-		out.State = stateOf(s, statuses)
+		out.SessionProgress = progressOf(statuses)
 	}
 	return out
 }

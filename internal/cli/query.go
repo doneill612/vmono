@@ -99,7 +99,7 @@ func newStatusCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "status [pkg[/session]] [--json]",
-		Short: "Show each member's branch, dirty state and ahead/behind in a session",
+		Short: "Show each member's branch, uncommitted work and what is left to push in a session",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := loadCore()
@@ -127,12 +127,30 @@ func newStatusCmd() *cobra.Command {
 // The session-start hook prints the same text so an agent sees exactly what
 // the user would.
 func writeStatusText(w io.Writer, st core.SessionStatus) error {
-	fprintf(w, "%s/%s  (%s)  %s\n", st.Package, st.Session, st.Branch, st.State)
+	fprintf(w, "%s/%s  (%s)  %s\n", st.Package, st.Session, st.Branch, st.Label())
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	for _, m := range st.Members {
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n", m.Name, m.Mode, where(m), cleanliness(m), aheadBehind(m), toLand(m))
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n", m.Name, m.Mode, where(m), cleanliness(m), m.PublishText())
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if hint := progressHint(st.SessionProgress); hint != "" {
+		fprintf(w, "%s\n", hint)
+	}
+	return nil
+}
+
+// progressHint says what to do about a session whose work has been merged, or
+// probably has, and is empty for any other.
+func progressHint(p core.SessionProgress) string {
+	switch {
+	case p.State == core.SessionMerged:
+		return "Everything has been merged; remove the session with `vmono session rm`, and start a new one for more work."
+	case len(p.RemoteDeleted) > 0:
+		return "The remote branch of " + strings.Join(p.RemoteDeleted, ", ") + " was deleted, probably because its pull request was merged. If it was, remove the session with `vmono session rm`, and start a new one for more work."
+	}
+	return ""
 }
 
 // where describes a member's branch or ref for display.
@@ -166,26 +184,6 @@ func cleanliness(m core.MemberStatus) string {
 		return "clean"
 	}
 	return strings.Join(parts, ", ")
-}
-
-// toLand says where an active member's work lands and how much of it is
-// still to land, empty for a member with no landing branch.
-func toLand(m core.MemberStatus) string {
-	if m.Into == "" {
-		return ""
-	}
-	if m.ToLand == 0 {
-		return "→ " + m.Into + ": nothing to land"
-	}
-	return fmt.Sprintf("→ %s: %d to land", m.Into, m.ToLand)
-}
-
-// aheadBehind formats upstream divergence, empty when there is no upstream.
-func aheadBehind(m core.MemberStatus) string {
-	if m.Upstream == "" {
-		return ""
-	}
-	return fmt.Sprintf("↑%d ↓%d", m.Ahead, m.Behind)
 }
 
 // newPathCmd builds `vmono path`. "pkg/session" prints a session directory,

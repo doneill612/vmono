@@ -28,12 +28,12 @@ func pushFromElsewhere(t *testing.T, src, branch, file, content string) {
 	testutil.Git(t, clone, "push", "--quiet", "origin", branch)
 }
 
-// toLand returns the member's count of commits left to land.
-func toLand(t *testing.T, c *Core, s *Session, name string) int {
+// ownCommitsOf returns the member's count of commits its base lacks.
+func ownCommitsOf(t *testing.T, c *Core, s *Session, name string) int {
 	t.Helper()
 	for _, m := range c.Status(s).Members {
 		if m.Name == name {
-			return m.ToLand
+			return m.OwnCommits
 		}
 	}
 	t.Fatalf("no member %q", name)
@@ -69,7 +69,7 @@ func TestUpdateRebasesOntoTheRemote(t *testing.T) {
 	if !gitx.IsMerged(wt, "origin/main", "HEAD") || sha(t, a, "main") != main {
 		t.Error("the session should contain origin/main, and the source's main must not move")
 	}
-	if n := toLand(t, c, s, "alpha"); n != 1 {
+	if n := ownCommitsOf(t, c, s, "alpha"); n != 1 {
 		t.Errorf("to land = %d, want 1", n)
 	}
 	if _, err := c.Update(s, UpdateOptions{Members: []string{"nope"}}); err == nil {

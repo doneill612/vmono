@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -358,10 +359,7 @@ type SessionSummary struct {
 	Branch     string `json:"branch"`
 	Dirty      bool   `json:"dirty"`
 	LastOpened string `json:"last_opened,omitempty"`
-	// State is SessionFinished or SessionInProgress.
-	State string `json:"state"`
-	// FinishedAt is when the session was last finished, if it ever was.
-	FinishedAt string `json:"finished_at,omitempty"`
+	SessionProgress
 }
 
 // timeFormat is how last-opened times are reported.
@@ -433,16 +431,15 @@ func (c *Core) List(withStatus bool) ([]Summary, error) {
 // sessionDirty reports whether any member of the session has uncommitted or
 // untracked files.
 func (c *Core) sessionDirty(s *Session) bool {
-	for _, ms := range c.Status(s).Members {
-		if ms.Dirty > 0 || ms.Untracked > 0 {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(s.Pkg.M.Members, func(mem manifest.Member) bool {
+		ms := worktreeStatus(s, mem)
+		return ms.Dirty > 0 || ms.Untracked > 0
+	})
 }
 
 // ListSessions returns a package's sessions, most recently opened first.
-// With withStatus it also checks each session for uncommitted changes.
+// With withStatus it also checks each session for uncommitted changes and says
+// how far its work is from published and merged.
 func (c *Core) ListSessions(p *Package, withStatus bool) ([]SessionSummary, error) {
 	sessions, err := c.LoadSessions(p)
 	if err != nil {
@@ -450,15 +447,13 @@ func (c *Core) ListSessions(p *Package, withStatus bool) ([]SessionSummary, erro
 	}
 	out := make([]SessionSummary, 0, len(sessions))
 	for _, s := range sessions {
-		row := SessionSummary{Package: p.Name, Name: s.Name, Path: s.Dir, Branch: s.S.Branch, State: c.SessionState(s)}
-		if !s.S.Finished.IsZero() {
-			row.FinishedAt = s.S.Finished.Format(timeFormat)
-		}
+		row := SessionSummary{Package: p.Name, Name: s.Name, Path: s.Dir, Branch: s.S.Branch}
 		if at := c.Idx.SessionOpened(p.Name, s.Name); !at.IsZero() {
 			row.LastOpened = at.Format(timeFormat)
 		}
 		if withStatus {
-			row.Dirty = c.sessionDirty(s)
+			st := c.Status(s)
+			row.Dirty, row.SessionProgress = st.Dirty(), st.SessionProgress
 		}
 		out = append(out, row)
 	}

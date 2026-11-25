@@ -76,9 +76,6 @@ func TestSessionStartsFromTheFresherCopyOfItsLandingBranch(t *testing.T) {
 	if sha(t, filepath.Join(s.Dir, "alpha"), "HEAD") != sha(t, a, "refs/remotes/origin/feature") {
 		t.Error("a stale local branch must not win over its remote copy")
 	}
-	if n := toLand(t, c, s, "alpha"); n != 0 {
-		t.Errorf("to land = %d, want 0", n)
-	}
 }
 
 func TestTrackFallsBackToFetchedRefsWhenOffline(t *testing.T) {

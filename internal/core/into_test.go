@@ -190,9 +190,6 @@ func TestSessionRecordsEachMembersCheckedOutBranch(t *testing.T) {
 	if got, want := sha(t, filepath.Join(s.Dir, "alpha"), "HEAD"), sha(t, a, "origin/main"); got != want {
 		t.Errorf("alpha session starts at %s, want origin/main %s", got, want)
 	}
-	if st := c.Status(s); st.Members[1].Into != "develop" || st.Members[0].Into != "main" || st.Members[2].Into != "main" {
-		t.Errorf("status landing branches = %q %q %q", st.Members[0].Into, st.Members[1].Into, st.Members[2].Into)
-	}
 }
 
 func TestLandingOnTheBaseBranchStillStartsFromBase(t *testing.T) {

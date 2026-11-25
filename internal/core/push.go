@@ -159,25 +159,6 @@ func pushCounts(src, branch string, t pushTarget) (ahead, behind int, err error)
 	return gitx.AheadBehind(src, local, t.ref)
 }
 
-// unpushedOn returns where the local branch of the repo src would be pushed, as
-// "remote/branch", and how many of its commits that branch lacks as of the last
-// fetch. It returns "" and 0 for a branch that does not exist or has nowhere to
-// go, which status reports as nothing to push rather than as an error.
-func unpushedOn(refs gitx.Refs, src, branch string) (target string, n int) {
-	if !refs.BranchExists(branch) {
-		return "", 0
-	}
-	t, err := pushTargetFor(refs, src, branch, nil)
-	if err != nil {
-		return "", 0
-	}
-	ahead, _, err := pushCounts(src, branch, t)
-	if err != nil {
-		return "", 0
-	}
-	return t.remote + "/" + t.dest, ahead
-}
-
 // mergedHint is what to do about a member whose work has been merged.
 const mergedHint = "remove the session with `vmono session rm`, and start a new one for more work"
 

@@ -345,8 +345,7 @@ func describeMember(p *core.Package, sess *core.Session, im core.InspectMember, 
 	default:
 		rows = append(rows,
 			[2]string{"Head", ms.Head},
-			[2]string{"Upstream", ms.Upstream},
-			[2]string{"Ahead/behind", fmt.Sprintf("↑%d ↓%d", ms.Ahead, ms.Behind)},
+			[2]string{"Published", ms.PublishText()},
 			[2]string{"Changes", fmt.Sprintf("%d modified, %d untracked", ms.Dirty, ms.Untracked)},
 		)
 	}
