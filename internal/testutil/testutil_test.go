@@ -39,3 +39,49 @@ func TestNewEnvLeavesAnEnclosingSession(t *testing.T) {
 		t.Errorf("a session is still found from %s", wd)
 	}
 }
+
+// TestNewSourceCopiesAreIndependent checks that a copied source is the same as
+// one built from scratch, and that its remote is its own.
+func TestNewSourceCopiesAreIndependent(t *testing.T) {
+	var urls, heads []string
+	for range 2 {
+		t.Run("env", func(t *testing.T) {
+			env := testutil.NewEnv(t)
+			src := env.NewSource(t, "alpha")
+			if got := testutil.Git(t, src, "status", "--porcelain"); got != "" {
+				t.Errorf("a new source is dirty: %s", got)
+			}
+			if got := testutil.Git(t, src, "rev-parse", "--abbrev-ref", "main@{upstream}"); got != "origin/main" {
+				t.Errorf("main tracks %s", got)
+			}
+			if got := testutil.Git(t, src, "symbolic-ref", "refs/remotes/origin/HEAD"); got != "refs/remotes/origin/main" {
+				t.Errorf("origin/HEAD is %s", got)
+			}
+			url := testutil.Git(t, src, "remote", "get-url", "origin")
+			if want := filepath.Join(env.Root, "remotes", "alpha.git"); filepath.Clean(url) != want {
+				t.Errorf("remote is %s, want %s", url, want)
+			}
+			testutil.WriteFile(t, filepath.Join(src, "new.txt"), "x")
+			testutil.Git(t, src, "add", "-A")
+			testutil.Git(t, src, "commit", "--quiet", "-m", "second")
+			testutil.Git(t, src, "push", "--quiet")
+			if got := testutil.Git(t, src, "rev-list", "--count", "origin/main"); got != "2" {
+				t.Errorf("origin/main has %s commits, want 2", got)
+			}
+			urls = append(urls, url)
+			heads = append(heads, testutil.Git(t, src, "rev-parse", "main~"))
+		})
+	}
+	if len(urls) == 2 && urls[0] == urls[1] {
+		t.Error("two sources share a remote")
+	}
+	if len(heads) == 2 && heads[0] != heads[1] {
+		t.Error("the second source was not copied from the first")
+	}
+}
+
+// TestMain runs the tests here with source templates, like the packages that
+// use this one.
+func TestMain(m *testing.M) {
+	os.Exit(testutil.Main(m))
+}

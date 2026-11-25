@@ -244,7 +244,7 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 		return
 	}
 	var exists bool
-	l.target, exists = landingTarget(src, l.Into, base)
+	l.target, exists = landingTarget(gitx.LiveRefs(src), src, l.Into, base)
 	l.Create = !exists
 	if !exists {
 		if other, clash := gitx.BranchRefConflict(src, l.Into); clash {
@@ -253,7 +253,7 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 		}
 	}
 
-	if l.Commits, err = ownCommits(src, l.wt, l.Into, base, l.target); err != nil {
+	if l.Commits, err = ownCommits(gitx.LiveRefs(src), src, l.wt, l.Into, base, l.target); err != nil {
 		l.block("cannot count its commits: %v", err)
 		return
 	}

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -76,8 +77,23 @@ func Version() (string, error) {
 	return f[2], nil
 }
 
-// CheckVersion reports an error when git is older than 2.30.
+// versionOK records that CheckVersion has passed in this process.
+var versionOK atomic.Bool
+
+// CheckVersion reports an error when git is older than 2.30. Once it has
+// passed it doesn't ask git again; a failure is never remembered, so the user
+// can fix it while vmono runs.
 func CheckVersion() error {
+	if versionOK.Load() {
+		return nil
+	}
+	err := checkVersion()
+	versionOK.Store(err == nil)
+	return err
+}
+
+// checkVersion asks git for its version and compares it.
+func checkVersion() error {
 	v, err := Version()
 	if err != nil {
 		return fmt.Errorf("git not found: %w", err)
@@ -103,13 +119,18 @@ func TopLevel(path string) (string, error) {
 	return filepath.FromSlash(out), nil
 }
 
-// IsBare reports whether the repository at path is bare.
-func IsBare(path string) (bool, error) {
-	out, err := run(path, "rev-parse", "--is-bare-repository")
+// WorkTree returns the root of the working tree containing path, as TopLevel
+// does, and whether its repository is bare, with one git command.
+func WorkTree(path string) (top string, bare bool, err error) {
+	out, err := run(path, "rev-parse", "--show-toplevel", "--is-bare-repository")
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
-	return out == "true", nil
+	i := strings.LastIndexByte(out, '\n')
+	if i < 0 {
+		return "", false, fmt.Errorf("unexpected output from git rev-parse: %q", out)
+	}
+	return filepath.FromSlash(strings.TrimRight(out[:i], "\r\n")), out[i+1:] == "true", nil
 }
 
 // CommonDir returns the absolute git common directory for path. For a
@@ -293,10 +314,16 @@ func ResolveRef(repo, ref string) (string, error) {
 // resolves the same way), or to a commit id when the source has a detached
 // HEAD or the checkout cannot be named.
 func ResolveDefaultRef(repo, ref string) (resolved string, fellBack bool) {
+	return LiveRefs(repo).ResolveDefault(ref)
+}
+
+// ResolveDefault is ResolveDefaultRef answered from r.
+func (r Refs) ResolveDefault(ref string) (resolved string, fellBack bool) {
+	repo := r.repo
 	if ref == "" {
 		ref = "origin/HEAD"
 	}
-	if RefExists(repo, ref) {
+	if r.Exists(ref) {
 		return ref, false
 	}
 	if ref != "origin/HEAD" {
@@ -539,6 +566,19 @@ func RevCount(repo string, revs ...string) (int, error) {
 	return strconv.Atoi(out)
 }
 
+// AheadBehind returns how many commits a has that b lacks, and how many b has
+// that a lacks.
+func AheadBehind(repo, a, b string) (ahead, behind int, err error) {
+	out, err := run(repo, "rev-list", "--count", "--left-right", a+"..."+b)
+	if err != nil {
+		return 0, 0, err
+	}
+	if _, err := fmt.Sscan(out, &ahead, &behind); err != nil {
+		return 0, 0, fmt.Errorf("unexpected output from git rev-list: %q", out)
+	}
+	return ahead, behind, nil
+}
+
 // RebaseOnto replays the commits of the worktree's checked-out branch that
 // are reachable from HEAD but not from upstream onto onto, equivalent to
 // `git rebase --onto <onto> <upstream>`. Git stops with an error on a
@@ -577,12 +617,12 @@ func MergeAbort(worktree string) error {
 // RebaseInProgress reports whether the worktree is in the middle of a
 // rebase, stopped on a conflict or waiting on `git rebase --continue`.
 func RebaseInProgress(worktree string) bool {
-	for _, name := range []string{"rebase-merge", "rebase-apply"} {
-		out, err := run(worktree, "rev-parse", "--path-format=absolute", "--git-path", name)
-		if err != nil {
-			continue
-		}
-		if st, err := os.Stat(filepath.FromSlash(out)); err == nil && st.IsDir() {
+	out, err := run(worktree, "rev-parse", "--path-format=absolute", "--git-path", "rebase-merge", "--git-path", "rebase-apply")
+	if err != nil {
+		return false
+	}
+	for _, dir := range strings.Split(out, "\n") {
+		if st, err := os.Stat(filepath.FromSlash(strings.TrimRight(dir, "\r"))); err == nil && st.IsDir() {
 			return true
 		}
 	}
@@ -736,12 +776,7 @@ func UpstreamOf(repo, branch string) (Tracking, bool) {
 		return Tracking{}, false
 	}
 	ref, remote, _ := strings.Cut(strings.TrimSpace(out), "\t")
-	remote = strings.TrimSpace(remote)
-	prefix := "refs/remotes/" + remote + "/"
-	if ref == "" || remote == "" || remote == "." || !strings.HasPrefix(ref, prefix) {
-		return Tracking{}, false
-	}
-	return Tracking{Remote: remote, Branch: strings.TrimPrefix(ref, prefix), Ref: ref}, true
+	return newTracking(tracked{ref: ref, remote: strings.TrimSpace(remote)})
 }
 
 // RemoteBranch is a branch of a remote as of the last fetch.
@@ -863,8 +898,17 @@ func Init(path, branch string) error {
 // identityArgs supplies a fallback commit identity when the user has none
 // configured, so shell-repo commits never fail for lack of one.
 func identityArgs(dir string) []string {
-	name, _ := run(dir, "config", "user.name")
-	email, _ := run(dir, "config", "user.email")
+	out, _ := run(dir, "config", "--get-regexp", `^user\.(name|email)$`)
+	var name, email string
+	for _, line := range strings.Split(out, "\n") {
+		// The last value of a key wins, as it does for git.
+		switch key, value, _ := strings.Cut(strings.TrimRight(line, "\r"), " "); key {
+		case "user.name":
+			name = value
+		case "user.email":
+			email = value
+		}
+	}
 	var args []string
 	if strings.TrimSpace(name) == "" {
 		args = append(args, "-c", "user.name=vmono")

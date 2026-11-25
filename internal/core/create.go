@@ -189,11 +189,11 @@ func prepareMember(mem *manifest.Member) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	top, err := gitx.TopLevel(src)
+	top, bare, err := gitx.WorkTree(src)
 	if err != nil {
 		return "", NotFound("%s is not a git repository", src)
 	}
-	if bare, err := gitx.IsBare(top); err != nil || bare {
+	if bare {
 		return "", fmt.Errorf("%s is a bare repository; members must be non-bare", top)
 	}
 	if mem.Name == "" {
@@ -274,11 +274,22 @@ func realPath(p string) string {
 // commits at all gets its own error, since the generic "ref not found" gives
 // no hint that the fix is an initial commit rather than a different ref.
 func resolveRef(src, ref string, warn func(string)) (string, error) {
-	resolved, fell := gitx.ResolveDefaultRef(src, ref)
+	return resolveRefIn(gitx.LiveRefs(src), src, ref, warn)
+}
+
+// resolveRefIn is resolveRef answered from refs.
+func resolveRefIn(refs gitx.Refs, src, ref string, warn func(string)) (string, error) {
+	if ref == "" {
+		ref = "origin/HEAD"
+	}
+	if refs.Exists(ref) {
+		return ref, nil
+	}
+	resolved, fell := refs.ResolveDefault(ref)
 	if fell && warn != nil {
 		warn("no origin/HEAD; using the source's current HEAD instead")
 	}
-	if !gitx.RefExists(src, resolved) {
+	if !refs.Exists(resolved) {
 		if !gitx.HasAnyCommit(src) {
 			return "", fmt.Errorf("%s has no commits yet; make an initial commit there before starting a session on it", src)
 		}

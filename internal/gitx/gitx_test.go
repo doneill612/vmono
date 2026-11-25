@@ -14,7 +14,7 @@ func TestWorktreeLifecycleAndStatus(t *testing.T) {
 	env := testutil.NewEnv(t)
 	src := env.NewSource(t, "alpha")
 
-	if bare, err := IsBare(src); err != nil || bare {
+	if _, bare, err := WorkTree(src); err != nil || bare {
 		t.Fatalf("IsBare = %v, %v", bare, err)
 	}
 	ref, fell := ResolveDefaultRef(src, "origin/HEAD")

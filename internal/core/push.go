@@ -135,10 +135,10 @@ type pushTarget struct {
 // pushed. A branch with an upstream goes there. One without goes to a branch
 // of the same name on origin, or on the repo's only remote when it has no
 // origin. The error is worded as the reason the member is blocked.
-func pushTargetFor(src, into string) (pushTarget, error) {
-	if tr, ok := gitx.UpstreamOf(src, into); ok {
+func pushTargetFor(refs gitx.Refs, src, into string) (pushTarget, error) {
+	if tr, ok := refs.UpstreamOf(into); ok {
 		t := pushTarget{remote: tr.Remote, dest: tr.Branch, upstream: true}
-		if gitx.RefExists(src, tr.Ref) {
+		if refs.Exists(tr.Ref) {
 			t.ref = tr.Ref
 		}
 		return t, nil
@@ -152,7 +152,7 @@ func pushTargetFor(src, into string) (pushTarget, error) {
 		return pushTarget{}, fmt.Errorf("its source repo has several remotes (%s) and none is origin; give %s an upstream with `git branch --set-upstream-to`", strings.Join(remotes, ", "), into)
 	}
 	t := pushTarget{remote: remote, dest: into}
-	if ref := "refs/remotes/" + remote + "/" + into; gitx.RefExists(src, ref) {
+	if ref := "refs/remotes/" + remote + "/" + into; refs.Exists(ref) {
 		t.ref = ref
 	}
 	return t, nil
@@ -169,11 +169,7 @@ func pushCounts(src, into string, t pushTarget) (ahead, behind int, err error) {
 		ahead, err = gitx.RevCount(src, local, "--not", "--remotes="+t.remote)
 		return ahead, 0, err
 	}
-	if ahead, err = gitx.RevCount(src, local, "--not", t.ref); err != nil {
-		return 0, 0, err
-	}
-	behind, err = gitx.RevCount(src, t.ref, "--not", local)
-	return ahead, behind, err
+	return gitx.AheadBehind(src, local, t.ref)
 }
 
 // unpushedOn returns where the local branch into of the repo src would be
@@ -181,11 +177,11 @@ func pushCounts(src, into string, t pushTarget) (ahead, behind int, err error) {
 // of the last fetch. It returns "" and 0 for a branch that does not exist or
 // has nowhere to go, which status reports as nothing to push rather than as
 // an error.
-func unpushedOn(src, into string) (target string, n int) {
-	if !gitx.BranchExists(src, into) {
+func unpushedOn(refs gitx.Refs, src, into string) (target string, n int) {
+	if !refs.BranchExists(into) {
 		return "", 0
 	}
-	t, err := pushTargetFor(src, into)
+	t, err := pushTargetFor(refs, src, into)
 	if err != nil {
 		return "", 0
 	}
@@ -231,7 +227,7 @@ func planPushMember(s *Session, mem manifest.Member, p *pushing) {
 		p.Status = PushNothing
 		return
 	}
-	t, err := pushTargetFor(src, p.Branch)
+	t, err := pushTargetFor(gitx.LiveRefs(src), src, p.Branch)
 	if err != nil {
 		p.block("%v", err)
 		return

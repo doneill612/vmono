@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to a pull request cancels the run it replaces. Runs on main each
+# get a group of their own, so they always finish.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test (${{ matrix.os }})
@@ -18,6 +24,24 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # The tests run git thousands of times. Git\cmd\git.exe is a launcher
+      # that starts the real git, so put that one first.
+      - name: use git without its launcher (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = 'C:\Program Files\Git\mingw64\bin'
+          if (Test-Path "$dir\git.exe") { Add-Content $env:GITHUB_PATH $dir }
+      # D: is usually faster than C:, where the temp directory is.
+      - name: keep temp files on D (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path 'D:\') {
+            New-Item -ItemType Directory -Force 'D:\tmp' | Out-Null
+            Add-Content $env:GITHUB_ENV "TEMP=D:\tmp"
+            Add-Content $env:GITHUB_ENV "TMP=D:\tmp"
+          }
       - name: git version
         run: git --version
       - name: vet

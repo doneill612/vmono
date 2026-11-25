@@ -82,11 +82,11 @@ func Repos(roots, configured []string, idx *index.Index, depth int, skip []strin
 		if _, ok := byPath[path]; ok {
 			return
 		}
-		top, err := gitx.TopLevel(path)
+		top, bare, err := gitx.WorkTree(path)
 		if err != nil {
 			return
 		}
-		if bare, err := gitx.IsBare(top); err != nil || bare {
+		if bare {
 			return
 		}
 		if _, ok := byPath[top]; ok {
@@ -141,11 +141,11 @@ func Resolve(arg string, known []Repo) (Repo, error) {
 	default:
 		return Repo{}, &AmbiguousError{Name: arg, Matches: matches}
 	}
-	top, err := gitx.TopLevel(arg)
+	top, bare, err := gitx.WorkTree(arg)
 	if err != nil {
 		return Repo{}, &NotFoundError{Arg: arg}
 	}
-	if bare, err := gitx.IsBare(top); err != nil || bare {
+	if bare {
 		return Repo{}, &NotFoundError{Arg: arg}
 	}
 	return Repo{
