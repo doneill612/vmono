@@ -644,6 +644,9 @@ func initialize(c *core.Core, req *LaunchRequest) (message string, again bool, e
 		}
 		return err.Error(), true, nil
 	case res.Direct:
+		if now, err := c.Load(p.Name); err == nil && len(now.M.Pending()) == 0 {
+			res.Summary += "; no commands to review"
+		}
 		return res.Summary, true, nil
 	}
 	return "", res.Launched == launcher.HandedOff && c.Cfg.ReturnToTUI, nil

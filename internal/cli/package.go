@@ -100,8 +100,12 @@ var (
 // only says so.
 func reviewAfterInit(out io.Writer, c *core.Core, name, notice string) error {
 	p, err := c.Load(name)
-	if err != nil || len(p.M.Pending()) == 0 {
+	if err != nil {
 		return err
+	}
+	if len(p.M.Pending()) == 0 {
+		fprintf(out, "no commands were suggested that need a review\n")
+		return nil
 	}
 	if interactive() {
 		if err := runReview(c, name, notice); err != nil {
@@ -249,6 +253,8 @@ func newPackageRecordCmd() *cobra.Command {
 			}
 			if n := len(res.Pending); n > 0 {
 				fprintf(out, "%s for the user to review when they exit\n", countCommands(n))
+			} else if rec.Suggestions == nil {
+				fprintf(out, "no \"suggestions\" were sent; record again with them, or with [] when no member needs a setup or teardown command\n")
 			}
 			return nil
 		},

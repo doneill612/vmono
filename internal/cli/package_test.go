@@ -43,6 +43,9 @@ func TestPackageInitAndRecord(t *testing.T) {
 		return nil
 	})
 	out, stderr, err := run(t, "package", "init", "demo")
+	if !strings.Contains(out, "no commands were suggested") {
+		t.Errorf("with nothing to review it should say so: %q", out)
+	}
 	if err != nil || !strings.Contains(out, "recorded an overview of demo") {
 		t.Fatalf("init = %q %v\n%s", out, err, stderr)
 	}

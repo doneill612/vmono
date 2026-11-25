@@ -42,7 +42,7 @@ func TestInitializeFromPackages(t *testing.T) {
 		return err
 	})
 	msg, again, err := handoff(c, req)
-	if err != nil || !again || msg != "recorded an overview of p" {
+	if err != nil || !again || msg != "recorded an overview of p; no commands to review" {
 		t.Fatalf("handoff = %q %v %v", msg, again, err)
 	}
 
