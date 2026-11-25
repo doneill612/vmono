@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/harness"
@@ -112,6 +113,27 @@ func Resolve(cfg config.Config) (Launcher, error) {
 	default:
 		return nil, fmt.Errorf("unknown launcher %q", cfg.Launcher)
 	}
+}
+
+// SelfLaunch returns the launch that runs a vmono command, rather than a
+// harness, in a multiplexer: in dir, tagged "pkg/place", with the direct
+// launcher so that vmono stays with the harness it starts there. argv is the
+// command without the program, and name is what to call it in notices.
+func SelfLaunch(name, dir, pkg, place string, argv []string) (*harness.Launch, error) {
+	self, err := selfPath()
+	if err != nil {
+		return nil, err
+	}
+	// Anything that identifies the session vmono is asked from is blanked.
+	overrides := map[string]string{"VMONO_LAUNCHER": config.LauncherDirect}
+	for _, key := range []string{"VMONO_PACKAGE", "VMONO_SESSION", "VMONO_ROOT", "VMONO_BRANCH", "VMONO_AUTHOR"} {
+		overrides[key] = ""
+	}
+	for _, kv := range settingsEnv() {
+		key, val, _ := strings.Cut(kv, "=")
+		overrides[key] = val
+	}
+	return &harness.Launch{Name: name, Dir: dir, Path: self, Args: argv, Package: pkg, Session: place, Overrides: overrides, Self: argv}, nil
 }
 
 // Launch resolves the configured launcher and starts l with it.

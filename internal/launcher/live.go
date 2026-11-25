@@ -88,7 +88,7 @@ func (l Live) Sessions(dir string) map[string]string {
 			continue
 		}
 		name, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
-		if name == "." || name == ".." {
+		if strings.HasPrefix(name, ".") { // the package itself, outside it, or its init workspace
 			continue
 		}
 		if urgency[a.state] > urgency[out[name]] {

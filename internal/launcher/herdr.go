@@ -158,6 +158,21 @@ func openLine(l *harness.Launch, tag string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	argv := append([]string{"env", "VMONO_LAUNCHER=" + config.LauncherDirect}, settingsEnv()...)
+	argv = append(argv, self)
+	if l.Self != nil {
+		return shellLine(append(argv, l.Self...)), nil
+	}
+	argv = append(argv, "open", tag, "--harness", l.Name)
+	if extra := l.Args[min(len(l.Harness.Args), len(l.Args)):]; len(extra) > 0 {
+		argv = append(append(argv, "--"), extra...)
+	}
+	return shellLine(argv), nil
+}
+
+// settingsEnv returns the VMONO_* settings vmono runs with, sorted, leaving
+// out the ones that identify a session, its author or a launcher.
+func settingsEnv() []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		key, val, _ := strings.Cut(kv, "=")
@@ -170,15 +185,16 @@ func openLine(l *harness.Launch, tag string) (string, error) {
 		}
 	}
 	sort.Strings(env)
-	argv := append([]string{"env", "VMONO_LAUNCHER=" + config.LauncherDirect}, env...)
-	argv = append(argv, self, "open", tag, "--harness", l.Name)
-	if extra := l.Args[min(len(l.Harness.Args), len(l.Args)):]; len(extra) > 0 {
-		argv = append(append(argv, "--"), extra...)
-	}
+	return env
+}
+
+// shellLine quotes and joins a command line.
+func shellLine(argv []string) string {
+	quoted := make([]string, len(argv))
 	for i, a := range argv {
-		argv[i] = shellQuote(a)
+		quoted[i] = shellQuote(a)
 	}
-	return strings.Join(argv, " "), nil
+	return strings.Join(quoted, " ")
 }
 
 // shellQuote quotes an argument for sh, zsh, bash and fish alike.
