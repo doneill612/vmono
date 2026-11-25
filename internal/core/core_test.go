@@ -474,7 +474,8 @@ func TestDeleteRefusesLostWorkThenForce(t *testing.T) {
 	b := env.NewSource(t, "beta")
 	p, s := newWork(t, c, request("del", []string{a, b}, nil))
 
-	// alpha: untracked file. beta: unpushed commit.
+	// alpha: an untracked file, which would be lost. beta: a commit, which its
+	// branch keeps.
 	testutil.WriteFile(t, filepath.Join(s.Dir, "alpha", "scratch.txt"), "x")
 	testutil.WriteFile(t, filepath.Join(s.Dir, "beta", "feature.txt"), "x")
 	testutil.Git(t, filepath.Join(s.Dir, "beta"), "add", "-A")
@@ -482,10 +483,10 @@ func TestDeleteRefusesLostWorkThenForce(t *testing.T) {
 
 	_, err := c.Delete(p, DeleteOptions{})
 	var re *RefusedError
-	if !errors.Is(err, ErrRefused) || !errors.As(err, &re) || len(re.Unsafe) != 2 {
-		t.Fatalf("want RefusedError for both members, got %v", err)
+	if !errors.Is(err, ErrRefused) || !errors.As(err, &re) || len(re.Unsafe) != 1 {
+		t.Fatalf("want RefusedError for alpha, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "work/alpha") || !strings.Contains(err.Error(), "work/beta") {
+	if !strings.Contains(err.Error(), "work/alpha") {
 		t.Errorf("rows should name session/member: %v", err)
 	}
 	if _, err := os.Stat(p.Dir); err != nil {
@@ -499,10 +500,10 @@ func TestDeleteRefusesLostWorkThenForce(t *testing.T) {
 	if _, err := os.Stat(p.Dir); !os.IsNotExist(err) {
 		t.Error("package dir should be gone")
 	}
-	// alpha's branch has no new commits -> merged -> deleted. beta's has an
-	// unmerged commit -> kept even with force.
+	// alpha's branch has nothing on it, so it goes. beta's has a commit that is
+	// not merged, so it is kept even with force.
 	if gitx.BranchExists(a, "vmono/del") {
-		t.Error("merged branch should be deleted")
+		t.Error("an empty branch should be deleted")
 	}
 	if !gitx.BranchExists(b, "vmono/del") {
 		t.Error("unmerged branch must be kept")
@@ -548,21 +549,6 @@ func TestDeletePackageRefusedByAnySession(t *testing.T) {
 	}
 	if _, err := os.Stat(p.Dir); !os.IsNotExist(err) {
 		t.Error("package should be gone")
-	}
-}
-
-func TestDeleteCleanKeepsBranchesByDefault(t *testing.T) {
-	c, env := newCore(t)
-	a := env.NewSource(t, "alpha")
-	p, s := newWork(t, c, request("clean", []string{a}, nil))
-	if bad := unsafeOf(c.SafetyCheck(s)); len(bad) != 0 {
-		t.Fatalf("fresh session should be safe: %+v", bad)
-	}
-	if _, err := c.Delete(p, DeleteOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if !gitx.BranchExists(a, "vmono/clean") {
-		t.Error("branches are kept unless --delete-branches")
 	}
 }
 

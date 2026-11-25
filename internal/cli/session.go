@@ -364,7 +364,13 @@ func newSessionRmCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rm <pkg>/<session> [--force] [--delete-branches]",
 		Short: "Remove a session and its worktrees; the package and other sessions stay",
-		Args:  cobra.ExactArgs(1),
+		Long: `Remove a session: its worktrees, its directory, and the tmux session or herdr
+workspace it runs in. It is refused while a member has uncommitted work, or commits
+that are on no branch, unless forced. To work on its branches again, start a session
+with --track, or with --reuse-branch for one that was never pushed.
+
+` + branchesHelp,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !strings.Contains(args[0], "/") {
 				return fmt.Errorf("name the session as PACKAGE/SESSION, got %q", args[0])
@@ -388,13 +394,11 @@ func newSessionRmCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			fprintf(out, "removed session %s\n", s.Label())
-			for _, b := range res.BranchesKept {
-				fprintf(out, "kept branch %s\n", b)
-			}
+			printBranches(out, res)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "remove even if members have unsaved work")
-	cmd.Flags().BoolVar(&deleteBranches, "delete-branches", false, "also delete the session branch if already merged into its base")
+	cmd.Flags().BoolVar(&deleteBranches, "delete-branches", false, "also delete the branches whose work has been merged")
 	return cmd
 }

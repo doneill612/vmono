@@ -278,7 +278,7 @@ func (c *Core) initRemovalSteps(w *InitWorkspace, force bool) ([]apply.Step, err
 		}
 		ms, err := c.removeMemberSteps(s, manifest.Member{
 			Name: mem.Name, Source: mem.Source, Path: mem.Path, Mode: manifest.ModeReference,
-		}, force, false, nil)
+		}, DeleteOptions{Force: force}, nil)
 		if err != nil {
 			return nil, err
 		}

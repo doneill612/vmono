@@ -145,6 +145,26 @@ func (f *sessionFlags) options() (core.SessionOptions, error) {
 	return opts, err
 }
 
+// printBranches writes what became of the branches of what was removed, one line
+// each, saying why.
+func printBranches(w io.Writer, res core.DeleteResult) {
+	for _, b := range res.BranchesDeleted {
+		fprintf(w, "deleted branch %s (%s): %s\n", b.Branch, b.Member, b.Reason)
+	}
+	for _, b := range res.BranchesKept {
+		fprintf(w, "kept branch %s (%s): %s\n", b.Branch, b.Member, b.Reason)
+	}
+}
+
+// branchesHelp explains what removing a worktree does with its branch.
+const branchesHelp = `Branches are kept, so committed work is never lost, except that a branch vmono made
+and nothing was committed to goes too. --delete-branches also deletes the branches
+whose work has been merged. A merge commit, a rebase merge and a squash merge all
+count, and each kept branch is listed with the reason. A squash merge that was edited
+on the way in, or that resolved a conflict, cannot be told from work that was never
+merged, so its branch is kept: check, then delete it with git branch -D in the source
+repo. What counts as merged is as of the last fetch.`
+
 // parseBranches splits the values of flag into the branch for every member and
 // the branches for individual members. A value is MEMBER=BRANCH when it has an
 // "=" with a member name before it, and otherwise a branch for every member.

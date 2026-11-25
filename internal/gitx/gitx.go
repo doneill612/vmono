@@ -707,36 +707,11 @@ func StatusOf(path string) (Status, error) {
 	return s, nil
 }
 
-// Unpushed counts commits in the worktree that exist on no remote. With an
-// upstream it is the commits ahead of it; without one it is commits
-// reachable from HEAD but from no remote-tracking ref, so a branch with
-// nothing new beyond its base counts zero. Commits already on one of the
-// local branches in landedOn are not counted either: they have landed in the
-// source repo, which outlives the worktree. Names of branches that do not
-// exist are ignored.
-//
-// A detached HEAD, which is how reference members are checked out, has no
-// branch of its own to publish. Removing its worktree only loses commits that
-// nothing else holds, so commits on any branch or tag are not counted.
-func Unpushed(path string, landedOn ...string) (int, error) {
-	args := []string{"rev-list", "--count", "HEAD", "--not"}
-	if _, err := run(path, "symbolic-ref", "--quiet", "HEAD"); err != nil {
-		args = append(args, "--remotes", "--branches", "--tags")
-	} else if _, err := run(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil {
-		args = append(args, "@{upstream}")
-	} else {
-		args = append(args, "--remotes")
-	}
-	for _, b := range landedOn {
-		if b != "" && BranchExists(path, b) {
-			args = append(args, "refs/heads/"+b)
-		}
-	}
-	out, err := run(path, args...)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(out)
+// OnNoBranch counts the commits of the worktree's HEAD that no branch, tag or
+// remote branch holds. It is for a detached HEAD, as reference members are
+// checked out and a rebase leaves: removing the worktree loses only these.
+func OnNoBranch(path string) (int, error) {
+	return RevCount(path, "HEAD", "--not", "--branches", "--tags", "--remotes")
 }
 
 // Tracking is the remote branch a local branch is configured to track.

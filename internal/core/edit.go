@@ -247,13 +247,13 @@ func sessionErr(s *Session, total int, err error) error {
 type RemoveOptions struct {
 	// Force removes the member even if it has unsaved work.
 	Force bool
-	// DeleteBranch deletes the package branch if it is merged into its base.
+	// DeleteBranch deletes the member's branches whose work has been merged.
 	DeleteBranch bool
 }
 
 // RemoveMember removes a member's worktree from every session and drops it
 // from the manifest. It returns a *RefusedError, changing nothing, when the
-// member has dirty files, untracked files or unpushed commits in any session
+// member has dirty files, untracked files or commits on no branch in any session
 // and force was not given.
 func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (DeleteResult, error) {
 	var res DeleteResult
@@ -276,7 +276,7 @@ func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (Delete
 	}
 	var steps []apply.Step
 	for _, s := range sessions {
-		ss, err := c.removeMemberSteps(s, target, opts.Force, opts.DeleteBranch, &res)
+		ss, err := c.removeMemberSteps(s, target, DeleteOptions{Force: opts.Force, DeleteBranches: opts.DeleteBranch}, &res)
 		if err != nil {
 			return res, err
 		}

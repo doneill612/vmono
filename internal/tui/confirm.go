@@ -144,7 +144,7 @@ func (m *confirmModel) View(w, h int) string {
 			b.WriteString(fmt.Sprintf("   %-24s %s\n", r.Label(), styleErr.Render("cannot inspect: "+r.Error)))
 		case r.Unsafe():
 			b.WriteString(fmt.Sprintf("   %-24s %s\n", r.Label(), styleWarn.Render(
-				fmt.Sprintf("%d dirty · %d untracked · %d unpushed", r.Dirty, r.Untracked, r.Unpushed))))
+				r.LossText())))
 		default:
 			b.WriteString(fmt.Sprintf("   %-24s %s\n", r.Label(), styleOK.Render("clean")))
 		}

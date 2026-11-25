@@ -157,11 +157,15 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(addSteps(first, true)); err != nil {
 		return plan, err
 	}
+	again := map[string]bool{}
+	for _, mem := range adds {
+		again[mem.Name] = true
+	}
 	var rmSteps []apply.Step
 	var res DeleteResult
 	for _, s := range ep.Sessions {
 		for _, mem := range removals {
-			ss, err := c.removeMemberSteps(s, mem, opts.Force, false, &res)
+			ss, err := c.removeMemberSteps(s, mem, DeleteOptions{Force: opts.Force, keepBranches: again[mem.Name]}, &res)
 			if err != nil {
 				return plan, err
 			}

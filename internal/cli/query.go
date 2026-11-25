@@ -228,6 +228,7 @@ func newDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <pkg> [--force] [--delete-branches]",
 		Short: "Tear down a package and every one of its sessions",
+		Long:  "Remove a package and every one of its sessions.\n\n" + branchesHelp,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := loadCore()
@@ -249,13 +250,11 @@ func newDeleteCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			fprintf(out, "deleted %s\n", p.Name)
-			for _, b := range res.BranchesKept {
-				fprintf(out, "kept branch %s\n", b)
-			}
+			printBranches(out, res)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "delete even if members have unsaved work in any session")
-	cmd.Flags().BoolVar(&deleteBranches, "delete-branches", false, "also delete session branches already merged into their base")
+	cmd.Flags().BoolVar(&deleteBranches, "delete-branches", false, "also delete the branches whose work has been merged")
 	return cmd
 }

@@ -41,8 +41,8 @@ func TestWorktreeLifecycleAndStatus(t *testing.T) {
 	if st.Branch != "vmono/x" || st.Dirty != 0 || st.Untracked != 0 {
 		t.Errorf("clean status wrong: %+v", st)
 	}
-	if n, err := Unpushed(wt); err != nil || n != 0 {
-		t.Errorf("Unpushed clean = %d, %v", n, err)
+	if n, err := OnNoBranch(wt); err != nil || n != 0 {
+		t.Errorf("OnNoBranch clean = %d, %v", n, err)
 	}
 
 	testutil.WriteFile(t, filepath.Join(wt, "README.md"), "changed\n")
@@ -57,8 +57,8 @@ func TestWorktreeLifecycleAndStatus(t *testing.T) {
 	}
 	testutil.Git(t, wt, "add", "-A")
 	testutil.Git(t, wt, "commit", "--quiet", "-m", "work")
-	if n, _ := Unpushed(wt); n != 1 {
-		t.Errorf("Unpushed after commit = %d, want 1", n)
+	if n, _ := OnNoBranch(wt); n != 0 {
+		t.Errorf("OnNoBranch after a commit on the branch = %d, want 0", n)
 	}
 	if IsMerged(src, "vmono/x", "origin/main") {
 		t.Error("branch with new commit must not be merged")
@@ -84,6 +84,10 @@ func TestDetachedAndCommonDir(t *testing.T) {
 	st, err := StatusOf(wt)
 	if err != nil || !st.Detached {
 		t.Fatalf("expected detached, got %+v, %v", st, err)
+	}
+	commitFile(t, wt, "stray.txt", "s\n", "stray")
+	if n, err := OnNoBranch(wt); err != nil || n != 1 {
+		t.Errorf("OnNoBranch of a detached commit = %d, %v", n, err)
 	}
 	cd, err := CommonDir(wt)
 	if err != nil {
@@ -423,29 +427,6 @@ func TestRebaseOntoStopsOnConflict(t *testing.T) {
 	testutil.Git(t, wt, "rebase", "--abort")
 	if RebaseInProgress(wt) {
 		t.Error("aborted rebase must not read as in progress")
-	}
-}
-
-func TestUnpushedIgnoresCommitsOnLandedBranches(t *testing.T) {
-	env := testutil.NewEnv(t)
-	src := env.NewSource(t, "epsilon")
-	wt := filepath.Join(env.Root, "wt", "epsilon")
-	if err := WorktreeAddBranch(src, wt, "vmono/x", "origin/main"); err != nil {
-		t.Fatal(err)
-	}
-	commitFile(t, wt, "a.txt", "a\n", "work")
-	if n, _ := Unpushed(wt); n != 1 {
-		t.Fatalf("Unpushed = %d, want 1", n)
-	}
-	if n, _ := Unpushed(wt, "", "no-such-branch", "main"); n != 1 {
-		t.Errorf("empty, missing and unrelated branches must not hide commits: %d", n)
-	}
-	testutil.Git(t, src, "merge", "--ff-only", "--quiet", "vmono/x")
-	if n, _ := Unpushed(wt, "main"); n != 0 {
-		t.Errorf("commits on a landed branch must not count: %d", n)
-	}
-	if n, _ := Unpushed(wt); n != 1 {
-		t.Errorf("without naming it, the commit still counts: %d", n)
 	}
 }
 
