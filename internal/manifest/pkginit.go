@@ -63,3 +63,16 @@ func (m *Manifest) InitDrift() (added, removed []string) {
 	}
 	return added, removed
 }
+
+// DriftText renders InitDrift as "+added -removed", or "" when there is none.
+func (m *Manifest) DriftText() string {
+	added, removed := m.InitDrift()
+	var parts []string
+	for _, name := range added {
+		parts = append(parts, "+"+name)
+	}
+	for _, name := range removed {
+		parts = append(parts, "-"+name)
+	}
+	return strings.Join(parts, " ")
+}
