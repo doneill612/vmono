@@ -373,7 +373,7 @@ type worktreeProblem struct {
 }
 
 // checkWorktree returns what keeps the member worktree at wt from being
-// rebased, or nil when it is clean and on its branch in the session. then is the
+// updated, or nil when it is clean and on its branch in the session. then is the
 // command the reason tells the user to run again.
 func checkWorktree(s *Session, mem manifest.Member, wt, then string) *worktreeProblem {
 	if gitx.RebaseInProgress(wt) {
@@ -395,7 +395,7 @@ func checkWorktree(s *Session, mem manifest.Member, wt, then string) *worktreePr
 }
 
 // forkPoint returns the commit after which a session's own commits begin: the
-// later of its merge-base with the member's base and with the landing target.
+// later of its merge-base with the member's base and with the target.
 // Replaying from the base's merge-base keeps commits that already sit on the
 // base, which the session was built on, from being replayed as new ones.
 func forkPoint(wt, base, target string) (string, error) {

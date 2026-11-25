@@ -308,8 +308,8 @@ func ResolveRef(repo, ref string) (string, error) {
 // The fallback is never the literal "HEAD". A ref returned here is also
 // evaluated inside session worktrees, where "HEAD" is the session branch
 // itself: a base of "HEAD" there makes every one of the session's own commits
-// look like they are already on the base, so status and finish see nothing to
-// land. The fallback is therefore pinned to the source's checked-out branch
+// look like they are already on the base, so there never seems to be anything
+// to push. The fallback is therefore pinned to the source's checked-out branch
 // as a full ref name (refs/heads/<branch>, which every worktree of the repo
 // resolves the same way), or to a commit id when the source has a detached
 // HEAD or the checkout cannot be named.
@@ -865,8 +865,8 @@ func IsNonFastForward(err error) bool {
 	return false
 }
 
-// DefaultBranch returns the name of the branch a repo's work normally lands
-// on: the one origin/HEAD points at, or, for a repo with no remote HEAD, the
+// DefaultBranch returns the name of the branch a repo's work normally merges
+// into: the one origin/HEAD points at, or, for a repo with no remote HEAD, the
 // branch it has checked out. It returns "" when neither is known.
 func DefaultBranch(repo string) string {
 	if out, err := run(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {

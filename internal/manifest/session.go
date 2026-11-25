@@ -39,17 +39,11 @@ type Session struct {
 	// Branch is checked out by every active member of the session that Members
 	// gives no branch of its own. Use BranchFor to read a member's.
 	Branch string `toml:"branch"`
-	// Finished is when the session's work last landed. The zero time means it
-	// has never been finished. Whether the session still reads as finished
-	// also depends on its members' live git state; see core.SessionState.
-	Finished time.Time `toml:"finished,omitempty"`
-	// Into maps a member's name to the branch in its source repo that the
-	// session's work lands on when the session is finished. Landing branches
-	// are per member because repos need not share a branch name. A member
-	// with no entry, such as one added after the session began, lands on the
-	// branch its base names (see IntoFor). It is a table, so it is written
-	// after the scalars.
-	Into map[string]string `toml:"into,omitempty"`
+	// Finished and Into are read from files of LandingSessionSchema, and kept
+	// until the file is converted: when the session's work last landed, and the
+	// branch of each member's source repo it landed on.
+	Finished time.Time         `toml:"finished,omitempty"`
+	Into     map[string]string `toml:"into,omitempty"`
 	// Members maps an active member's name to what the session records about
 	// its branch. A member with no entry is on Branch, which it found already
 	// made, and is built on its base.
@@ -95,18 +89,6 @@ func (s *Session) SetMember(member string, m SessionMember) {
 		s.Members = map[string]SessionMember{}
 	}
 	s.Members[member] = m
-}
-
-// IntoFor returns the branch mem's work lands on when the session is finished,
-// and whether the session recorded it for this member. A recorded branch that
-// does not exist yet is created at finish. Without one, the branch is the one
-// the member's base names (see BaseBranch), or "" when the base names none,
-// in which case the caller resolves the source repo's default branch with git.
-func (s *Session) IntoFor(mem Member) (branch string, recorded bool) {
-	if b := s.Into[mem.Name]; b != "" {
-		return b, true
-	}
-	return BaseBranch(mem), false
 }
 
 // BaseBranch returns the branch a member's base names: "origin/main" is

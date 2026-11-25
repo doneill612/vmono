@@ -26,7 +26,7 @@ const initFile = "init.toml"
 
 // InitWorkspace is the temporary checkout an agent explores to initialize a
 // package: a detached worktree of every member, whatever its mode. It is not
-// a session: it has no branch, lands nothing, and is removed when the harness
+// a session: it has no branch, makes no changes, and is removed when the harness
 // exits. Its file, rather than the manifest, says what there is to remove,
 // since the members may change while it is open.
 type InitWorkspace struct {
@@ -109,7 +109,7 @@ func (c *Core) exploredMembers(p *Package) []string {
 
 // initView returns the package as an init workspace holds it: every member a
 // reference at its base or ref, with nothing to copy or run. The base is used
-// rather than a landing branch because what is recorded describes the
+// rather than a session's branch because what is recorded describes the
 // package, not one feature. The package itself is not changed.
 func initView(p *Package) *Package {
 	m := clone(p.M)

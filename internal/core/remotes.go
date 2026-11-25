@@ -22,37 +22,32 @@ func primaryRemote(src string) string {
 	return ""
 }
 
-// remoteCounterpart returns the remote-tracking ref that stands for the
-// landing branch into of src: the upstream the local branch tracks, else the
-// branch of the same name on the primary remote. It is "" when there is none
-// on disk as of the last fetch.
-func remoteCounterpart(src, into string) string {
-	return remoteCounterpartIn(gitx.LiveRefs(src), src, into)
-}
-
-// remoteCounterpartIn is remoteCounterpart answered from refs.
-func remoteCounterpartIn(refs gitx.Refs, src, into string) string {
-	if tr, ok := refs.UpstreamOf(into); ok {
+// remoteCounterpart returns the remote-tracking ref that stands for the local
+// branch of src: the upstream it tracks, else the branch of the same name on the
+// primary remote. It is "" when there is none on disk as of the last fetch.
+func remoteCounterpart(src, branch string) string {
+	refs := gitx.LiveRefs(src)
+	if tr, ok := refs.UpstreamOf(branch); ok {
 		if refs.Exists(tr.Ref) {
 			return tr.Ref
 		}
 		return ""
 	}
 	if remote := primaryRemote(src); remote != "" {
-		if ref := "refs/remotes/" + remote + "/" + into; refs.Exists(ref) {
+		if ref := "refs/remotes/" + remote + "/" + branch; refs.Exists(ref) {
 			return ref
 		}
 	}
 	return ""
 }
 
-// freshest returns whichever of the existing local branch into and its remote
+// freshest returns whichever of the existing local branch and its remote
 // counterpart contains the other, preferring the local one when they are
 // equal. When each has commits the other lacks, it returns the local branch
 // and diverged is true.
-func freshest(src, into string) (ref string, diverged bool) {
-	local := "refs/heads/" + into
-	remote := remoteCounterpart(src, into)
+func freshest(src, branch string) (ref string, diverged bool) {
+	local := "refs/heads/" + branch
+	remote := remoteCounterpart(src, branch)
 	switch {
 	case remote == "" || gitx.IsMerged(src, remote, local):
 		return local, false
@@ -60,33 +55,6 @@ func freshest(src, into string) (ref string, diverged bool) {
 		return remote, false
 	}
 	return local, true
-}
-
-// landingTarget returns the ref a member's work is measured and rebased
-// against, and whether the landing branch exists as a local branch. A branch
-// that exists only on its remote stands in for it, and one that exists nowhere
-// is measured against the member's base, since finish will create it there.
-func landingTarget(refs gitx.Refs, src, into, base string) (target string, exists bool) {
-	if refs.BranchExists(into) {
-		return "refs/heads/" + into, true
-	}
-	if ref := remoteCounterpartIn(refs, src, into); ref != "" {
-		return ref, false
-	}
-	return base, false
-}
-
-// ownCommits counts the commits in the worktree that are reachable from HEAD
-// but from none of the member's base, its landing target, and the remote copy
-// of its landing branch into: the session's own work still to land. The remote
-// copy matters for a session updated onto it while the local branch lags, or
-// merged with it: what it picked up there is not its own.
-func ownCommits(refs gitx.Refs, src, wt, into, base, target string) (int, error) {
-	not := []string{"HEAD", "--not", base, target}
-	if ref := remoteCounterpartIn(refs, src, into); ref != "" {
-		not = append(not, ref)
-	}
-	return gitx.RevCount(wt, not...)
 }
 
 // MemberBranches is one active member's branches on its remote.
@@ -100,7 +68,7 @@ type MemberBranches struct {
 	ListErr error
 }
 
-// RemoteBranches lists the remote branches a session of p could start from,
+// RemoteBranches lists the remote branches a session of p could work on or build on,
 // for each active member: as of the last fetch, or after fetching when fetch
 // is true. A member that cannot be fetched or listed is reported rather than
 // failing the rest.

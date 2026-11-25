@@ -169,29 +169,13 @@ func TestSessionValidateInto(t *testing.T) {
 	}
 }
 
-func TestIntoFor(t *testing.T) {
-	cases := []struct {
-		into     map[string]string
-		member   string
-		base     string
-		want     string
-		recorded bool
-	}{
-		{nil, "api", "origin/main", "main", false},
-		{nil, "api", "origin/release/1.0", "release/1.0", false},
-		{nil, "api", "main", "main", false},
-		{nil, "api", "origin/HEAD", "", false},
-		{nil, "api", "HEAD", "", false},
-		{nil, "api", "", "", false},
-		{map[string]string{"api": "feature/x"}, "api", "origin/main", "feature/x", true},
-		{map[string]string{"api": "feature/x"}, "sdk", "origin/main", "main", false}, // a member added later
-	}
-	for _, c := range cases {
-		s := sampleSession()
-		s.Into = c.into
-		got, recorded := s.IntoFor(Member{Name: c.member, Base: c.base})
-		if got != c.want || recorded != c.recorded {
-			t.Errorf("into=%v member=%s base=%q: got (%q, %v), want (%q, %v)", c.into, c.member, c.base, got, recorded, c.want, c.recorded)
+func TestBaseBranch(t *testing.T) {
+	for base, want := range map[string]string{
+		"origin/main": "main", "origin/release/1.0": "release/1.0", "main": "main",
+		"origin/HEAD": "", "HEAD": "", "": "", "upstream/HEAD": "",
+	} {
+		if got := BaseBranch(Member{Base: base}); got != want {
+			t.Errorf("base %q: got %q, want %q", base, got, want)
 		}
 	}
 }
