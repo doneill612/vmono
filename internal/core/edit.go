@@ -314,6 +314,8 @@ type ShowInit struct {
 	// covers that the package no longer has.
 	Added   []string `json:"added"`
 	Removed []string `json:"removed"`
+	// Suggestions are commands that await review.
+	Suggestions []manifest.Suggestion `json:"suggestions"`
 }
 
 // Show reports the package's purpose, context, overview, notes (newest first), its
@@ -329,7 +331,8 @@ func (c *Core) Show(p *Package, s *Session) ShowResult {
 	if in := p.M.Init; in != nil {
 		added, removed := p.M.InitDrift()
 		out.Init = &ShowInit{At: in.At.Format(time.RFC3339), By: in.By, Overview: p.M.Overview(),
-			Added: append([]string{}, added...), Removed: append([]string{}, removed...)}
+			Added: append([]string{}, added...), Removed: append([]string{}, removed...),
+			Suggestions: append([]manifest.Suggestion{}, p.M.Pending()...)}
 	}
 	if s != nil {
 		out.Path, out.Session, out.Branch = s.Dir, s.Name, s.S.Branch

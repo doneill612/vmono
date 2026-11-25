@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
@@ -101,5 +102,62 @@ func TestDescribeOverviewAndShowDrift(t *testing.T) {
 	}
 	if err := c.Describe(p, DescribeOptions{Overview: &empty}); err != nil || p.M.Init != nil {
 		t.Errorf("clearing the overview: %v %+v", err, p.M.Init)
+	}
+}
+
+func TestReviewSuggestions(t *testing.T) {
+	c, env := newCore(t)
+	m := request("demo", []string{env.NewSource(t, "alpha")}, nil)
+	m.Members[0].Setup = manifest.Commands{"mine"}
+	p := mustPackage(t, c, m)
+	sug := func(kind, cmd string) manifest.Suggestion {
+		return manifest.Suggestion{Member: "alpha", Kind: kind, Command: cmd, Reason: "Makefile"}
+	}
+	rec := InitRecord{Overview: "o", Suggestions: []manifest.Suggestion{
+		sug("setup", "mine"), sug("setup", "make deps"), sug("setup", "make all"), sug("teardown", "make down"), sug("teardown", "make down"),
+	}}
+	res, err := c.RecordInit(p, rec)
+	if err != nil || len(res.Pending) != 3 || res.NewPending != 3 {
+		t.Fatalf("record = %+v, %v", res, err)
+	}
+	if res, err = c.RecordInit(p, InitRecord{Overview: "o2"}); err != nil || len(res.Pending) != 3 || res.NewPending != 0 {
+		t.Errorf("a record with no suggestions leaves them: %+v %v", res, err)
+	}
+	alpha := func() *manifest.Member {
+		p, _ = c.Load("demo")
+		mem, _ := p.M.Member("alpha")
+		return mem
+	}
+	if got := alpha().Setup; !reflect.DeepEqual(got, manifest.Commands{"mine"}) {
+		t.Fatalf("suggesting must change no command: %v", got)
+	}
+
+	agent := c.Author
+	c.Author = "agent:claude"
+	if err := c.ReviewSuggestions(p, []SuggestionDecision{{ID: res.Pending[0].ID(), Accept: true}}); !errors.Is(err, ErrAgentReview) {
+		t.Errorf("agent: %v", err)
+	}
+	c.Author = agent
+	if err := c.ReviewSuggestions(p, []SuggestionDecision{{ID: res.Pending[0].ID(), Accept: true}, {ID: "nope"}}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown id: %v", err)
+	}
+	if len(alpha().Setup) != 1 {
+		t.Error("a refused review must settle nothing")
+	}
+	if err := c.ReviewSuggestions(p, []SuggestionDecision{
+		{ID: res.Pending[0].ID(), Accept: true, Command: "make deps -j"}, {ID: res.Pending[1].ID()}, {ID: res.Pending[2].ID(), Accept: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mem := alpha()
+	if !reflect.DeepEqual(mem.Setup, manifest.Commands{"mine", "make deps -j"}) || !reflect.DeepEqual(mem.Teardown, manifest.Commands{"make down"}) || len(p.M.Pending()) != 0 {
+		t.Errorf("member = %+v, pending = %v", mem, p.M.Pending())
+	}
+	if res, err = c.RecordInit(p, rec); err != nil || len(res.Pending) != 0 {
+		t.Errorf("settled suggestions must not come back: %+v %v", res, err)
+	}
+	rec.Suggestions = []manifest.Suggestion{sug("setup", "a\nb")}
+	if _, err = c.RecordInit(p, rec); err == nil {
+		t.Error("a command of several lines should be refused")
 	}
 }
