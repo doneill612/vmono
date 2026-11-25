@@ -114,12 +114,6 @@ type (
 	pushMsg struct{ from, s screen }
 	// popMsg removes from, the top screen, and refreshes the one revealed.
 	popMsg struct{ from screen }
-	// popPastMsg removes from, the top screen, and then every screen beneath
-	// it that past reports true for, and refreshes the one revealed.
-	popPastMsg struct {
-		from screen
-		past func(screen) bool
-	}
 	// homeMsg returns to the packages view, reloading it, and flashes text.
 	homeMsg struct{ text string }
 	// flashMsg shows a one-line notice in the status bar until the next key.
@@ -141,13 +135,6 @@ func push(from, s screen) tea.Cmd { return func() tea.Msg { return pushMsg{from,
 
 // pop returns a command that closes from.
 func pop(from screen) tea.Cmd { return func() tea.Msg { return popMsg{from} } }
-
-// popPast returns a command that closes from and then any screens beneath it
-// that past reports true for. It is for an operation that removes what those
-// screens show, so they are not revealed with nothing left to display.
-func popPast(from screen, past func(screen) bool) tea.Cmd {
-	return func() tea.Msg { return popPastMsg{from, past} }
-}
 
 // goHome returns a command that goes back to the packages view.
 func goHome(text string) tea.Cmd { return func() tea.Msg { return homeMsg{text} } }
@@ -260,11 +247,6 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		return a, a.pop()
-	case popPastMsg:
-		if m.from != a.top() {
-			return a, nil
-		}
-		return a, a.popPast(m.past)
 	case actionMsg:
 		if m.owner != a.top() {
 			return a, nil
@@ -344,20 +326,6 @@ func (a *App) pop() tea.Cmd {
 		return nil
 	}
 	a.stack = a.stack[:len(a.stack)-1]
-	return a.updateTop(refreshMsg{})
-}
-
-// popPast closes the top screen and then each screen beneath it that past
-// reports true for, always keeping the root, and tells the screen revealed to
-// reload.
-func (a *App) popPast(past func(screen) bool) tea.Cmd {
-	if len(a.stack) <= 1 {
-		return nil
-	}
-	a.stack = a.stack[:len(a.stack)-1]
-	for len(a.stack) > 1 && past(a.top()) {
-		a.stack = a.stack[:len(a.stack)-1]
-	}
 	return a.updateTop(refreshMsg{})
 }
 

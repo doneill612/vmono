@@ -224,7 +224,7 @@ func TestEnterOnASessionOpensTheActionMenu(t *testing.T) {
 	if d.quit || d.app.Launch() != nil {
 		t.Fatal("enter on a session must not launch directly")
 	}
-	d.has("Launch", "Launch with…", "Members", "Describe", "Sync", "Fetch", "Copy path", "Finish", "Delete")
+	d.has("Launch", "Launch with…", "Members", "Describe", "Sync", "Fetch", "Copy path", "Update", "Push", "Delete")
 
 	d.key("esc")
 	d.lacks("enter select")
