@@ -186,6 +186,7 @@ The shortcuts, none of which you have to use:
 | `d` | Describe |
 | `n` / `e` | New package / edit the selected one (applies to every session) |
 | `i` | Initialize the package: pick a harness to explore it and record an overview |
+| `v` | Review the commands an initialization suggested |
 | `s` / `f` | Sync every session / fetch every member's source |
 | `ctrl+d` | Delete the package and all its sessions (asks first; typed confirmation if work would be lost in any of them) |
 | `y` | Copy the package path |
@@ -310,6 +311,14 @@ The exploration is read-only in layers. Claude Code and OpenCode get rules that 
 If files were changed, or the agent committed, the checkout is kept and reported. `vmono package init [pkg] --clean --force` discards it. One left by a crash is replaced by the next run, or removed by `--clean` or `vmono doctor --fix`. A package being initialized cannot be deleted.
 
 In tmux or herdr the initialization gets a place of its own named `package/.init` (`package/_init` in tmux), and starting another goes to it. An agent cannot start one.
+
+### Suggested commands
+
+The agent may also suggest [`setup` and `teardown` commands](#setup-and-teardown) for members, such as `pnpm install` where there is a `pnpm-lock.yaml`. Suggesting runs nothing. When the harness exits, vmono goes straight into a review that shows each command, when it would run, and the file it came from: `a` accepts, `e` edits first, `x` dismisses, `A` accepts all when they all show, and `q` leaves the rest for later.
+
+An accepted command is added after the member's own and runs in worktrees created or removed from then on. A settled suggestion is not offered again. Agents cannot accept or dismiss, because these commands run as you and outside the harness's sandbox.
+
+Return to a review with `v` on the package in the TUI or `vmono package suggestions [pkg] --review`. Without `--review` the command lists what is pending, and `--accept` and `--dismiss` take ids from that list. Inside herdr, a notification says there will be something to review as soon as the agent has recorded suggestions.
 
 ## Updating a session
 
@@ -499,7 +508,7 @@ Fetches and pushes never prompt. Starting a session, adding members, sync and th
 - `vmono session push` is the only command that pushes, and only on request. It sends one branch per member, the landing branch, never forced, and refuses a session that is not finished. A branch the remote has moved past is left alone.
 - Deleting a package or session directory by hand leaves its worktrees registered in the source repos. `vmono doctor --fix` prunes those records, and starting a session and adding or editing members release any whose directory is gone before adding a worktree, warning about each. Branches are still kept, so recreating a session of the same name asks to reuse its branch. Prefer `vmono session rm` and `vmono delete`, which remove the worktrees properly.
 - On Windows, vmono refuses to remove a session, member or package while your working directory is inside it, since Windows cannot delete a directory in use. `cd` out and run the command again, naming the session (`vmono session finish PKG/SESSION --close`). Nothing has changed when it refuses, and `--force` does not apply. Another program holding the directory open, such as an editor or a second terminal, can still make the removal fail with git's own `Permission denied`.
-- Hooks and `setup` and `teardown` commands run as you, outside any sandbox the harness uses. They come only from your config and the package manifest, so treat a change to those like a change to a script.
+- Hooks and `setup` and `teardown` commands run as you, outside any sandbox the harness uses. They come only from your config and the package manifest, and one an agent suggested joins the manifest only when you accept it, so treat a change to those like a change to a script.
 - Symlinks are never followed or created.
 - `vmono package init` works in temporary detached worktrees. One whose files were changed is kept until you discard it with `--clean --force`.
 - Committing from a worktree writes into the source repo's git directory, outside the package. `vmono inspect --json` lists each `git_common_dir` so sandboxing wrappers can allow it.
