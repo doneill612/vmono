@@ -89,7 +89,9 @@ If the work needs a repository the package does not have, ask the user first,
 then run ` + "`vmono add REPO --role \"TEXT\"`" + ` (a known repo name or a path to any git repo).
 Add ` + "`--ref`" + ` for a read-only reference member. The member is added to every
 session of the package, and its worktree in your session exists on disk
-immediately.
+immediately. If ` + "`vmono show --json`" + ` has an ` + "`init`" + `, its overview does not cover the
+new member yet: suggest that the user run ` + "`vmono package init`" + ` from their own
+terminal. Never run it yourself.
 
 `
 
