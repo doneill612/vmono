@@ -817,6 +817,23 @@ func SetUpstream(repo, branch, upstream string) error {
 	return err
 }
 
+// UnsetUpstream makes the local branch track nothing. It fails when the branch
+// has no upstream.
+func UnsetUpstream(repo, branch string) error {
+	_, err := run(repo, "branch", "--unset-upstream", branch)
+	return err
+}
+
+// Reflog returns the commits ref has pointed at, the most recent first. It is
+// nil for a ref with no reflog.
+func Reflog(repo, ref string) []string {
+	out, err := run(repo, "reflog", "show", "--format=%H", ref, "--")
+	if err != nil || out == "" {
+		return nil
+	}
+	return strings.Fields(out)
+}
+
 // Remotes returns the names of the repo's remotes, in git's order.
 func Remotes(repo string) []string {
 	out, err := run(repo, "remote")

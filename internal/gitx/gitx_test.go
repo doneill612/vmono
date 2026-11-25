@@ -577,3 +577,30 @@ func TestNewBranchTracksNothing(t *testing.T) {
 		t.Errorf("a branch cut from origin/main must not track it: %+v", tr)
 	}
 }
+
+func TestUnsetUpstream(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "alpha")
+	if err := UnsetUpstream(src, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := UpstreamOf(src, "main"); ok {
+		t.Error("main should track nothing")
+	}
+	if err := UnsetUpstream(src, "main"); err == nil {
+		t.Error("a branch with no upstream has none to unset")
+	}
+}
+
+func TestReflog(t *testing.T) {
+	src, wt := branchWithWork(t, "alpha")
+	tip, _ := ResolveRef(wt, "HEAD")
+	first, _ := ResolveRef(wt, "HEAD~1")
+	log := Reflog(src, "refs/heads/feat")
+	if len(log) != 3 || log[0] != tip || log[1] != first {
+		t.Errorf("reflog = %v, want %s then %s then where it was cut", log, tip, first)
+	}
+	if got := Reflog(src, "refs/heads/nope"); got != nil {
+		t.Errorf("a missing ref has no reflog: %v", got)
+	}
+}
