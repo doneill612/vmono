@@ -42,12 +42,28 @@ goreleaser release --snapshot --clean
 
 For installing and uninstalling by hand on Windows, see [Installation](installation.md). [GoReleaser](https://goreleaser.com) is only needed for the dry run.
 
+## Contributing changes
+
+Changes reach `main` through a pull request, and `main` can't be force-pushed or deleted. Admins can bypass the pull request requirement.
+
+The workflows pin every action to a commit SHA, with the version in a comment beside it. Pin new actions the same way. Dependabot opens weekly pull requests to update those pins and the Go modules.
+
+Report vulnerabilities privately, as described in the [security policy](../SECURITY.md).
+
 ## Releasing
 
-Push a version tag. CI runs the tests, publishes the release with GoReleaser, then installs it on Linux, macOS and Windows with the install scripts:
+Releases are cut by an admin, the only role that can create a `v*` tag. Check that CI passed on the commit, then push the tag. The release workflow runs the tests, publishes the release with GoReleaser, then installs it on Linux, macOS and Windows with the install scripts:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
 A tag with a suffix, such as `v0.2.0-rc.1`, is published as a prerelease, which `latest` skips.
+
+A release is final:
+
+- A `v*` tag can't be moved or deleted.
+- A published release is immutable: its tag and files can't be changed.
+- The install checks run after publishing. If they fail, fix the problem and release the next version.
+
+If the workflow fails before publishing for a passing reason, such as a network error, delete any draft release it left and re-run it. If the fix needs a new commit, tag the next version.
