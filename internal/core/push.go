@@ -343,7 +343,7 @@ func (c *Core) Push(s *Session, opts PushOptions) (PushResult, error) {
 	}
 	res.Members = pushMembers(plan)
 	if opts.DryRun {
-		return res, nil
+		return res, pushBlocked(plan, res)
 	}
 
 	var errs []error
@@ -362,13 +362,18 @@ func (c *Core) Push(s *Session, opts PushOptions) (PushResult, error) {
 		p.Status = PushPushed
 	}
 	res.Members = pushMembers(plan)
-	for _, p := range plan {
-		if p.Status == PushBlocked {
-			errs = append(errs, &PushBlockedError{Result: res})
-			break
-		}
+	if err := pushBlocked(plan, res); err != nil {
+		errs = append(errs, err)
 	}
 	return res, errors.Join(errs...)
+}
+
+// pushBlocked returns a *PushBlockedError when a planned member is blocked.
+func pushBlocked(plan []*pushing, res PushResult) error {
+	if slices.ContainsFunc(plan, func(p *pushing) bool { return p.Status == PushBlocked }) {
+		return &PushBlockedError{Result: res}
+	}
+	return nil
 }
 
 // explainPush rewords a failed push into advice the user can act on: missing

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,19 +9,35 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/doneill612/vmono/internal/core"
-	"github.com/doneill612/vmono/internal/manifest"
 )
 
 // newSessionCmd builds `vmono session`, the commands that start, list, update,
-// finish, push and remove the sessions of a package. A session is one piece of work on a
+// push and remove the sessions of a package. A session is one piece of work on a
 // package: its own branch, and its own worktree of every member.
 func newSessionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "session",
-		Short: "Start, list, update, finish, push and remove the sessions of a package",
+		Short: "Start, list, update, push and remove the sessions of a package",
 	}
-	cmd.AddCommand(newSessionNewCmd(), newSessionLsCmd(), newSessionIntoCmd(), newSessionUpdateCmd(), newSessionFinishCmd(), newSessionReviewCmd(), newSessionPushCmd(), newSessionRmCmd())
+	cmd.AddCommand(newSessionNewCmd(), newSessionLsCmd(), newSessionUpdateCmd(), newSessionReviewCmd(), newSessionPushCmd(), newSessionRmCmd(),
+		newRemovedCmd("finish", "a session's branches are now what you push: preview with `vmono session review`, publish with `vmono session push`, and remove the session with `vmono session rm`"),
+		newRemovedCmd("into", "sessions no longer land on other branches: name the branch to work on with `vmono session new --branch` or `--track`"))
 	return cmd
+}
+
+// newRemovedCmd builds a hidden command that stands in for one that no longer
+// exists and says what to use instead. An agent that learned the old commands
+// at the start of its conversation would otherwise only see that they are
+// unknown.
+func newRemovedCmd(name, instead string) *cobra.Command {
+	return &cobra.Command{
+		Use:                name,
+		Hidden:             true,
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return fmt.Errorf("`vmono session %s` was removed; %s", name, instead)
+		},
+	}
 }
 
 // newSessionNewCmd builds `vmono session new`.
@@ -112,82 +127,6 @@ func newSessionLsCmd() *cobra.Command {
 	return cmd
 }
 
-// newSessionIntoCmd builds `vmono session into`: show where each member's work
-// will land, or change it.
-func newSessionIntoCmd() *cobra.Command {
-	var all string
-	var members []string
-	var asJSON bool
-	cmd := &cobra.Command{
-		Use:   "into [pkg/session] [--all B] [--member NAME=B]... [--json]",
-		Short: "Show, or change, the branch each member's work lands on",
-		Long: `Without flags, list each active member's landing branch in the session.
---all sets one branch for every active member and --member NAME=BRANCH sets one
-member's, which wins over --all. Members you do not name keep theirs. A branch that
-does not exist yet is created when the session is finished.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			byMember, err := parseMembers(members)
-			if err != nil {
-				return err
-			}
-			c, err := loadCore()
-			if err != nil {
-				return err
-			}
-			s, err := c.ResolveSession(packageArg(args))
-			if err != nil {
-				return err
-			}
-			if all != "" || len(byMember) > 0 {
-				if err := c.SetInto(s, all, byMember); err != nil {
-					return err
-				}
-				if s, err = c.ResolveSession(s.Label()); err != nil {
-					return err
-				}
-			}
-			type row struct {
-				Member string `json:"member"`
-				Into   string `json:"into"`
-			}
-			var rows []row
-			for _, m := range c.Status(s).Members {
-				if m.Mode == manifest.ModeActive {
-					rows = append(rows, row{m.Name, m.Into})
-				}
-			}
-			out := cmd.OutOrStdout()
-			if asJSON {
-				return printJSON(out, rows)
-			}
-			for _, r := range rows {
-				fprintf(out, "%-16s %s\n", r.Member, r.Into)
-			}
-			return nil
-		},
-	}
-	f := cmd.Flags()
-	f.StringVar(&all, "all", "", "land every active member on this branch")
-	f.StringArrayVar(&members, "member", nil, "land one member on a branch: NAME=BRANCH (repeatable)")
-	f.BoolVar(&asJSON, "json", false, "output JSON")
-	return cmd
-}
-
-// parseMembers reads NAME=BRANCH pairs.
-func parseMembers(vals []string) (map[string]string, error) {
-	_, by, err := parseBranches("--member", vals)
-	if err != nil {
-		return nil, err
-	}
-	for _, v := range vals {
-		if !strings.Contains(v, "=") {
-			return nil, fmt.Errorf("--member %q: expected NAME=BRANCH", v)
-		}
-	}
-	return by, nil
-}
-
 // newSessionUpdateCmd builds `vmono session update`.
 func newSessionUpdateCmd() *cobra.Command {
 	var members []string
@@ -268,154 +207,6 @@ func printUpdate(w io.Writer, res core.UpdateResult, dryRun bool) {
 	}
 }
 
-// newSessionFinishCmd builds `vmono session finish`.
-func newSessionFinishCmd() *cobra.Command {
-	var into []string
-	var closeAfter, dryRun, asJSON bool
-	cmd := &cobra.Command{
-		Use:   "finish [pkg/session] [--into [MEMBER=]B]... [--close] [--dry-run] [--json]",
-		Short: "Land the session's commits on each member's branch in its source repo",
-		Long: `Land the session's work. Each active member's own commits are rebased onto its
-landing branch inside the session, then the landing branch in the member's source
-repo is moved to the result: fast-forwarded when it is checked out in a clean
-worktree, otherwise updated in place, and created when it does not exist yet.
-Members with no commits of their own are skipped.
-
-Each member lands on its own landing branch: the one recorded when the session was
-created (by default the branch its source had checked out), else the branch its
-base names (origin/main lands on main). --into overrides and records it. Nothing moves unless every member can land: commit
-or stash uncommitted work first. If a rebase stops on conflicts, resolve them in
-that member, run git add and git rebase --continue, then run this command again.
-
-The session, its worktrees and its branch stay in place and the session is marked
-finished; remove it with ` + "`vmono session rm`" + ` or pass --close. Nothing is pushed.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFinish(cmd, args, into, closeAfter, dryRun, asJSON)
-		},
-	}
-	f := cmd.Flags()
-	f.StringArrayVar(&into, "into", nil, intoHelp+"; overrides what is recorded, and is recorded")
-	f.BoolVar(&closeAfter, "close", false, "remove the session once its work has landed")
-	f.BoolVar(&dryRun, "dry-run", false, "show what would land without changing anything")
-	f.BoolVar(&asJSON, "json", false, "output JSON")
-	return cmd
-}
-
-// newSessionReviewCmd builds `vmono session review`, the read-only form of
-// `vmono session finish`: it plans the finish and prints what would land on
-// each member's branch, and changes nothing. It exists as its own command,
-// rather than as `finish --dry-run`, so a harness permission rule can allow
-// it while `vmono session finish` keeps asking: Claude Code lets an ask rule
-// beat any allow rule, however specific, so a dry-run flag on a command that
-// asks can never be exempted. Output, JSON and exit codes are those of
-// `finish --dry-run`, and an --into given here is checked but never recorded.
-func newSessionReviewCmd() *cobra.Command {
-	var into []string
-	var asJSON bool
-	cmd := &cobra.Command{
-		Use:   "review [pkg/session] [--into [MEMBER=]B]... [--json]",
-		Short: "Show what finishing the session would land, changing nothing",
-		Long: `Show what ` + "`vmono session finish`" + ` would do, without doing it. Each active member's
-commits that would be rebased onto its landing branch are listed with the branch
-they would land on, and any member that is blocked or would conflict is shown with
-the reason. Nothing is rebased, moved, recorded or marked finished.
-
---into previews a different landing branch; unlike finish, it is not recorded.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFinish(cmd, args, into, false, true, asJSON)
-		},
-	}
-	f := cmd.Flags()
-	f.StringArrayVar(&into, "into", nil, intoHelp+"; previews only, and is not recorded")
-	f.BoolVar(&asJSON, "json", false, "output JSON")
-	return cmd
-}
-
-// runFinish is the body shared by `vmono session finish` and `vmono session
-// review`. It resolves the session, plans or performs the finish with the
-// given options, and prints the result as text or JSON. A refused finish still
-// prints its per-member reasons before the error is returned, so the caller
-// sees why and the exit status stays non-zero. With dryRun set nothing is
-// changed, which is the only way review calls it.
-func runFinish(cmd *cobra.Command, args, into []string, closeAfter, dryRun, asJSON bool) error {
-	intoAll, intoBy, err := parseBranches("--into", into)
-	if err != nil {
-		return err
-	}
-	c, err := loadCore()
-	if err != nil {
-		return err
-	}
-	s, err := c.ResolveSession(packageArg(args))
-	if err != nil {
-		return err
-	}
-	var res core.FinishResult
-	err = withEvents(cmd.ErrOrStderr(), c, func() error {
-		var ferr error
-		res, ferr = c.Finish(s, core.FinishOptions{Into: intoAll, IntoByMember: intoBy, Close: closeAfter, DryRun: dryRun})
-		return ferr
-	})
-	out := cmd.OutOrStdout()
-	switch {
-	case asJSON && (err == nil || errors.Is(err, core.ErrRefused)):
-		if perr := printJSON(out, res); perr != nil {
-			return perr
-		}
-	case err == nil || errors.Is(err, core.ErrRefused):
-		printFinish(out, res, dryRun)
-	}
-	return err
-}
-
-// printFinish writes one line per member for a finish, or a dry run of one,
-// then a summary line. Refused finishes print the same lines with the reason
-// each member is stopped.
-func printFinish(w io.Writer, res core.FinishResult, dryRun bool) {
-	label := res.Package + "/" + res.Session
-	for _, m := range res.Members {
-		fprintf(w, "%-16s %s\n", m.Name, describeLanding(m, dryRun))
-		for _, n := range m.Notes {
-			fprintf(w, "%-16s note: %s\n", "", n)
-		}
-	}
-	switch {
-	case res.Closed:
-		fprintf(w, "finished and removed session %s\n", label)
-	case res.Finished:
-		fprintf(w, "finished session %s; remove it with `vmono session rm %s` when you are done\n", label, label)
-	case dryRun:
-		fprintf(w, "dry run: nothing changed\n")
-	}
-}
-
-// describeLanding words one member's outcome.
-func describeLanding(m core.MemberLanding, dryRun bool) string {
-	commits := fmt.Sprintf("%d commit", m.Commits)
-	if m.Commits != 1 {
-		commits += "s"
-	}
-	verb := "landed"
-	if dryRun || m.Status == core.LandReady {
-		verb = "would land"
-	}
-	switch m.Status {
-	case core.LandNothing:
-		return "nothing to land"
-	case core.LandBlocked:
-		return "blocked: " + m.Reason
-	case core.LandConflict:
-		return fmt.Sprintf("conflict: rebase onto %s stopped in %s; %s", m.Into, strings.Join(m.Conflicts, ", "), m.Reason)
-	}
-	text := fmt.Sprintf("%s %s on %s (%s)", verb, commits, m.Into, m.Via)
-	if m.Create {
-		text += ", creating the branch"
-	}
-	return text
-}
-
 // newSessionPushCmd builds `vmono session push`, which publishes the branches a
 // session's work is on. It is the only vmono command that pushes, and it never
 // forces.
@@ -445,31 +236,7 @@ exits with 2 when any is blocked, 1 when git refused one. --dry-run shows the pl
 and pushes nothing.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := loadCore()
-			if err != nil {
-				return err
-			}
-			s, err := c.ResolveSession(packageArg(args))
-			if err != nil {
-				return err
-			}
-			var res core.PushResult
-			err = withEvents(cmd.ErrOrStderr(), c, func() error {
-				var perr error
-				res, perr = c.Push(s, core.PushOptions{Members: members, DryRun: dryRun})
-				return perr
-			})
-			out := cmd.OutOrStdout()
-			if len(res.Members) > 0 || err == nil {
-				if asJSON {
-					if perr := printJSON(out, res); perr != nil {
-						return perr
-					}
-				} else {
-					printPush(out, res, dryRun)
-				}
-			}
-			return err
+			return runPush(cmd, args, members, dryRun, asJSON)
 		},
 	}
 	f := cmd.Flags()
@@ -477,6 +244,66 @@ and pushes nothing.`,
 	f.BoolVar(&dryRun, "dry-run", false, "show what would be pushed without pushing")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
 	return cmd
+}
+
+// newSessionReviewCmd builds `vmono session review`, the read-only form of
+// `vmono session push`: it plans the push and prints it, and changes nothing.
+// It exists as its own command, rather than as `push --dry-run`, so a harness
+// permission rule can allow it while `vmono session push` keeps asking: Claude
+// Code lets an ask rule beat any allow rule, however specific, so a dry-run
+// flag on a command that asks can never be exempted. Output, JSON and exit
+// codes are those of `push --dry-run`.
+func newSessionReviewCmd() *cobra.Command {
+	var members []string
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "review [pkg/session] [--member NAME]... [--json]",
+		Short: "Show what pushing the session would publish, changing nothing",
+		Long: `Show what ` + "`vmono session push`" + ` would do, without doing it: the branch of each active
+member, where it would go and how many commits it has that the remote lacks, what
+is uncommitted and so left out, and why a member is blocked or has nothing to push.
+The command exits with 2 when a member is blocked.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPush(cmd, args, members, true, asJSON)
+		},
+	}
+	f := cmd.Flags()
+	f.StringArrayVar(&members, "member", nil, "show only this member (repeatable)")
+	f.BoolVar(&asJSON, "json", false, "output JSON")
+	return cmd
+}
+
+// runPush is the body shared by `vmono session push` and `vmono session review`:
+// it plans or performs the push and prints the result as text or JSON. What
+// stops a member is printed before the error is returned. With dryRun set
+// nothing is changed, which is the only way review calls it.
+func runPush(cmd *cobra.Command, args, members []string, dryRun, asJSON bool) error {
+	c, err := loadCore()
+	if err != nil {
+		return err
+	}
+	s, err := c.ResolveSession(packageArg(args))
+	if err != nil {
+		return err
+	}
+	var res core.PushResult
+	err = withEvents(cmd.ErrOrStderr(), c, func() error {
+		var perr error
+		res, perr = c.Push(s, core.PushOptions{Members: members, DryRun: dryRun})
+		return perr
+	})
+	out := cmd.OutOrStdout()
+	if len(res.Members) > 0 || err == nil {
+		if asJSON {
+			if perr := printJSON(out, res); perr != nil {
+				return perr
+			}
+		} else {
+			printPush(out, res, dryRun)
+		}
+	}
+	return err
 }
 
 // printPush writes one line per member for a push, or a dry run of one.
