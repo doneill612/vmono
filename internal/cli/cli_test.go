@@ -861,7 +861,7 @@ func TestHookSessionStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"work/s1", "s1", "in-progress", "alpha", "beta", "1 untracked", "/vmono:finish", "/vmono:note", "/vmono:status"} {
+	for _, want := range []string{"work/s1", "s1", "in-progress", "alpha", "beta", "1 untracked", "/vmono:push", "/vmono:note", "/vmono:status"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("hook output missing %q:\n%s", want, got)
 		}

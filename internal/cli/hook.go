@@ -21,7 +21,7 @@ func newHookCmd() *cobra.Command {
 // Code plugin runs when a conversation starts, resumes, or is compacted. It
 // prints the live state of the session the working directory is in, which
 // Claude Code adds to the conversation as context, so the agent knows each
-// member's branch, what is uncommitted and what is left to land without
+// member's branch, what is uncommitted and what is left to push without
 // having to ask.
 //
 // It must never get in the way of a conversation. Outside a session it prints
@@ -50,7 +50,7 @@ func newHookSessionStartCmd() *cobra.Command {
 				return nil
 			}
 			fprintf(out, "\nThe vmono skill explains how to read and update the package. "+
-				"Commands: /vmono:status, /vmono:note [text], /vmono:finish.\n")
+				"Commands: /vmono:status, /vmono:note [text], /vmono:push.\n")
 			return nil
 		},
 	}

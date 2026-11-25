@@ -150,14 +150,20 @@ func TestRenderPackageWritesOnlyTheGitignore(t *testing.T) {
 	}
 }
 
-func TestSkillTeachesFinishing(t *testing.T) {
+func TestSkillTeachesPushingAndWhatFollows(t *testing.T) {
 	body := SkillMarkdown()
-	// The preview is `session review`, which needs no permission; `finish
-	// --dry-run` would prompt, since finish asks.
-	if strings.Contains(body, "finish --dry-run") {
-		t.Error("skill must preview with `vmono session review`, not `finish --dry-run`")
+	// The preview is `session review`, which needs no permission; `push
+	// --dry-run` would prompt, since push asks.
+	for _, gone := range []string{"push --dry-run", "session finish", "session into", "landing branch", "--merge"} {
+		if strings.Contains(body, gone) {
+			t.Errorf("skill mentions %q", gone)
+		}
 	}
-	for _, want := range []string{"vmono session finish --json", "vmono session review --json", "git -c core.editor=true rebase --continue", "Never pass `--close`", "Never push", "vmono session update --json", "Never use `--merge` without asking", "vmono session into", "--member NAME=BRANCH"} {
+	for _, want := range []string{
+		"vmono session review --json", "vmono session push --json", "Push only when the user asks", "Never use `git push`",
+		"vmono session update --json", "git -c core.editor=true rebase --continue", "Never rebase or amend commits that have been pushed",
+		"squash", "`remote-deleted`", "vmono session rm PACKAGE/SESSION", "--delete-branches", "Never remove the session", "git rebase --onto BASE LAST_MERGED_COMMIT",
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("skill missing %q", want)
 		}

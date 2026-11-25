@@ -132,7 +132,7 @@ func TestClaudeAdapterMergesMemberPermissions(t *testing.T) {
 			t.Errorf("deny missing %q: %v", want, f.Permissions.Deny)
 		}
 	}
-	for _, want := range []string{"Bash(vmono rm:*)", "Bash(vmono delete:*)", "Bash(vmono session rm:*)", "Bash(vmono session finish:*)", "Bash(vmono session push:*)", "Bash(vmono edit:*)", "Bash(npm test:*)"} {
+	for _, want := range []string{"Bash(vmono rm:*)", "Bash(vmono delete:*)", "Bash(vmono session rm:*)", "Bash(vmono session push:*)", "Bash(vmono edit:*)", "Bash(npm test:*)"} {
 		if !contains(f.Permissions.Ask, want) {
 			t.Errorf("ask missing %q: %v", want, f.Permissions.Ask)
 		}
@@ -179,7 +179,7 @@ func TestClaudeAdapterAllowsReadOnlyVmono(t *testing.T) {
 	}
 	// Anything that can change state, or that asks, must not be allowed.
 	for _, rule := range f.Permissions.Allow {
-		for _, bad := range []string{"vmono session finish", "vmono session push", "vmono session rm", "vmono session update", "vmono session into", "vmono sync", "vmono doctor --fix", "vmono rm", "vmono delete", "vmono edit", "vmono note", "vmono add"} {
+		for _, bad := range []string{"vmono session push", "vmono session rm", "vmono session update", "vmono sync", "vmono doctor --fix", "vmono rm", "vmono delete", "vmono edit", "vmono note", "vmono add"} {
 			if strings.Contains(rule, bad) {
 				t.Errorf("allow rule %q covers %q, which can change state", rule, bad)
 			}
@@ -382,16 +382,16 @@ func TestClaudePluginCommands(t *testing.T) {
 		return string(data)
 	}
 
-	finish := read("finish")
-	for _, want := range []string{"name: finish\n", "disable-model-invocation: true\n", finishSection, "vmono session finish --json"} {
-		if !strings.Contains(finish, want) {
-			t.Errorf("finish missing %q", want)
+	push := read("push")
+	for _, want := range []string{"name: push\n", "disable-model-invocation: true\n", pushSection, updateSection, mergedSection, "vmono session push --json"} {
+		if !strings.Contains(push, want) {
+			t.Errorf("push missing %q", want)
 		}
 	}
 	// A pre-approval here would silence the adapter's ask rule for
-	// `vmono session finish`.
-	if strings.Contains(finish, "allowed-tools") {
-		t.Error("finish must not pre-approve tools: the ask rule for vmono session finish has to keep prompting")
+	// `vmono session push`.
+	if strings.Contains(push, "allowed-tools") {
+		t.Error("push must not pre-approve tools: the ask rule for vmono session push has to keep prompting")
 	}
 
 	note := read("note")
@@ -402,7 +402,7 @@ func TestClaudePluginCommands(t *testing.T) {
 	}
 
 	status := read("status")
-	for _, want := range []string{"name: status\n", `allowed-tools: "Bash(vmono status:*)"`, "vmono status --json"} {
+	for _, want := range []string{"name: status\n", `allowed-tools: "Bash(vmono status:*)"`, "vmono status --json", mergedSection} {
 		if !strings.Contains(status, want) {
 			t.Errorf("status missing %q", want)
 		}
@@ -410,10 +410,29 @@ func TestClaudePluginCommands(t *testing.T) {
 	if strings.Contains(status, "disable-model-invocation") {
 		t.Error("status is read-only and may be run by Claude")
 	}
-	for name, body := range map[string]string{"finish": finish, "note": note, "status": status} {
+	for name, body := range map[string]string{"push": push, "note": note, "status": status} {
 		if !strings.HasPrefix(body, "---\nname: "+name+"\n") || !strings.Contains(body, "\n---\n<!-- "+GeneratedNote+" -->") {
 			t.Errorf("%s: frontmatter malformed:\n%s", name, body)
 		}
+	}
+}
+
+// TestClaudePluginDropsTheFinishCommand covers a session rendered by a vmono
+// that had it.
+func TestClaudePluginDropsTheFinishCommand(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	old := filepath.Join(dir, ".claude/skills/vmono/skills/finish/SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(old, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(old)); !os.IsNotExist(err) {
+		t.Error("the finish command should be gone")
 	}
 }
 
