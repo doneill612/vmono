@@ -81,11 +81,11 @@ func TestInitWorkspaceWithoutSessions(t *testing.T) {
 		t.Error("no branch may be created")
 	}
 
-	t.Chdir(filepath.Join(w.Dir, "_ref", "alpha"))
+	chdir(t, filepath.Join(w.Dir, "_ref", "alpha"))
 	if pp, s, err := c.ResolveContext(""); err != nil || pp.Name != "demo" || s != nil {
 		t.Errorf("inside the workspace the package is known and there is no session: %v %v %v", pp, s, err)
 	}
-	t.Chdir(env.Root)
+	chdir(t, env.Root)
 
 	if err := c.CloseInit(w, false); err != nil {
 		t.Fatal(err)

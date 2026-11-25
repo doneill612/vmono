@@ -28,13 +28,31 @@ func initEnv(t *testing.T, fn func(l *harness.Launch) error) *testutil.Env {
 	return env
 }
 
+// chdir changes the working directory for the rest of the test. It uses
+// os.Chdir rather than t.Chdir on purpose: t.Chdir keeps the directory it
+// leaves open until the test ends, and on Windows that open handle stops the
+// later removal of that directory, here the init checkout, from succeeding.
+// PWD is set as t.Chdir would, so symlinked temp dirs resolve as before.
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PWD", dir)
+}
+
 func TestPackageInitAndRecord(t *testing.T) {
 	env := initEnv(t, func(l *harness.Launch) error {
 		file := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(l.Dir))), "record.json")
 		testutil.WriteFile(t, file, `{"purpose":"why","overview":"the overview","roles":{"alpha":"does things"}}`)
 		wd, _ := os.Getwd()
-		t.Chdir(l.Dir) // as the agent does: the package is inferred
-		defer t.Chdir(wd)
+		chdir(t, l.Dir) // as the agent does: the package is inferred
+		defer chdir(t, wd)
 		out, _, err := run(t, "package", "record", file, "--json")
 		var res core.RecordResult
 		if err != nil || json.Unmarshal([]byte(out), &res) != nil || len(res.Set) != 3 {
