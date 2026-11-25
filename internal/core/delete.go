@@ -130,13 +130,18 @@ func (c *Core) safetyAcross(sessions []*Session, members []manifest.Member) []Me
 }
 
 // PackageSafety runs SafetyCheck over every session of a package, for the
-// delete confirmation. Each row names its session.
+// delete confirmation, and over an init workspace that was changed. Each row
+// names its session.
 func (c *Core) PackageSafety(p *Package) ([]MemberSafety, error) {
 	sessions, err := c.LoadSessions(p)
 	if err != nil {
 		return nil, err
 	}
-	return c.safetyAcross(sessions, p.M.Members), nil
+	_, changed, err := c.checkInit(p)
+	if err != nil {
+		return nil, err
+	}
+	return append(c.safetyAcross(sessions, p.M.Members), changed...), nil
 }
 
 // unsafeOf filters to members that would lose work.
@@ -262,7 +267,8 @@ func (c *Core) DeleteSession(s *Session, opts DeleteOptions) (DeleteResult, erro
 
 // Delete tears a package down, every session first: it checks every member
 // of every session for lost work (returning a *RefusedError unless forced),
-// removes the worktrees, optionally deletes merged branches, then removes the
+// removes the worktrees, those of a leftover init workspace included,
+// optionally deletes merged branches, then removes the
 // package directory and index entry.
 func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
 	var res DeleteResult
@@ -273,7 +279,11 @@ func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
 	if err != nil {
 		return res, err
 	}
-	if bad := unsafeOf(c.safetyAcross(sessions, p.M.Members)); len(bad) > 0 && !opts.Force {
+	initWS, changed, err := c.checkInit(p)
+	if err != nil {
+		return res, err
+	}
+	if bad := append(unsafeOf(c.safetyAcross(sessions, p.M.Members)), changed...); len(bad) > 0 && !opts.Force {
 		return res, &RefusedError{Unsafe: bad}
 	}
 	if err := c.preRemove(sessions...); err != nil {
@@ -282,6 +292,13 @@ func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
 	var steps []apply.Step
 	for _, s := range sessions {
 		ss, err := c.sessionSteps(s, opts, &res, true)
+		if err != nil {
+			return res, err
+		}
+		steps = append(steps, ss...)
+	}
+	if initWS != nil {
+		ss, err := c.initRemovalSteps(initWS, opts.Force)
 		if err != nil {
 			return res, err
 		}
