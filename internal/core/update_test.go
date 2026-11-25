@@ -121,46 +121,6 @@ func TestUpdateAbortsAConflictAndUpdatesTheRest(t *testing.T) {
 	}
 }
 
-// TestUpdateOntoAFeatureBranchesRemoteThenFinish guards the landing target: a
-// session updated onto origin/feature while the local feature lags must not
-// count, or replay, the commits it picked up as its own.
-func TestUpdateOntoAFeatureBranchesRemoteThenFinish(t *testing.T) {
-	c, env := newCore(t)
-	a := env.NewSource(t, "alpha")
-	featureBranch(t, a, "feature")
-	testutil.Git(t, a, "push", "--quiet", "-u", "origin", "feature")
-	p := mustPackage(t, c, request("feat", []string{a}, nil))
-	s, err := c.CreateSession(p, "work", SessionOptions{Into: "feature"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wt := filepath.Join(s.Dir, "alpha")
-	commitIn(t, wt, "work.txt")
-	pushFromElsewhere(t, a, "feature", "theirs.txt", "theirs\n")
-
-	if res, err := c.Update(s, UpdateOptions{}); err != nil || res.Members[0].Onto != "origin/feature" {
-		t.Fatalf("update = %+v, %v", res, err)
-	}
-	if n := toLand(t, c, s, "alpha"); n != 1 {
-		t.Errorf("to land = %d, want only the session's own commit", n)
-	}
-	tip := sha(t, wt, "HEAD")
-	res, err := c.Finish(s, FinishOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m := member(t, res, "alpha"); m.Status != LandLanded || m.Commits != 1 {
-		t.Errorf("landing = %+v", m)
-	}
-	if sha(t, a, "feature") != tip {
-		t.Error("finish should fast-forward feature to the updated session")
-	}
-	push, err := c.Push(s, PushOptions{})
-	if err != nil || push.Members[0].Status != PushPushed || push.Members[0].Commits != 1 {
-		t.Errorf("push = %+v, %v", push, err)
-	}
-}
-
 func TestUpdateSkipsADivergedLandingBranch(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")
@@ -175,56 +135,6 @@ func TestUpdateSkipsADivergedLandingBranch(t *testing.T) {
 	}
 	if sha(t, filepath.Join(s.Dir, "alpha"), "HEAD") != tip {
 		t.Error("the session must not move")
-	}
-}
-
-// TestUpdateMergesADivergedLandingBranch covers the whole way through: a
-// session merged with both sides blocks a finish that would copy upstream's
-// commits, can be merged again, and then lands and pushes as fast-forwards.
-func TestUpdateMergesADivergedLandingBranch(t *testing.T) {
-	for _, into := range []string{"feature", "main"} {
-		t.Run(into, func(t *testing.T) {
-			c, env := newCore(t)
-			a := env.NewSource(t, "alpha")
-			if into == "feature" {
-				testutil.Git(t, a, "checkout", "--quiet", "-b", into)
-				testutil.Git(t, a, "push", "--quiet", "-u", "origin", into)
-			}
-			_, s := newWork(t, c, request("mrg", []string{a}, nil))
-			wt := filepath.Join(s.Dir, "alpha")
-			commitIn(t, wt, "work.txt")
-			commitIn(t, a, "local.txt")
-			pushFromElsewhere(t, a, into, "theirs.txt", "theirs\n")
-
-			res, err := c.Update(s, UpdateOptions{Merge: true})
-			if err != nil || res.Members[0].Status != UpdateDone || !res.Members[0].Merge {
-				t.Fatalf("merge = %+v, %v", res, err)
-			}
-			theirs := sha(t, a, "refs/remotes/origin/"+into)
-			if n := toLand(t, c, s, "alpha"); n != 3 {
-				t.Errorf("to land = %d, want the session's commit and two merges", n)
-			}
-
-			commitIn(t, a, "local2.txt")
-			fin, err := c.Finish(s, FinishOptions{})
-			if !errors.Is(err, ErrRefused) || member(t, fin, "alpha").Status != LandBlocked {
-				t.Fatalf("finish after %s moved = %+v, %v", into, fin, err)
-			}
-			if _, err := c.Update(s, UpdateOptions{Merge: true}); err != nil {
-				t.Fatal(err)
-			}
-			tip := sha(t, wt, "HEAD")
-			if _, err := c.Finish(s, FinishOptions{}); err != nil {
-				t.Fatal(err)
-			}
-			if sha(t, a, into) != tip || !gitx.IsMerged(a, theirs, into) {
-				t.Error("the landing branch should fast-forward to a tip that holds both sides")
-			}
-			push, err := c.Push(s, PushOptions{})
-			if err != nil || push.Members[0].Status != PushPushed {
-				t.Errorf("push = %+v, %v", push, err)
-			}
-		})
 	}
 }
 

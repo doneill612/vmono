@@ -240,3 +240,25 @@ func TestSavedHarnessesGetInitArgs(t *testing.T) {
 		t.Errorf("the user's own args win: %v", got)
 	}
 }
+
+// TestRemovedHookIsIgnored covers a config written when sessions were finished:
+// an unknown hook is an error, and would fail every command.
+func TestRemovedHookIsIgnored(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(file, []byte("[hooks]\npost_create = \"code .\"\npost_finish = \"notify\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Hooks) != 1 || len(cfg.Notices) != 1 || !strings.Contains(cfg.Notices[0], "post_finish") {
+		t.Errorf("hooks = %+v, notices = %v", cfg.Hooks, cfg.Notices)
+	}
+	if err := cfg.SaveTo(file); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = LoadFrom(file); err != nil || len(cfg.Notices) != 0 {
+		t.Errorf("saving should drop it: %v, %v", cfg.Notices, err)
+	}
+}

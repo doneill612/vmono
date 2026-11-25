@@ -647,6 +647,9 @@ func Run() error {
 			return err
 		}
 		c.FindTerminal = launcher.FindSession
+		if message == "" {
+			message = strings.Join(cfg.Notices, "; ")
+		}
 		app := NewApp(c, message)
 		app.openReview(review)
 		if launcher.HasLive(cfg) {

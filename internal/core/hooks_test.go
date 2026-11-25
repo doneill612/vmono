@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -111,26 +110,10 @@ func TestGlobalHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a warning post_create must not fail the create: %v", err)
 	}
-	commitIn(t, filepath.Join(s.Dir, "alpha"), "work.txt")
 
-	ref := "$VMONO_LANDED"
-	if runtime.GOOS == "windows" {
-		ref = "%VMONO_LANDED%"
-	}
-	c.Cfg.Hooks = map[string]config.Hook{
-		config.HookPostFinish: {Command: "echo landed=" + ref},
-		config.HookPreRemove:  abort("exit 1"),
-	}
-	events, err := record(c, func() error { _, err := c.Finish(s, FinishOptions{Close: true}); return err })
-	if !errors.Is(err, ErrRefused) {
-		t.Errorf("pre_remove must veto the close, got %v", err)
-	}
-	heard := false
-	for _, ev := range events {
-		heard = heard || ev.Status == apply.StatusOutput && strings.TrimSpace(ev.Message) == "landed=alpha:main"
-	}
-	if !heard {
-		t.Errorf("post_finish output missing in %+v", events)
+	c.Cfg.Hooks = map[string]config.Hook{config.HookPreRemove: abort("exit 1")}
+	if _, err := c.DeleteSession(s, DeleteOptions{Force: true}); !errors.Is(err, ErrRefused) {
+		t.Errorf("pre_remove must veto the removal, got %v", err)
 	}
 	if _, err := c.Delete(p, DeleteOptions{Force: true}); !errors.Is(err, ErrRefused) {
 		t.Errorf("pre_remove must veto a package delete, got %v", err)

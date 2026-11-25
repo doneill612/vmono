@@ -49,7 +49,7 @@ func TestCreateSessionRecordsInto(t *testing.T) {
 		t.Errorf("a landing branch that does not exist yet must leave the session cut from base: HEAD %s, origin/main %s", tip, main)
 	}
 	if gitx.BranchExists(a, "feature/x") {
-		t.Error("the landing branch is created at finish, not at session create")
+		t.Error("the landing branch is not made at session create")
 	}
 }
 
@@ -161,36 +161,6 @@ func TestCommitsOnTheLandingBranchAreSafeToDelete(t *testing.T) {
 	}
 }
 
-func TestExplicitIntoDecidesWhatCountsAsLanded(t *testing.T) {
-	c, env := newCore(t)
-	a := env.NewSource(t, "alpha")
-	featureBranch(t, a, "feature")
-	p := mustPackage(t, c, request("explicit", []string{a}, nil))
-	s, err := c.CreateSession(p, "work", SessionOptions{Into: "feature"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	commitIn(t, filepath.Join(s.Dir, "alpha"), "work.txt")
-
-	// main is not where this session lands, so landing there proves nothing
-	// about feature; the session still has work only its own branch holds.
-	if rows := c.SafetyCheck(s); rows[0].Unpushed != 1 {
-		t.Fatalf("before landing: %+v", rows)
-	}
-	// Move feature itself to the session's tip, without touching main.
-	tip, _ := gitx.ResolveRef(a, s.S.Branch)
-	if err := gitx.UpdateRefCAS(a, "refs/heads/feature", tip, "", "test"); err == nil {
-		t.Fatal("feature exists already; creating it must fail")
-	}
-	old, _ := gitx.ResolveRef(a, "feature")
-	if err := gitx.UpdateRefCAS(a, "refs/heads/feature", tip, old, "test: land"); err != nil {
-		t.Fatal(err)
-	}
-	if bad := unsafeOf(c.SafetyCheck(s)); len(bad) != 0 {
-		t.Fatalf("work on the explicit landing branch must be safe: %+v", bad)
-	}
-}
-
 func TestSessionRecordsEachMembersCheckedOutBranch(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")
@@ -287,7 +257,7 @@ func TestReferenceOnALocalBranchIsSafeToDelete(t *testing.T) {
 		t.Errorf("a commit only the worktree holds must be unsafe: %+v", bad)
 	}
 	testutil.Git(t, wt, "reset", "--quiet", "--hard", "HEAD~1")
-	if _, err := c.Finish(s, FinishOptions{Close: true}); err != nil {
-		t.Errorf("finish and close: %v", err)
+	if _, err := c.DeleteSession(s, DeleteOptions{}); err != nil {
+		t.Errorf("remove: %v", err)
 	}
 }

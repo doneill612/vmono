@@ -48,7 +48,7 @@ func TestRemovingASessionClosesItsTerminalLast(t *testing.T) {
 	if _, err := c.DeleteSession(s, DeleteOptions{}); !errors.Is(err, ErrRefused) || len(found) != 0 {
 		t.Errorf("a refused removal must touch nothing: %v, %v", found, err)
 	}
-	if _, err := c.Finish(two, FinishOptions{Close: true}); err != nil {
+	if _, err := c.DeleteSession(two, DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.Delete(p, DeleteOptions{Force: true}); err != nil {

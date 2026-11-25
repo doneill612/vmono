@@ -9,7 +9,7 @@ import (
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
-func TestTrackStartsFromAndLandsOnARemoteBranch(t *testing.T) {
+func TestTrackStartsFromARemoteBranch(t *testing.T) {
 	c, env := newCore(t)
 	c.Cfg.FetchOnCreate = false // tracking fetches regardless
 	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
@@ -28,15 +28,7 @@ func TestTrackStartsFromAndLandsOnARemoteBranch(t *testing.T) {
 		t.Errorf("into = %v", s.S.Into)
 	}
 	if gitx.BranchExists(a, "feat/x") {
-		t.Error("the local branch is made at finish, not at create")
-	}
-
-	commitIn(t, wt, "work.txt")
-	if _, err := c.Finish(s, FinishOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if tr, ok := gitx.UpstreamOf(a, "feat/x"); !ok || tr.Ref != "refs/remotes/origin/feat/x" {
-		t.Errorf("upstream = %+v, %v", tr, ok)
+		t.Error("the local branch is not made at create")
 	}
 }
 

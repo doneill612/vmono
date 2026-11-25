@@ -55,6 +55,9 @@ func loadCore() (*core.Core, error) {
 	if err != nil {
 		return nil, err
 	}
+	for _, n := range cfg.Notices {
+		fprintf(os.Stderr, "vmono: %s\n", n)
+	}
 	cfg.NoHooks = cfg.NoHooks || noHooks
 	c, err := core.New(cfg)
 	if err != nil {

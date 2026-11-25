@@ -397,3 +397,19 @@ func mustPlan(t *testing.T, c *Core, s *Session) PushResult {
 	}
 	return res
 }
+
+// TestPushFromARepoWithNoOriginHead covers a source whose origin/HEAD was never
+// set, so the member's base falls back to what the source has checked out. That
+// fallback once resolved to the literal "HEAD", which inside the session
+// worktree is the session branch, so a session never had any commits.
+func TestPushFromARepoWithNoOriginHead(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	testutil.Git(t, a, "remote", "set-head", "origin", "--delete")
+	_, s := newWork(t, c, request("nohead", []string{a}, nil))
+	commitIn(t, filepath.Join(s.Dir, "alpha"), "one.txt")
+	commitIn(t, filepath.Join(s.Dir, "alpha"), "two.txt")
+	if m := pushRow(t, mustPlan(t, c, s), "alpha"); m.Status != PushReady || m.Commits != 2 {
+		t.Errorf("row = %+v", m)
+	}
+}

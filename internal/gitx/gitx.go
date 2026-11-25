@@ -648,28 +648,10 @@ func ConflictedFiles(worktree string) ([]string, error) {
 	return files, nil
 }
 
-// UpdateRefCAS moves ref to newSHA only if it still points at oldSHA, a
-// compare-and-swap that keeps two writers from clobbering each other. An
-// empty oldSHA means the ref must not exist yet, so it creates the ref.
-// reason is recorded in the ref's reflog. It never touches a working tree,
-// so callers must not use it on a branch that is checked out anywhere.
-func UpdateRefCAS(repo, ref, newSHA, oldSHA, reason string) error {
-	_, err := run(repo, "update-ref", "-m", reason, ref, newSHA, oldSHA)
-	return err
-}
-
-// MergeFFOnly fast-forwards the branch checked out in worktree to ref and
-// updates the working tree with it. Git refuses unless the move is a pure
-// fast-forward, or the working tree has changes that would be overwritten.
-func MergeFFOnly(worktree, ref string) error {
-	_, err := run(worktree, "merge", "--ff-only", "--quiet", ref)
-	return err
-}
-
 // ResetKeep moves the worktree's checked-out branch to ref and updates its
-// working tree, refusing when that would overwrite local changes. It undoes
-// a MergeFFOnly: git keeps uncommitted changes that do not conflict and
-// aborts when any would be lost, so it never discards work.
+// working tree, refusing when that would overwrite local changes: git keeps
+// uncommitted changes that do not conflict and aborts when any would be lost,
+// so it never discards work.
 func ResetKeep(worktree, ref string) error {
 	_, err := run(worktree, "reset", "--keep", "--quiet", ref)
 	return err

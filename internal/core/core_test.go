@@ -57,6 +57,16 @@ func newWork(t *testing.T, c *Core, m *manifest.Manifest) (*Package, *Session) {
 	return p, s
 }
 
+// sha resolves ref in repo, failing the test when it does not exist.
+func sha(t *testing.T, repo, ref string) string {
+	t.Helper()
+	out, err := gitx.ResolveRef(repo, ref)
+	if err != nil {
+		t.Fatalf("resolve %s in %s: %v", ref, repo, err)
+	}
+	return out
+}
+
 // mustPackage creates a package and fails the test if it cannot.
 func mustPackage(t *testing.T, c *Core, m *manifest.Manifest) *Package {
 	t.Helper()

@@ -66,6 +66,10 @@ type Config struct {
 	// comes from VMONO_NO_HOOKS or --no-hooks and is never saved.
 	NoHooks bool `toml:"-"`
 
+	// Notices are settings in the config file that were ignored, for the front
+	// ends to point out.
+	Notices []string `toml:"-"`
+
 	// Loaded reports whether a config file existed on disk. It is false on
 	// first run, which triggers the setup flow.
 	Loaded bool `toml:"-"`
@@ -77,12 +81,13 @@ const (
 	HookPostCreate = "post_create"
 	// HookPreRemove runs before a session is removed.
 	HookPreRemove = "pre_remove"
-	// HookPostFinish runs once a session's work has landed.
-	HookPostFinish = "post_finish"
+	// hookPostFinish ran once a session's work had landed on other branches,
+	// which no longer happens. A config that still has it loads without it.
+	hookPostFinish = "post_finish"
 )
 
 // HookNames lists every global hook.
-func HookNames() []string { return []string{HookPostCreate, HookPreRemove, HookPostFinish} }
+func HookNames() []string { return []string{HookPostCreate, HookPreRemove} }
 
 // What happens when a hook's command fails.
 const (
@@ -298,6 +303,10 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 	}
 	if present["hooks"] {
 		dst.Hooks = src.Hooks
+		if _, ok := dst.Hooks[hookPostFinish]; ok {
+			delete(dst.Hooks, hookPostFinish)
+			dst.Notices = append(dst.Notices, "config: the "+hookPostFinish+" hook is ignored, since sessions are no longer finished; remove it")
+		}
 	}
 	if present["harness"] && len(src.Harness) > 0 {
 		dst.Harness = src.Harness

@@ -47,32 +47,6 @@ func wantInUse(t *testing.T, err error, dir string) {
 	}
 }
 
-func TestFinishCloseRefusedFromInsideTheSessionBeforeAnythingMoves(t *testing.T) {
-	blockCwd(t)
-	c, env := newCore(t)
-	a := env.NewSource(t, "alpha")
-	_, s := newWork(t, c, request("inuse", []string{a}, nil))
-	wt := filepath.Join(s.Dir, "alpha")
-	commitIn(t, wt, "work.txt")
-	before := sha(t, a, "main")
-
-	chdir(t, wt)
-	_, err := c.Finish(s, FinishOptions{Close: true})
-	wantInUse(t, err, s.Dir)
-	if got := sha(t, a, "main"); got != before {
-		t.Error("a refused close must not move the landing branch")
-	}
-	if _, err := os.Stat(s.Dir); err != nil {
-		t.Errorf("the session must still exist: %v", err)
-	}
-
-	chdir(t, env.Root)
-	res, err := c.Finish(s, FinishOptions{Close: true})
-	if err != nil || !res.Closed {
-		t.Fatalf("from outside the session: %+v, %v", res, err)
-	}
-}
-
 func TestDeleteSessionRefusedFromInsideEvenWhenForced(t *testing.T) {
 	blockCwd(t)
 	c, env := newCore(t)

@@ -89,23 +89,6 @@ func ownCommits(refs gitx.Refs, src, wt, into, base, target string) (int, error)
 	return gitx.RevCount(wt, not...)
 }
 
-// replaysUpstream reports whether rebasing the commits after fork onto target
-// would copy commits that belong to the remote copy of the landing branch.
-// That happens when a session holding them is rebased onto a local branch that
-// lacks them, and the copies would make the local branch diverge for good.
-func replaysUpstream(src, wt, into, fork, target string) bool {
-	ref := remoteCounterpart(src, into)
-	if ref == "" {
-		return false
-	}
-	all, err := gitx.RevCount(wt, "HEAD", "--not", fork, target)
-	if err != nil {
-		return false
-	}
-	own, err := gitx.RevCount(wt, "HEAD", "--not", fork, target, ref)
-	return err == nil && own < all
-}
-
 // MemberBranches is one active member's branches on its remote.
 type MemberBranches struct {
 	Member   string
