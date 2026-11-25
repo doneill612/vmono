@@ -191,7 +191,15 @@ func (c *Core) OpenInit(p *Package) (*InitWorkspace, error) {
 		if err := w.save(); err != nil {
 			return err
 		}
-		if err := render.RenderInit(w.Dir, view.M, c.renderOptions()); err != nil {
+		// The agent is told what commands members have, which the view leaves
+		// out so that they do not run.
+		shown := clone(view.M)
+		for i := range shown.Members {
+			if mem, ok := p.M.Member(shown.Members[i].Name); ok {
+				shown.Members[i].Setup, shown.Members[i].Teardown = mem.Setup, mem.Teardown
+			}
+		}
+		if err := render.RenderInit(w.Dir, shown, c.renderOptions()); err != nil {
 			return err
 		}
 		_, err := gitx.CommitAll(w.Dir, "vmono: initialize package "+p.Name, "")

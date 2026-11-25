@@ -32,7 +32,7 @@ func setup(t *testing.T) (*core.Core, *core.Package) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := c.CreatePackage(&manifest.Manifest{Name: "demo", Members: []manifest.Member{{Source: env.NewSource(t, "alpha"), Mode: manifest.ModeActive}}})
+	p, err := c.CreatePackage(&manifest.Manifest{Name: "demo", Members: []manifest.Member{{Source: env.NewSource(t, "alpha"), Mode: manifest.ModeActive, Setup: manifest.Commands{"touch ran-setup"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +47,12 @@ func TestRunDirectRecordsAndCleansUp(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(l.Dir, "_ref", "alpha", "README.md")); err != nil {
 			t.Error(err)
+		}
+		if text, _ := os.ReadFile(filepath.Join(l.Dir, "AGENTS.md")); !strings.Contains(string(text), "alpha setup: `touch ran-setup`") {
+			t.Errorf("the agent should see the commands members have:\n%s", text)
+		}
+		if _, err := os.Stat(filepath.Join(l.Dir, "_ref", "alpha", "ran-setup")); err == nil {
+			t.Error("setup commands must not run")
 		}
 		again, _ := c.Load("demo")
 		_, err := c.RecordInit(again, core.InitRecord{Overview: "o"})

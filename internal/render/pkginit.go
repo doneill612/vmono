@@ -47,16 +47,18 @@ edit, build, commit or push anything.
    It is JSON: escape quotes and write newlines inside a string as \n. The
    command reports what it set, and what it kept because the user wrote it.
 
-   Suggestions are optional. Suggest a "setup" command when a fresh worktree of
-   a member cannot be worked in without it (installing dependencies, generating
-   code), and a "teardown" command for what must stop before a worktree goes
-   away (containers). Suggest only what the member's own files show, in the
+   Always send "suggestions", on a re-run too; send [] when no member needs any.
+   Suggest a "setup" command when a fresh worktree of a member cannot be worked
+   in without it (installing dependencies, as in npm install; generating code),
+   and a "teardown" command for what must stop before a worktree goes away
+   (containers). When one fits, send it rather than asking the user whether to:
+   suggesting is how they are asked. Suggest only what the member's own files show, in the
    form they use, and nothing that deploys, publishes or needs credentials.
-   Each is one line and runs in the member's directory. ` + "`vmono show --json`" + `
-   lists the commands members have already; do not repeat those. Suggesting runs
-   nothing: the user reviews each one after they exit. You cannot accept them,
-   so do not try to. Sending "suggestions" again replaces the list; leave it out
-   to keep it.
+   Each is one line and runs in the member's directory. The commands members have
+   already are listed under Members; one that is there, or that the user settled
+   before, is dropped, so there is no need to check. Suggesting runs nothing: the
+   user reviews each one after they exit. You cannot accept them, so do not try
+   to. Sending "suggestions" again replaces the list; leave it out to keep it.
 4. Show the user what you recorded and ask for corrections. Record again after
    each one; the new overview replaces the last, so always send the whole text.
    If the user wants to replace something that was kept, use
@@ -115,6 +117,21 @@ func InitBlock(m *manifest.Manifest) string {
 	b.WriteString("## Members\n\n| Name | Path | Ref | Role |\n| --- | --- | --- | --- |\n")
 	for _, mem := range m.Members {
 		fmt.Fprintf(&b, "| %s | `%s/` | `%s` | %s |\n", mem.Name, path.Clean(mem.Path), mem.Ref, cell(mem.Role))
+	}
+	b.WriteString("\nSetup and teardown commands they have already:\n\n")
+	none := true
+	for _, mem := range m.Members {
+		for _, cmd := range mem.Setup {
+			none = false
+			fmt.Fprintf(&b, "- %s setup: `%s`\n", mem.Name, oneLine(cmd))
+		}
+		for _, cmd := range mem.Teardown {
+			none = false
+			fmt.Fprintf(&b, "- %s teardown: `%s`\n", mem.Name, oneLine(cmd))
+		}
+	}
+	if none {
+		b.WriteString("- none\n")
 	}
 	b.WriteString("\n")
 	if notes := m.RecentNotes(manifest.MaxNotesRendered); len(notes) > 0 {
