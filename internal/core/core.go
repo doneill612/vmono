@@ -116,8 +116,12 @@ type Session struct {
 	S    *manifest.Session
 }
 
-// Branch returns the branch every active member of the session is on.
+// Branch returns the session's branch, which every active member is on unless
+// it has one of its own; see BranchFor.
 func (s *Session) Branch() string { return s.S.Branch }
+
+// BranchFor returns the branch the named active member is on.
+func (s *Session) BranchFor(member string) string { return s.S.BranchFor(member) }
 
 // MemberDir returns the absolute worktree directory of a member in this
 // session.

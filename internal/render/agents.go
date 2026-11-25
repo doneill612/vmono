@@ -56,7 +56,7 @@ func AgentsBlock(m *manifest.Manifest, s *manifest.Session) string {
 	} else {
 		b.WriteString("| Path | Mode | Branch / ref | Role |\n| --- | --- | --- | --- |\n")
 		for _, mem := range m.Members {
-			where := s.Branch
+			where := s.BranchFor(mem.Name)
 			if mem.Mode == manifest.ModeReference {
 				where = mem.Ref
 			}
@@ -67,7 +67,7 @@ func AgentsBlock(m *manifest.Manifest, s *manifest.Session) string {
 	}
 
 	b.WriteString("## Working rules\n\n")
-	fmt.Fprintf(&b, "- Active members are git worktrees on branch `%s`. Edit and commit in them.\n", s.Branch)
+	b.WriteString("- Active members are git worktrees on the branch listed above. Edit and commit in them.\n")
 	b.WriteString("- Run git commands from inside the member's directory, never from the package root.\n")
 	b.WriteString("- Commit per member; each member is its own repository.\n")
 	b.WriteString("- When the user says the work is done, commit in every member and run `vmono session finish`: it lands the commits on each member's own branch in its source repo, locally, and asks first. Never push.\n")

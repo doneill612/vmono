@@ -225,12 +225,12 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 	case !gitx.ValidBranchName(src, l.Into):
 		l.block("%q is not a valid branch name", l.Into)
 		return
-	case l.Into == s.S.Branch:
+	case l.Into == s.BranchFor(mem.Name):
 		l.block("%q is the session's own branch", l.Into)
 		return
 	}
 
-	if p := checkWorktree(s, l.wt, "finish"); p != nil {
+	if p := checkWorktree(s, mem, l.wt, "finish"); p != nil {
 		l.block("%s", p.reason)
 		if len(p.conflicts) > 0 {
 			l.Status, l.Conflicts = LandConflict, p.conflicts
@@ -290,7 +290,7 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 				return
 			}
 		}
-		if behind, err := gitx.RevCount(src, l.Into+"@{upstream}", "--not", l.target, "refs/heads/"+s.S.Branch); err == nil && behind > 0 {
+		if behind, err := gitx.RevCount(src, l.Into+"@{upstream}", "--not", l.target, "refs/heads/"+s.BranchFor(mem.Name)); err == nil && behind > 0 {
 			if _, diverged := freshest(src, l.Into); diverged {
 				l.Notes = append(l.Notes, fmt.Sprintf("%s has diverged from its upstream, so pushing it will be refused; `vmono session update --merge` first lands both sides", l.Into))
 				return
@@ -310,9 +310,9 @@ type worktreeProblem struct {
 }
 
 // checkWorktree returns what keeps the member worktree at wt from being
-// rebased, or nil when it is clean and on the session branch. then is the
+// rebased, or nil when it is clean and on its branch in the session. then is the
 // command the reason tells the user to run again.
-func checkWorktree(s *Session, wt, then string) *worktreeProblem {
+func checkWorktree(s *Session, mem manifest.Member, wt, then string) *worktreeProblem {
 	if gitx.RebaseInProgress(wt) {
 		if files, _ := gitx.ConflictedFiles(wt); len(files) > 0 {
 			return &worktreeProblem{conflicts: files, reason: "a rebase is stopped on conflicts; resolve them, `git add`, `git rebase --continue`, then " + then + " again"}
@@ -323,8 +323,8 @@ func checkWorktree(s *Session, wt, then string) *worktreeProblem {
 	switch {
 	case err != nil:
 		return &worktreeProblem{reason: fmt.Sprintf("cannot read its state: %v", err)}
-	case st.Detached || st.Branch != s.S.Branch:
-		return &worktreeProblem{reason: fmt.Sprintf("its worktree is on %s, not the session branch %s", firstNonEmpty(st.Branch, "a detached HEAD"), s.S.Branch)}
+	case st.Detached || st.Branch != s.BranchFor(mem.Name):
+		return &worktreeProblem{reason: fmt.Sprintf("its worktree is on %s, not the session branch %s", firstNonEmpty(st.Branch, "a detached HEAD"), s.BranchFor(mem.Name))}
 	case st.Dirty > 0 || st.Untracked > 0:
 		return &worktreeProblem{uncommitted: true, reason: fmt.Sprintf("uncommitted changes (%d modified, %d untracked); commit them first", st.Dirty, st.Untracked)}
 	}

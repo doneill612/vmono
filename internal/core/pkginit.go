@@ -152,7 +152,7 @@ func (c *Core) OpenInit(p *Package) (*InitWorkspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := preflightMembers(view.M, "", srcs, view.M.Members, false, nil); err != nil {
+	if _, err := preflightMembers(view.M, nil, srcs, view.M.Members, false, nil); err != nil {
 		return nil, err
 	}
 	w := &InitWorkspace{Pkg: p, Dir: p.InitDir(), PID: os.Getpid(), Started: time.Now().Truncate(time.Second)}

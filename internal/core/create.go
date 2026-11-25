@@ -299,12 +299,13 @@ func resolveRefIn(refs gitx.Refs, src, ref string, warn func(string)) (string, e
 }
 
 // preflightMembers checks the members in check before anything touches
-// disk, for a session on branch: sources are usable, no two active members
-// share a repo, the branch is not checked out elsewhere and does not collide
-// with another branch's ref path, and base/ref resolve. srcs maps every
+// disk, for a session whose members are on the branches branchFor gives: sources
+// are usable, no two active members share a repo, the branch is not checked out
+// elsewhere and does not collide with another branch's ref path, and base/ref
+// resolve. srcs maps every
 // member of m (not only check) to its absolute source. It returns the
 // members whose branch already exists in their source.
-func preflightMembers(m *manifest.Manifest, branch string, srcs map[string]string, check []manifest.Member, reuse bool, removing map[string]bool) (existing map[string]bool, err error) {
+func preflightMembers(m *manifest.Manifest, branchFor func(member string) string, srcs map[string]string, check []manifest.Member, reuse bool, removing map[string]bool) (existing map[string]bool, err error) {
 	existing = map[string]bool{}
 	if err := checkDistinctSources(m, srcs); err != nil {
 		return nil, err
@@ -313,6 +314,7 @@ func preflightMembers(m *manifest.Manifest, branch string, srcs map[string]strin
 		src := srcs[mem.Name]
 		switch mem.Mode {
 		case manifest.ModeActive:
+			branch := branchFor(mem.Name)
 			if at, err := gitx.BranchCheckedOutAt(src, branch); err != nil {
 				return nil, fmt.Errorf("%s: %w", mem.Name, err)
 			} else if at != "" && !removing[realPath(at)] {
@@ -525,7 +527,7 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	if err := ms.Validate(); err != nil {
 		return nil, err
 	}
-	existing, err := preflightMembers(p.M, ms.Branch, srcs, p.M.Members, opts.ReuseBranch, nil)
+	existing, err := preflightMembers(p.M, ms.BranchFor, srcs, p.M.Members, opts.ReuseBranch, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -632,7 +634,7 @@ func (c *Core) fetchStep(srcs ...string) []apply.Step {
 func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branchExists bool) []apply.Step {
 	var steps []apply.Step
 	dst := s.MemberDir(mem)
-	branch := s.S.Branch
+	branch := s.BranchFor(mem.Name)
 
 	switch mem.Mode {
 	case manifest.ModeActive:

@@ -160,7 +160,7 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 	}
 	existing := make(map[string]map[string]bool, len(sessions))
 	for _, s := range sessions {
-		ex, err := preflightMembers(next, s.S.Branch, srcs, []manifest.Member{added}, opts.ReuseBranch, nil)
+		ex, err := preflightMembers(next, s.BranchFor, srcs, []manifest.Member{added}, opts.ReuseBranch, nil)
 		if err != nil {
 			return added, sessionErr(s, len(sessions), err)
 		}

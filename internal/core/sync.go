@@ -218,13 +218,14 @@ func (c *Core) recreateMember(s *Session, mem manifest.Member, src string) error
 		return err
 	}
 	exists := false
+	branch := s.BranchFor(mem.Name)
 	if mem.Mode == manifest.ModeActive {
-		if at, err := gitx.BranchCheckedOutAt(src, s.S.Branch); err != nil {
+		if at, err := gitx.BranchCheckedOutAt(src, branch); err != nil {
 			return err
 		} else if at != "" {
-			return fmt.Errorf("branch %q is already checked out at %s", s.S.Branch, at)
+			return fmt.Errorf("branch %q is already checked out at %s", branch, at)
 		}
-		exists = gitx.BranchExists(src, s.S.Branch)
+		exists = gitx.BranchExists(src, branch)
 	}
 	return (&apply.Runner{Events: c.Events}).Run(c.addMemberSteps(s, mem, src, exists))
 }

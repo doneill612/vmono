@@ -366,13 +366,14 @@ func (c *Core) removeMemberSteps(s *Session, mem manifest.Member, force, deleteB
 	}})
 	if deleteBranch && mem.Mode == manifest.ModeActive {
 		steps = append(steps, apply.Step{Member: mem.Name, Name: "delete branch", Run: func(warn func(string)) error {
+			branch := s.BranchFor(mem.Name)
 			into, _ := landingBranch(s, mem, src)
-			kept, deleted := deleteMergedBranch(src, s.S.Branch, mem.Base, into)
+			kept, deleted := deleteMergedBranch(src, branch, mem.Base, into)
 			if deleted {
-				res.BranchesDeleted = append(res.BranchesDeleted, mem.Name+":"+s.S.Branch)
+				res.BranchesDeleted = append(res.BranchesDeleted, mem.Name+":"+branch)
 			} else if kept != "" {
-				res.BranchesKept = append(res.BranchesKept, mem.Name+":"+s.S.Branch)
-				warn("kept branch " + s.S.Branch + ": " + kept)
+				res.BranchesKept = append(res.BranchesKept, mem.Name+":"+branch)
+				warn("kept branch " + branch + ": " + kept)
 			}
 			return nil
 		}})

@@ -183,7 +183,7 @@ func planUpdate(s *Session, mem manifest.Member, merge bool, u *updating) {
 		u.skip("its worktree is missing; run `vmono sync`")
 		return
 	}
-	p := checkWorktree(s, u.wt, "update")
+	p := checkWorktree(s, mem, u.wt, "update")
 	if p != nil && !p.uncommitted {
 		u.skip("%s", p.reason)
 		return

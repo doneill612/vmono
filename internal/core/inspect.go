@@ -94,7 +94,7 @@ func (c *Core) Inspect(s *Session) (InspectResult, error) {
 			Path: s.MemberDir(mem), RelPath: mem.Path, Source: src,
 		}
 		if mem.Mode == manifest.ModeActive {
-			im.Branch, im.Base = s.S.Branch, mem.Base
+			im.Branch, im.Base = s.BranchFor(mem.Name), mem.Base
 		} else {
 			im.Ref = mem.Ref
 		}

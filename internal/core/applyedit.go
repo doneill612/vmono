@@ -112,14 +112,14 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	}
 	existing := make(map[string]map[string]bool, len(ep.Sessions))
 	for _, s := range ep.Sessions {
-		ex, err := preflightMembers(ep.Next, s.S.Branch, ep.Srcs, adds, opts.ReuseBranch || len(replacing) > 0, removing)
+		ex, err := preflightMembers(ep.Next, s.BranchFor, ep.Srcs, adds, opts.ReuseBranch || len(replacing) > 0, removing)
 		if err != nil {
 			return plan, sessionErr(s, len(ep.Sessions), err)
 		}
 		existing[s.Name] = ex
 		for _, mem := range adds {
 			if !replacing[mem.Name] && ex[mem.Name] && !opts.ReuseBranch {
-				return plan, &BranchExistsError{Member: mem.Name, Branch: s.S.Branch}
+				return plan, &BranchExistsError{Member: mem.Name, Branch: s.BranchFor(mem.Name)}
 			}
 		}
 	}
