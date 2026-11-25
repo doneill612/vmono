@@ -2,8 +2,10 @@ package manifest
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -11,8 +13,14 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// SessionSchemaVersion is the session file schema this build reads and writes.
-const SessionSchemaVersion = 1
+// SessionSchemaVersion is the session file schema new sessions are written in.
+// Files of schema LandingSessionSchema are still read.
+const SessionSchemaVersion = 2
+
+// LandingSessionSchema is the schema of session files from when a session's
+// work landed on branches of their own, kept in Into, rather than being pushed
+// from the branches it is done on.
+const LandingSessionSchema = 1
 
 // SessionFile is the name of a session's metadata file, kept in the same
 // .vmono directory a package manifest uses.
@@ -28,7 +36,8 @@ type Session struct {
 	Package string    `toml:"package"`
 	Name    string    `toml:"name"`
 	Created time.Time `toml:"created"`
-	// Branch is checked out by every active member of the session.
+	// Branch is checked out by every active member of the session that Members
+	// gives no branch of its own. Use BranchFor to read a member's.
 	Branch string `toml:"branch"`
 	// Finished is when the session's work last landed. The zero time means it
 	// has never been finished. Whether the session still reads as finished
@@ -39,8 +48,53 @@ type Session struct {
 	// are per member because repos need not share a branch name. A member
 	// with no entry, such as one added after the session began, lands on the
 	// branch its base names (see IntoFor). It is a table, so it is written
-	// last.
+	// after the scalars.
 	Into map[string]string `toml:"into,omitempty"`
+	// Members maps an active member's name to what the session records about
+	// its branch. A member with no entry is on Branch, which it found already
+	// made, and is built on its base.
+	Members map[string]SessionMember `toml:"members,omitempty"`
+}
+
+// SessionMember is what a session records about one active member's branch.
+type SessionMember struct {
+	// Branch is the branch the member has checked out, when it is not the
+	// session's.
+	Branch string `toml:"branch,omitempty"`
+	// Created is true when vmono made the branch, so that one nothing was
+	// committed to can be deleted along with the session.
+	Created bool `toml:"created,omitempty"`
+	// From is the branch or ref the member's branch is built on in place of
+	// the member's base, for work stacked on work that has not merged.
+	From string `toml:"from,omitempty"`
+	// BaseTip is the commit of From the branch was last built on. When From
+	// goes away it says where the member's own commits begin.
+	BaseTip string `toml:"base_tip,omitempty"`
+}
+
+// BranchFor returns the branch the named active member has checked out in the
+// session.
+func (s *Session) BranchFor(member string) string {
+	if b := s.Members[member].Branch; b != "" {
+		return b
+	}
+	return s.Branch
+}
+
+// SetMember records m for the named member. A branch that is the session's own
+// is left out, and an empty record removes the entry.
+func (s *Session) SetMember(member string, m SessionMember) {
+	if m.Branch == s.Branch {
+		m.Branch = ""
+	}
+	if m == (SessionMember{}) {
+		delete(s.Members, member)
+		return
+	}
+	if s.Members == nil {
+		s.Members = map[string]SessionMember{}
+	}
+	s.Members[member] = m
 }
 
 // IntoFor returns the branch mem's work lands on when the session is finished,
@@ -94,8 +148,8 @@ func (s *Session) ApplyDefaults(branchPrefix string) {
 // Validate checks the schema, that package and session names are slugs, and
 // that the branch is set.
 func (s *Session) Validate() error {
-	if s.Schema != SessionSchemaVersion {
-		return fmt.Errorf("unsupported session schema %d (this vmono reads %d)", s.Schema, SessionSchemaVersion)
+	if s.Schema != SessionSchemaVersion && s.Schema != LandingSessionSchema {
+		return fmt.Errorf("unsupported session schema %d (this vmono reads %d and %d)", s.Schema, LandingSessionSchema, SessionSchemaVersion)
 	}
 	if err := ValidateName(s.Package); err != nil {
 		return fmt.Errorf("session package: %w", err)
@@ -113,20 +167,31 @@ func (s *Session) Validate() error {
 		if into == "" {
 			return fmt.Errorf("session %s: into: %s has an empty branch", s.Name, member)
 		}
-		if err := validateInto(into); err != nil {
+		if err := validateBranch(into); err != nil {
 			return fmt.Errorf("session %s: into %s: %w", s.Name, member, err)
 		}
 		if into == s.Branch {
 			return fmt.Errorf("session %s: into %s: %q is the session's own branch", s.Name, member, into)
 		}
 	}
+	for member, m := range s.Members {
+		if err := ValidateName(member); err != nil {
+			return fmt.Errorf("session %s: members: %q: %w", s.Name, member, err)
+		}
+		if err := validateBranch(m.Branch); err != nil {
+			return fmt.Errorf("session %s: branch of %s: %w", s.Name, member, err)
+		}
+		if strings.HasPrefix(m.From, "-") || strings.ContainsAny(m.From, " \t\r\n") {
+			return fmt.Errorf("session %s: from of %s: %q is not a ref", s.Name, member, m.From)
+		}
+	}
 	return nil
 }
 
-// validateInto rejects the landing branch names that can never be valid git
-// branches or would be read as options. Full ref-format validation is git's
-// job and happens when a session is created.
-func validateInto(into string) error {
+// validateBranch rejects the branch names that can never be valid git branches
+// or would be read as options. Full ref-format validation is git's job and
+// happens when a session is created. An empty name is one that is not set.
+func validateBranch(into string) error {
 	switch {
 	case into == "":
 		return nil
@@ -161,6 +226,22 @@ func EncodeSession(s *Session) []byte {
 		b.WriteString("\n[into]\n")
 		for _, member := range members {
 			fmt.Fprintf(&b, "%s = %s\n", member, quote(s.Into[member]))
+		}
+	}
+	for _, member := range slices.Sorted(maps.Keys(s.Members)) {
+		m := s.Members[member]
+		fmt.Fprintf(&b, "\n[members.%s]\n", member)
+		if m.Branch != "" {
+			fmt.Fprintf(&b, "branch = %s\n", quote(m.Branch))
+		}
+		if m.Created {
+			b.WriteString("created = true\n")
+		}
+		if m.From != "" {
+			fmt.Fprintf(&b, "from = %s\n", quote(m.From))
+		}
+		if m.BaseTip != "" {
+			fmt.Fprintf(&b, "base_tip = %s\n", quote(m.BaseTip))
 		}
 	}
 	return []byte(b.String())

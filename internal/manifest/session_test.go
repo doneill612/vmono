@@ -186,3 +186,61 @@ func TestIntoFor(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionMembersRoundTrip(t *testing.T) {
+	s := sampleSession()
+	s.SetMember("sdk", SessionMember{Branch: s.Branch, Created: true})
+	s.SetMember("api", SessionMember{Branch: "feat/x", From: "feat/parent", BaseTip: "abc123"})
+	s.SetMember("web", SessionMember{Branch: s.Branch})
+	body := string(EncodeSession(s))
+	if strings.Index(body, "[members.api]") > strings.Index(body, "[members.sdk]") {
+		t.Errorf("members should be written in a stable order:\n%s", body)
+	}
+	got, err := ParseSession([]byte(body))
+	if err != nil {
+		t.Fatalf("parse: %v\n%s", err, body)
+	}
+	if got.Schema != SessionSchemaVersion || len(got.Members) != 2 {
+		t.Errorf("schema = %d, members = %+v", got.Schema, got.Members)
+	}
+	if got.Members["api"] != (SessionMember{Branch: "feat/x", From: "feat/parent", BaseTip: "abc123"}) || got.Members["sdk"] != (SessionMember{Created: true}) {
+		t.Errorf("members = %+v", got.Members)
+	}
+	if got.BranchFor("api") != "feat/x" || got.BranchFor("sdk") != s.Branch || got.BranchFor("unlisted") != s.Branch {
+		t.Errorf("branches = %q %q %q", got.BranchFor("api"), got.BranchFor("sdk"), got.BranchFor("unlisted"))
+	}
+	got.SetMember("sdk", SessionMember{})
+	if _, ok := got.Members["sdk"]; ok {
+		t.Error("an empty record should be dropped")
+	}
+}
+
+func TestSessionValidateMembers(t *testing.T) {
+	for name, bad := range map[string]map[string]SessionMember{
+		"branch":      {"api": {Branch: "a b"}},
+		"option":      {"api": {Branch: "-x"}},
+		"from":        {"api": {From: "-x"}},
+		"member name": {"Bad Member": {Created: true}},
+	} {
+		s := sampleSession()
+		s.Members = bad
+		if err := s.Validate(); err == nil {
+			t.Errorf("%s: accepted %+v", name, bad)
+		}
+	}
+}
+
+func TestLandingSessionKeepsItsSchema(t *testing.T) {
+	old := "schema  = 1\npackage = \"p\"\nname    = \"s\"\ncreated = 2026-11-16T09:00:00Z\nbranch  = \"vmono/p/s\"\n\n[into]\napi = \"main\"\n"
+	s, err := ParseSession([]byte(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Schema != LandingSessionSchema || s.Into["api"] != "main" || s.BranchFor("api") != "vmono/p/s" {
+		t.Errorf("session = %+v", s)
+	}
+	again, err := ParseSession(EncodeSession(s))
+	if err != nil || again.Schema != LandingSessionSchema || again.Into["api"] != "main" {
+		t.Errorf("saving must not convert it: %+v, %v", again, err)
+	}
+}
