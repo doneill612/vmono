@@ -307,7 +307,9 @@ func (c *Core) Delete(p *Package, opts DeleteOptions) (DeleteResult, error) {
 	steps = append(steps, apply.Step{Name: "remove package", Run: func(func(string)) error {
 		return os.RemoveAll(p.Dir)
 	}})
-	closeTerminals := c.terminals(sessions...)
+	// An initialization runs in the package directory, and leaves its shell
+	// there under herdr.
+	closeTerminals := c.terminals(append(sessions, &Session{Pkg: p, Name: InitName, Dir: p.Dir})...)
 	if err := (&apply.Runner{Events: c.Events}).Run(steps); err != nil {
 		return res, err
 	}
