@@ -21,7 +21,7 @@ func newSessionCmd() *cobra.Command {
 		Use:   "session",
 		Short: "Start, list, update, finish, push and remove the sessions of a package",
 	}
-	cmd.AddCommand(newSessionNewCmd(), newSessionLsCmd(), newSessionIntoCmd(), newSessionUpdateCmd(), newSessionFinishCmd(), newSessionPushCmd(), newSessionRmCmd())
+	cmd.AddCommand(newSessionNewCmd(), newSessionLsCmd(), newSessionIntoCmd(), newSessionUpdateCmd(), newSessionFinishCmd(), newSessionReviewCmd(), newSessionPushCmd(), newSessionRmCmd())
 	return cmd
 }
 
@@ -291,34 +291,7 @@ The session, its worktrees and its branch stay in place and the session is marke
 finished; remove it with ` + "`vmono session rm`" + ` or pass --close. Nothing is pushed.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			intoAll, intoBy, err := parseBranches("--into", into)
-			if err != nil {
-				return err
-			}
-			c, err := loadCore()
-			if err != nil {
-				return err
-			}
-			s, err := c.ResolveSession(packageArg(args))
-			if err != nil {
-				return err
-			}
-			var res core.FinishResult
-			err = withEvents(cmd.ErrOrStderr(), c, func() error {
-				var ferr error
-				res, ferr = c.Finish(s, core.FinishOptions{Into: intoAll, IntoByMember: intoBy, Close: closeAfter, DryRun: dryRun})
-				return ferr
-			})
-			out := cmd.OutOrStdout()
-			switch {
-			case asJSON && (err == nil || errors.Is(err, core.ErrRefused)):
-				if perr := printJSON(out, res); perr != nil {
-					return perr
-				}
-			case err == nil || errors.Is(err, core.ErrRefused):
-				printFinish(out, res, dryRun)
-			}
-			return err
+			return runFinish(cmd, args, into, closeAfter, dryRun, asJSON)
 		},
 	}
 	f := cmd.Flags()
@@ -327,6 +300,74 @@ finished; remove it with ` + "`vmono session rm`" + ` or pass --close. Nothing i
 	f.BoolVar(&dryRun, "dry-run", false, "show what would land without changing anything")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
 	return cmd
+}
+
+// newSessionReviewCmd builds `vmono session review`, the read-only form of
+// `vmono session finish`: it plans the finish and prints what would land on
+// each member's branch, and changes nothing. It exists as its own command,
+// rather than as `finish --dry-run`, so a harness permission rule can allow
+// it while `vmono session finish` keeps asking: Claude Code lets an ask rule
+// beat any allow rule, however specific, so a dry-run flag on a command that
+// asks can never be exempted. Output, JSON and exit codes are those of
+// `finish --dry-run`, and an --into given here is checked but never recorded.
+func newSessionReviewCmd() *cobra.Command {
+	var into []string
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "review [pkg/session] [--into [MEMBER=]B]... [--json]",
+		Short: "Show what finishing the session would land, changing nothing",
+		Long: `Show what ` + "`vmono session finish`" + ` would do, without doing it. Each active member's
+commits that would be rebased onto its landing branch are listed with the branch
+they would land on, and any member that is blocked or would conflict is shown with
+the reason. Nothing is rebased, moved, recorded or marked finished.
+
+--into previews a different landing branch; unlike finish, it is not recorded.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runFinish(cmd, args, into, false, true, asJSON)
+		},
+	}
+	f := cmd.Flags()
+	f.StringArrayVar(&into, "into", nil, intoHelp+"; previews only, and is not recorded")
+	f.BoolVar(&asJSON, "json", false, "output JSON")
+	return cmd
+}
+
+// runFinish is the body shared by `vmono session finish` and `vmono session
+// review`. It resolves the session, plans or performs the finish with the
+// given options, and prints the result as text or JSON. A refused finish still
+// prints its per-member reasons before the error is returned, so the caller
+// sees why and the exit status stays non-zero. With dryRun set nothing is
+// changed, which is the only way review calls it.
+func runFinish(cmd *cobra.Command, args, into []string, closeAfter, dryRun, asJSON bool) error {
+	intoAll, intoBy, err := parseBranches("--into", into)
+	if err != nil {
+		return err
+	}
+	c, err := loadCore()
+	if err != nil {
+		return err
+	}
+	s, err := c.ResolveSession(packageArg(args))
+	if err != nil {
+		return err
+	}
+	var res core.FinishResult
+	err = withEvents(cmd.ErrOrStderr(), c, func() error {
+		var ferr error
+		res, ferr = c.Finish(s, core.FinishOptions{Into: intoAll, IntoByMember: intoBy, Close: closeAfter, DryRun: dryRun})
+		return ferr
+	})
+	out := cmd.OutOrStdout()
+	switch {
+	case asJSON && (err == nil || errors.Is(err, core.ErrRefused)):
+		if perr := printJSON(out, res); perr != nil {
+			return perr
+		}
+	case err == nil || errors.Is(err, core.ErrRefused):
+		printFinish(out, res, dryRun)
+	}
+	return err
 }
 
 // printFinish writes one line per member for a finish, or a dry run of one,

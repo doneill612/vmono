@@ -75,8 +75,18 @@ func TestOpenCodeV1Output(t *testing.T) {
 	if doc.Permission["edit"]["api/secrets/**"] != "deny" || doc.Permission["edit"]["api/*"] != "allow" {
 		t.Errorf("member edit rules not re-anchored:\n%s", text)
 	}
-	if doc.Permission["bash"]["vmono rm *"] != "ask" || doc.Permission["bash"]["vmono delete *"] != "ask" || doc.Permission["bash"]["vmono session rm *"] != "ask" || doc.Permission["bash"]["vmono session finish *"] != "ask" {
+	if doc.Permission["bash"]["vmono rm *"] != "ask" || doc.Permission["bash"]["vmono delete *"] != "ask" || doc.Permission["bash"]["vmono session rm *"] != "ask" || doc.Permission["bash"]["vmono session finish *"] != "ask" || doc.Permission["bash"]["vmono session push *"] != "ask" || doc.Permission["bash"]["vmono edit *"] != "ask" {
 		t.Errorf("vmono bash asks missing:\n%s", text)
+	}
+	for _, res := range []string{"vmono show *", "vmono status *", "vmono session review *", "vmono doctor", "vmono --version"} {
+		if doc.Permission["bash"][res] != "allow" {
+			t.Errorf("read-only %q should be allowed:\n%s", res, text)
+		}
+	}
+	// Last match wins: the read-only allows come before the member rules and
+	// the vmono asks, so neither can be overridden by them.
+	if strings.Index(text, `"vmono show *"`) > strings.Index(text, `"npm test *"`) || strings.Index(text, `"vmono show *"`) > strings.Index(text, `"vmono rm *"`) {
+		t.Errorf("read-only allows must come first:\n%s", text)
 	}
 	if doc.Permission["bash"]["npm test *"] != "allow" {
 		t.Errorf("member bash rule lost:\n%s", text)
