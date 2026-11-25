@@ -251,6 +251,10 @@ func describePackage(p *core.Package, sessions []core.SessionSummary, ins *core.
 	}
 	b.WriteString(textBlock("Purpose", p.M.Purpose, w))
 	b.WriteString(textBlock("Context", p.M.Context, w))
+	b.WriteString(textBlock("Overview", p.M.Overview(), w))
+	if drift := p.M.DriftText(); drift != "" {
+		b.WriteString("   " + styleWarn.Render("out of date: "+drift) + "\n")
+	}
 
 	b.WriteString("\n " + styleHeaderCol.Render("NOTES") + "\n")
 	notes := p.M.RecentNotes(10)

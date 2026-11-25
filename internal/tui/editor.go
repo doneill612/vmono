@@ -473,6 +473,7 @@ func (m *editorModel) saveCreate() (screen, tea.Cmd) {
 			return err
 		},
 		home: true,
+		hint: func() string { return "i initializes it" },
 		back: func() screen { return m },
 	}))
 }
@@ -505,6 +506,12 @@ func (m *editorModel) saveEdit() (screen, tea.Cmd) {
 			run: func(force, reuse bool) error {
 				_, err := c.ApplyEdit(pkg, edited, core.EditOptions{Force: force, ReuseBranch: reuse})
 				return err
+			},
+			hint: func() string {
+				if drift := ep.Next.DriftText(); drift != "" {
+					return "overview out of date (" + drift + "), i updates it"
+				}
+				return ""
 			},
 			back: func() screen { return m },
 		})
