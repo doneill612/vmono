@@ -39,12 +39,24 @@ edit, build, commit or push anything.
        {
          "purpose": "why these repositories belong together, in one to three sentences",
          "overview": "markdown, see below",
-         "roles": {"MEMBER": "one line on what the member contributes"}
+         "roles": {"MEMBER": "one line on what the member contributes"},
+         "suggestions": [{"member": "MEMBER", "kind": "setup", "command": "one shell command", "reason": "the file that shows it is needed"}]
        }
        VMONO_EOF
 
    It is JSON: escape quotes and write newlines inside a string as \n. The
    command reports what it set, and what it kept because the user wrote it.
+
+   Suggestions are optional. Suggest a "setup" command when a fresh worktree of
+   a member cannot be worked in without it (installing dependencies, generating
+   code), and a "teardown" command for what must stop before a worktree goes
+   away (containers). Suggest only what the member's own files show, in the
+   form they use, and nothing that deploys, publishes or needs credentials.
+   Each is one line and runs in the member's directory. ` + "`vmono show --json`" + `
+   lists the commands members have already; do not repeat those. Suggesting runs
+   nothing: the user reviews each one after they exit. You cannot accept them,
+   so do not try to. Sending "suggestions" again replaces the list; leave it out
+   to keep it.
 4. Show the user what you recorded and ask for corrections. Record again after
    each one; the new overview replaces the last, so always send the whole text.
    If the user wants to replace something that was kept, use
@@ -87,6 +99,18 @@ func InitBlock(m *manifest.Manifest) string {
 			note += " Members removed since: " + strings.Join(removed, ", ") + "."
 		}
 		b.WriteString(note + "\n\n")
+		suggestions := func(intro string, list []manifest.Suggestion) {
+			if len(list) == 0 {
+				return
+			}
+			b.WriteString(intro + "\n\n")
+			for _, s := range list {
+				fmt.Fprintf(&b, "- %s %s: `%s`\n", s.Member, s.Kind, s.Command)
+			}
+			b.WriteString("\n")
+		}
+		suggestions("Commands suggested earlier that still await the user's review:", m.Pending())
+		suggestions("Commands the user already accepted or dismissed; do not suggest them again:", m.Init.Settled)
 	}
 	b.WriteString("## Members\n\n| Name | Path | Ref | Role |\n| --- | --- | --- | --- |\n")
 	for _, mem := range m.Members {
@@ -132,7 +156,8 @@ func RenderInit(dir string, m *manifest.Manifest, opts Options) error {
 	if opts.has(AdapterAgentSkills) {
 		rules := "# " + GeneratedNote + "\n" +
 			"prefix_rule(pattern = [\"vmono\", \"show\"], decision = \"allow\")\n" +
-			"prefix_rule(pattern = [\"vmono\", \"package\", \"record\"], decision = \"allow\")\n"
+			"prefix_rule(pattern = [\"vmono\", \"package\", \"record\"], decision = \"allow\")\n" +
+			"prefix_rule(pattern = [\"vmono\", \"package\", \"suggestions\"], decision = \"forbidden\")\n"
 		if err := w.file(codexRulesPath, rules); err != nil {
 			return fmt.Errorf("agent-skills adapter: %w", err)
 		}
@@ -144,7 +169,7 @@ func RenderInit(dir string, m *manifest.Manifest, opts Options) error {
 // edits, commits or pushes, and recording without asking.
 func renderClaudeInit(w *writer, m *manifest.Manifest) error {
 	rules := newRuleSet()
-	for _, r := range []string{"Edit", "Write", "NotebookEdit", "Bash(git commit:*)", "Bash(git push:*)"} {
+	for _, r := range []string{"Edit", "Write", "NotebookEdit", "Bash(git commit:*)", "Bash(git push:*)", "Bash(vmono package suggestions:*)"} {
 		rules.add(r, EffectDeny)
 	}
 	for _, r := range []string{"Bash(vmono package record:*)", "Bash(vmono show:*)"} {
@@ -185,6 +210,7 @@ func renderOpenCodeInit(w *writer, m *manifest.Manifest, v2 bool) error {
 	for _, r := range []ocRule{
 		{"bash", "git commit *", EffectDeny}, {"bash", "git push *", EffectDeny},
 		{"bash", "vmono show *", EffectAllow}, {"bash", "vmono package record *", EffectAllow},
+		{"bash", "vmono package suggestions*", EffectDeny},
 	} {
 		rules.add(r, true)
 	}

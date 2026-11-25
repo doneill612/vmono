@@ -54,7 +54,7 @@ func TestRenderInitRestrictsEveryAdapter(t *testing.T) {
 	if err := json.Unmarshal([]byte(readIn(t, dir, ".claude/settings.json")), &cf); err != nil {
 		t.Fatal(err)
 	}
-	for _, r := range []string{"Edit", "Write", "NotebookEdit", "Bash(git push:*)", "Read(/_ref/alpha/secrets/**)"} {
+	for _, r := range []string{"Edit", "Write", "NotebookEdit", "Bash(git push:*)", "Bash(vmono package suggestions:*)", "Read(/_ref/alpha/secrets/**)"} {
 		if !slices.Contains(cf.Permissions.Deny, r) {
 			t.Errorf("deny lacks %s: %v", r, cf.Permissions.Deny)
 		}
