@@ -9,7 +9,6 @@ source_roots    = ["~/source"]              # scanned to fill the repo picker
 repos           = ["~/work/one-off-repo"]   # individual repos, from anywhere
 package_root    = "~/.vmono"
 scan_depth      = 2
-branch_prefix   = "vmono/"
 fetch_on_create = true      # fetch source repos before adding worktrees; failures only warn
 default_harness = "claude"
 auto_commit     = true      # commit every package change to the package's own repo
