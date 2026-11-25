@@ -234,6 +234,9 @@ func LoadFrom(file string) (Config, error) {
 		}
 		meta := decodeKeys(data)
 		overlay(&cfg, onDisk, meta)
+		if prefix := oldBranchPrefix(data); prefix != "" {
+			cfg.Notices = append(cfg.Notices, "config: branch_prefix = \""+prefix+"\" is no longer read; pass --prefix when starting a session, and remove it")
+		}
 		backfillHarnesses(&cfg)
 		cfg.Loaded = true
 	case errors.Is(err, os.ErrNotExist):
@@ -247,6 +250,19 @@ func LoadFrom(file string) (Config, error) {
 		cfg.ReturnToTUI = true
 	}
 	return cfg, cfg.Validate()
+}
+
+// oldBranchPrefix returns the branch_prefix of a config from when it was a
+// setting, or "" when there is none. The default of the time is left out: every
+// saved config has it, whether or not anyone chose it.
+func oldBranchPrefix(data []byte) string {
+	var old struct {
+		BranchPrefix string `toml:"branch_prefix"`
+	}
+	if _, err := toml.Decode(string(data), &old); err != nil || old.BranchPrefix == "vmono/" {
+		return ""
+	}
+	return old.BranchPrefix
 }
 
 // decodeKeys returns the set of top-level keys present in a config file so

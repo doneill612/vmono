@@ -262,3 +262,16 @@ func TestRemovedHookIsIgnored(t *testing.T) {
 		t.Errorf("saving should drop it: %v, %v", cfg.Notices, err)
 	}
 }
+
+func TestChosenBranchPrefixIsPointedOut(t *testing.T) {
+	for prefix, want := range map[string]int{"vmono/": 0, "": 0, "me/": 1} {
+		file := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(file, []byte("branch_prefix = \""+prefix+"\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadFrom(file)
+		if err != nil || len(cfg.Notices) != want {
+			t.Errorf("%q: notices = %v, %v", prefix, cfg.Notices, err)
+		}
+	}
+}
