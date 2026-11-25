@@ -263,12 +263,12 @@ func publishStatus(s *Session, mem manifest.Member, ms *MemberStatus) {
 	if err != nil {
 		return
 	}
-	ms.BuiltOn, ms.OwnCommits = shortRef(base.ref), own
+	ms.BuiltOn, ms.OwnCommits = displayRef(src, base.ref), own
 	pub := publicationOf(refs, src, branch, baseBranches(s, mem, src))
 	if pub.remote != "" {
 		ms.RemoteBranch = pub.remote + "/" + pub.dest
 		if how, into := mergedIntoAny(src, local, base.refs()); how != "" {
-			ms.Publish, ms.MergedBy, ms.MergedInto = PublishMerged, how, shortRef(into)
+			ms.Publish, ms.MergedBy, ms.MergedInto = PublishMerged, how, displayRef(src, into)
 			return
 		}
 	}

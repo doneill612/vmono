@@ -27,7 +27,7 @@ func TestPreviewBesideTheListFollowsTheHighlight(t *testing.T) {
 	d.key("right")
 	d.has("branch", "work", "MEMBERS", "gamma")
 	d.key("m")
-	d.has("built on", "origin/HEAD", "no commits yet")
+	d.has("built on", "origin/main", "no commits yet")
 }
 
 func TestNarrowTerminalsGetTheListAlone(t *testing.T) {

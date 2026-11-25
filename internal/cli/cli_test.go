@@ -973,6 +973,7 @@ func TestSessionUpdate(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(a, "new.txt"), "new\n")
 	testutil.Git(t, a, "add", "-A")
 	testutil.Git(t, a, "commit", "--quiet", "-m", "new")
+	testutil.Git(t, a, "push", "--quiet", "origin", "main")
 
 	testutil.WriteFile(t, filepath.Join(wt, "README.md"), "edited\n")
 	out, _, err = run(t, "session", "update", "demo/work", "--json")
@@ -982,7 +983,7 @@ func TestSessionUpdate(t *testing.T) {
 	}
 	testutil.Git(t, wt, "checkout", "--quiet", "README.md")
 	out, _, err = run(t, "session", "update", "demo/work")
-	if err != nil || !strings.Contains(out, "updated onto main (1 behind") {
+	if err != nil || !strings.Contains(out, "rebased onto origin/main (1 behind") {
 		t.Errorf("update = %q, %v", out, err)
 	}
 }

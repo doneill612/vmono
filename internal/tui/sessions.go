@@ -415,8 +415,8 @@ func syncSessionOp(c *core.Core, pkg, session string) operation {
 	}
 }
 
-// updateOp builds the operation that rebases one session's members onto the
-// latest of their landing branches. Nothing is asked first: a member that
+// updateOp builds the operation that brings one session's branches up to date
+// with what they are built on. Nothing is asked first: a member that
 // cannot be updated cleanly is left as it was. A failure offers to launch the
 // harness in the session, which is where a conflict gets resolved.
 func updateOp(c *core.Core, pkg, session string) operation {

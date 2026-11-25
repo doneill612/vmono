@@ -21,6 +21,9 @@ const (
 	UpdateReady = "ready"
 	// UpdateDone: the member's commits now sit on top of its target.
 	UpdateDone = "updated"
+	// UpdateMerged: the member's work has been merged, so there is nothing left
+	// to update. The Reason says how.
+	UpdateMerged = "merged"
 	// UpdateSkipped: the member was left alone. The Reason says why.
 	UpdateSkipped = "skipped"
 	// UpdateConflict: rebasing the member conflicted. The rebase was aborted
@@ -33,29 +36,29 @@ const (
 // MemberUpdate is what updating a session does, or did, for one active member.
 type MemberUpdate struct {
 	Name string `json:"name"`
-	// Onto is the branch the member is updated to, such as "origin/main".
+	// Onto is what the member is updated to, such as "origin/main".
 	Onto   string `json:"onto,omitempty"`
 	Status string `json:"status"`
 	// Behind counts the commits on Onto the session lacked.
 	Behind int `json:"behind"`
-	// Commits counts the session's own commits, replayed on top of Onto.
+	// Commits counts the branch's own commits, which a rebase replays on top of
+	// Onto.
 	Commits int `json:"commits"`
-	// Reason explains a skipped, conflicted or failed member.
-	Reason string `json:"reason,omitempty"`
-	// Conflicts lists the files an aborted rebase conflicted in.
-	Conflicts []string `json:"conflicts,omitempty"`
 	// Merge is true when the member is updated by merging instead of rebasing,
-	// because its landing branch and the remote copy have diverged.
+	// because its branch has been published.
 	Merge bool `json:"merge,omitempty"`
+	// Reason explains a merged, skipped, conflicted or failed member.
+	Reason string `json:"reason,omitempty"`
+	// Conflicts lists the files an aborted rebase or merge conflicted in.
+	Conflicts []string `json:"conflicts,omitempty"`
+	// Notes say what else changed, such as what the branch is built on.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // UpdateOptions tunes Update.
 type UpdateOptions struct {
 	// Members names the active members to update. Empty means every one.
 	Members []string
-	// Merge also updates members whose landing branch has diverged from its
-	// copy on the remote, by merging both into the session branch.
-	Merge bool
 	// NoFetch updates to the refs already on disk.
 	NoFetch bool
 	// DryRun reports what would be updated and moves no branch. It still
@@ -92,12 +95,21 @@ func (e *UpdateIncompleteError) Error() string {
 func (e *UpdateIncompleteError) Is(target error) bool { return target == ErrRefused }
 
 // updating is the working state of one member while an update is planned and
-// run: the public MemberUpdate plus the refs and paths the rebase needs.
+// run: the public MemberUpdate plus the refs and paths the update needs.
 type updating struct {
 	MemberUpdate
-	src, wt, target, fork string
-	// merges are the refs a diverged member merges, in order.
+	src, wt, branch string
+	// target and fork are what a rebase replays onto and after.
+	target, fork string
+	// merges are the refs a published member merges, in order.
 	merges []string
+	// retarget is true when the branch moves from what the session built it on
+	// to the member's own base, and tip is what it is built on afterwards.
+	retarget bool
+	tip      string
+	// track is the remote branch to start tracking, for a published branch that
+	// tracks none.
+	track string
 }
 
 // skip marks the member as left alone.
@@ -105,21 +117,23 @@ func (u *updating) skip(format string, args ...any) {
 	u.Status, u.Reason = UpdateSkipped, fmt.Sprintf(format, args...)
 }
 
-// Update brings each active member of the session up to date with the branch
-// its work lands on. The sources are fetched, and the member's own commits are
-// then rebased, inside the session's worktree, onto the landing branch or its
-// copy on the remote, whichever is further ahead, or onto the member's base
-// when the landing branch does not exist yet. No source repo branch moves.
+// Update brings each active member of the session up to date. The sources are
+// fetched, and a branch that is not published is then rebased, inside the
+// session's worktree, onto what it is built on: the member's base, or the branch
+// the session builds it on. Nobody else has its commits, so they can be
+// rewritten. One that is published has its remote copy and then its base merged
+// into it instead, which are fast-forwards where they can be, so that pushing it
+// never needs force. No branch of a source repo but the member's own moves.
 //
-// Members are independent. One with uncommitted work is skipped, and so is one
-// whose landing branch has diverged from its remote copy, since rebasing onto
-// either side could take commits the session already has out of it. With
-// opts.Merge both sides are merged into such a session instead: it then holds
-// everything, so finishing fast-forwards the landing branch, and pushing that
-// is a fast-forward too. The merge commit lands with the work, which is why it
-// has to be asked for. A rebase or merge that conflicts is aborted, unlike in Finish: an agent may be working in the
-// session, and leaving its worktree mid-rebase would pull it out from under
-// it. A failed fetch only warns, and the refs on disk are used.
+// A branch built on one that has since merged moves to the member's base. A
+// member whose work has been merged is left as it is, and so is one whose remote
+// branch was deleted, or whose history or remote copy's was rewritten, since
+// merging would bring back what the rewrite dropped.
+//
+// Members are independent. One with uncommitted work is skipped. A rebase or
+// merge that conflicts is aborted: an agent may be working in the session, and
+// leaving its worktree part way would pull it out from under it. A failed fetch
+// only warns, and the refs on disk are used.
 func (c *Core) Update(s *Session, opts UpdateOptions) (UpdateResult, error) {
 	res := UpdateResult{Package: s.Pkg.Name, Session: s.Name}
 	if err := gitx.CheckVersion(); err != nil {
@@ -153,8 +167,8 @@ func (c *Core) Update(s *Session, opts UpdateOptions) (UpdateResult, error) {
 	var errs []error
 	incomplete := false
 	for i, mem := range members {
-		u := &updating{MemberUpdate: MemberUpdate{Name: mem.Name, Status: UpdateReady}, src: srcs[i], wt: s.MemberDir(mem)}
-		planUpdate(s, mem, opts.Merge, u)
+		u := &updating{MemberUpdate: MemberUpdate{Name: mem.Name, Status: UpdateReady}, src: srcs[i], wt: s.MemberDir(mem), branch: s.BranchFor(mem.Name)}
+		planUpdate(s, mem, u)
 		if u.Status == UpdateReady && !opts.DryRun {
 			step := apply.Step{Member: mem.Name, Name: "rebase onto " + u.Onto, Run: func(func(string)) error { return u.rebase() }}
 			if u.Merge {
@@ -162,6 +176,11 @@ func (c *Core) Update(s *Session, opts UpdateOptions) (UpdateResult, error) {
 			}
 			if err := runner.Run([]apply.Step{step}); err != nil && u.Status == UpdateFailed {
 				errs = append(errs, err)
+			}
+			if u.Status == UpdateDone {
+				if err := u.record(s); err != nil {
+					errs = append(errs, err)
+				}
 			}
 		} else if u.Status == UpdateSkipped {
 			c.warnEvent(mem.Name, "update", "skipped: "+u.Reason)
@@ -178,7 +197,7 @@ func (c *Core) Update(s *Session, opts UpdateOptions) (UpdateResult, error) {
 // planUpdate decides, without changing anything, what updating one member
 // would do. Uncommitted work only matters when there is something to update
 // to.
-func planUpdate(s *Session, mem manifest.Member, merge bool, u *updating) {
+func planUpdate(s *Session, mem manifest.Member, u *updating) {
 	if _, err := os.Stat(u.wt); err != nil {
 		u.skip("its worktree is missing; run `vmono sync`")
 		return
@@ -188,34 +207,49 @@ func planUpdate(s *Session, mem manifest.Member, merge bool, u *updating) {
 		u.skip("%s", p.reason)
 		return
 	}
-	base, err := resolveRef(u.src, mem.Base, nil)
+	refs := gitx.LiveRefs(u.src)
+	base, err := baseOf(refs, s, mem, u.src, nil)
 	if err != nil {
 		u.skip("%v", err)
 		return
 	}
-	u.target = base
-	into, _ := landingBranch(s, mem, u.src)
-	switch {
-	case into == "":
-	case gitx.BranchExists(u.src, into):
-		u.target, u.Merge = freshest(u.src, into)
-	default:
-		if ref := remoteCounterpart(u.src, into); ref != "" {
-			u.target = ref
+	bases := baseBranches(s, mem, u.src)
+	pub := publicationOf(refs, u.src, u.branch, bases)
+	if pub.remote != "" {
+		if how, into := mergedIntoAny(u.src, "refs/heads/"+u.branch, base.refs()); how != "" {
+			u.Status, u.Reason = UpdateMerged, mergedReason(u.src, how, into)
+			return
 		}
 	}
-	u.Onto = shortRef(u.target)
-	incoming := []string{u.target}
-	if u.Merge {
-		u.merges = []string{u.target, remoteCounterpart(u.src, into)}
-		u.Onto += " and " + shortRef(u.merges[1])
-		incoming = u.merges
-	}
-	if u.Behind, err = gitx.RevCount(u.wt, append(slices.Clone(incoming), "--not", "HEAD")...); err != nil {
-		u.skip("cannot compare it with %s: %v", u.Onto, err)
+	if pub.deleted() {
+		u.skip("%s", deletedReason(pub, u.branch))
 		return
 	}
-	if u.Behind == 0 {
+	if !u.planBase(s, mem, base, bases) {
+		return
+	}
+	u.target, u.Onto = base.ref, displayRef(u.src, base.ref)
+	if u.retarget {
+		u.target, u.Onto = base.manifest, displayRef(u.src, base.manifest)
+	}
+	if u.Commits, err = gitx.RevCount(u.wt, append([]string{"HEAD", "--not"}, base.refs()...)...); err != nil {
+		u.skip("%v", err)
+		return
+	}
+	incoming := []string{u.target}
+	if pub.published() {
+		if !u.planMerge(pub, base) {
+			return
+		}
+		incoming = u.merges
+	}
+	if len(incoming) > 0 {
+		if u.Behind, err = gitx.RevCount(u.wt, append(slices.Clone(incoming), "--not", "HEAD")...); err != nil {
+			u.skip("cannot compare it with %s: %v", u.Onto, err)
+			return
+		}
+	}
+	if u.Behind == 0 && !u.retarget {
 		u.Status = UpdateCurrent
 		return
 	}
@@ -223,24 +257,110 @@ func planUpdate(s *Session, mem manifest.Member, merge bool, u *updating) {
 		u.skip("%s", p.reason)
 		return
 	}
-	if u.Merge {
-		if !merge {
-			u.Merge = false
-			u.skip("%s have diverged; `vmono session update --merge` merges both into the session, or reconcile them in %s", u.Onto, u.src)
-			return
-		}
-		u.Commits, err = gitx.RevCount(u.wt, append([]string{"HEAD", "--not", base}, u.merges...)...)
-		if err != nil {
-			u.skip("%v", err)
-		}
+	if u.tip, err = gitx.ResolveRef(u.src, u.target); err != nil {
+		u.skip("%v", err)
 		return
 	}
-	if u.fork, err = forkPoint(u.wt, base, u.target); err == nil {
-		u.Commits, err = gitx.RevCount(u.wt, "HEAD", "--not", u.fork)
+	if u.Merge {
+		return
 	}
-	if err != nil {
+	if u.fork == "" {
+		if u.fork, err = forkPoint(u.wt, base.manifest, u.target); err != nil {
+			u.skip("%v", err)
+			return
+		}
+	}
+	if u.Commits, err = gitx.RevCount(u.wt, "HEAD", "--not", u.fork); err != nil {
 		u.skip("%v", err)
 	}
+}
+
+// planBase decides, for a branch the session builds on another, where its own
+// commits begin and whether it moves to the member's own base because the other
+// has merged. It is false when the member has to be skipped.
+func (u *updating) planBase(s *Session, mem manifest.Member, base memberBase, bases []string) bool {
+	rec := s.S.Members[mem.Name]
+	if rec.From == "" {
+		return true
+	}
+	if rec.BaseTip != "" && gitx.IsMerged(u.wt, rec.BaseTip, "HEAD") {
+		u.fork = rec.BaseTip
+	}
+	if base.lost != "" {
+		// What it was built on can only be told by the commit it was at.
+		if rec.BaseTip == "" || mergedInto(u.src, rec.BaseTip, base.manifest) == "" {
+			u.skip("what it is built on, %s, is gone and does not look merged into %s; rebase it onto what it should be built on by hand", base.lost, displayRef(u.src, base.manifest))
+			return false
+		}
+		u.retarget = true
+	} else if pub := publicationOf(gitx.LiveRefs(u.src), u.src, bases[len(bases)-1], bases[:len(bases)-1]); pub.remote != "" {
+		u.retarget = mergedInto(u.src, base.ref, base.manifest) != ""
+	}
+	if u.retarget {
+		u.Notes = append(u.Notes, fmt.Sprintf("%s has merged, so it is now built on %s", rec.From, displayRef(u.src, base.manifest)))
+	}
+	return true
+}
+
+// planMerge plans the merges a published branch is updated with: its remote
+// copy and then its base, each only when it has something new. It is false when
+// the member has to be skipped, because its history or the remote copy's was
+// rewritten, or the remote branch is not a copy of it at all.
+func (u *updating) planMerge(pub publication, base memberBase) bool {
+	u.Merge = true
+	remote := shortRef(pub.ref)
+	moves := gitx.Reflog(u.src, pub.ref)
+	for _, m := range moves {
+		if gitx.IsMerged(u.src, m.Commit, "refs/heads/"+u.branch) && !gitx.IsMerged(u.src, m.Commit, pub.ref) {
+			u.skip("%s was rewritten since this branch had it, and merging would bring the old commits back beside the new; compare them, then run `git reset --hard %s` or rebase onto it in the member", remote, remote)
+			return false
+		}
+		if m.Pushed() && gitx.IsMerged(u.src, m.Commit, pub.ref) && !gitx.IsMerged(u.src, m.Commit, "refs/heads/"+u.branch) {
+			u.skip("this branch was rewritten after it was pushed, and merging %s would bring the old commits back beside the new; if the rewrite was meant, run `git push --force-with-lease` in the member", remote)
+			return false
+		}
+	}
+	if !pub.upstream {
+		shared, err := gitx.RevCount(u.src, append([]string{"refs/heads/" + u.branch, "--not", pub.ref}, base.refs()...)...)
+		if err != nil || shared == u.Commits {
+			u.skip("%s has a branch of the same name that shares no work with this one; rename this one with `git branch -m`, or track the other if it is meant to be the same", pub.remote)
+			return false
+		}
+		u.track = remote
+	}
+	for _, ref := range []string{pub.ref, u.target} {
+		if !gitx.IsMerged(u.wt, ref, "HEAD") {
+			u.merges = append(u.merges, ref)
+		}
+	}
+	if len(u.merges) > 0 {
+		var names []string
+		for _, ref := range u.merges {
+			names = append(names, displayRef(u.src, ref))
+		}
+		u.Onto = strings.Join(names, " and ")
+	}
+	return true
+}
+
+// record saves what an update changed about what the branch is built on, and
+// makes a published branch track its remote copy.
+func (u *updating) record(s *Session) error {
+	if u.track != "" {
+		if err := gitx.SetUpstream(u.src, u.branch, u.track); err != nil {
+			return err
+		}
+	}
+	rec := s.S.Members[u.Name]
+	if rec.From == "" {
+		return nil
+	}
+	rec.BaseTip = u.tip
+	if u.retarget {
+		rec.From, rec.BaseTip = "", ""
+	}
+	s.S.SetMember(u.Name, rec)
+	return manifest.SaveSession(s.Dir, s.S)
 }
 
 // worktreeProblem is why a member's worktree cannot be rebased as it stands.
@@ -315,9 +435,9 @@ func (u *updating) rebase() error {
 	return errors.New(u.Reason)
 }
 
-// merge merges both sides of a diverged landing branch into the session. A
-// merge that stops is aborted, and one already made before it is undone, which
-// puts the member back where it was.
+// merge merges the planned refs into the branch, in order. A merge that stops is
+// aborted, and one already made before it is undone, which puts the member back
+// where it was.
 func (u *updating) merge() error {
 	tip, err := gitx.ResolveRef(u.wt, "HEAD")
 	if err != nil {
@@ -333,10 +453,14 @@ func (u *updating) merge() error {
 		u.Status, u.Reason = UpdateFailed, oneLine(err.Error())
 		_ = gitx.MergeAbort(u.wt)
 		if rerr := gitx.ResetKeep(u.wt, tip); rerr != nil {
-			u.Reason = fmt.Sprintf("merging %s stopped and could not be undone: %v", shortRef(ref), rerr)
+			u.Reason = fmt.Sprintf("merging %s stopped and could not be undone: %v", displayRef(u.src, ref), rerr)
 		} else if len(files) > 0 {
+			var cmds []string
+			for _, r := range u.merges {
+				cmds = append(cmds, "`git merge "+displayRef(u.src, r)+"`")
+			}
 			u.Status, u.Conflicts = UpdateConflict, files
-			u.Reason = fmt.Sprintf("merging %s conflicts in %s; the merge was aborted and nothing changed, run `git merge %s` and then `git merge %s` in the member to resolve it", shortRef(ref), strings.Join(files, ", "), shortRef(u.merges[0]), shortRef(u.merges[1]))
+			u.Reason = fmt.Sprintf("merging %s conflicts in %s; the merge was aborted and nothing changed, run %s in the member to resolve it", displayRef(u.src, ref), strings.Join(files, ", "), strings.Join(cmds, " and then "))
 		}
 		return errors.New(u.Reason)
 	}

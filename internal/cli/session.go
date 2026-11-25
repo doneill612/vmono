@@ -129,19 +129,22 @@ func newSessionLsCmd() *cobra.Command {
 // newSessionUpdateCmd builds `vmono session update`.
 func newSessionUpdateCmd() *cobra.Command {
 	var members []string
-	var merge, noFetch, dryRun, asJSON bool
+	var noFetch, dryRun, asJSON bool
 	cmd := &cobra.Command{
-		Use:   "update [pkg/session] [--member NAME]... [--merge] [--no-fetch] [--dry-run] [--json]",
-		Short: "Rebase the session's commits onto the latest of each member's landing branch",
-		Long: `Bring a session up to date. The sources are fetched, then each active member's own
-commits are rebased, inside the session, onto its landing branch or that branch's
-copy on the remote, whichever is further ahead, or onto the member's base when the
-landing branch does not exist yet. Only the session branch moves.
+		Use:   "update [pkg/session] [--member NAME]... [--no-fetch] [--dry-run] [--json]",
+		Short: "Bring the session's branches up to date with what they are built on",
+		Long: `Bring a session up to date. The sources are fetched, then each active member's
+branch takes in what is new. One that has not been pushed is rebased onto its base.
+One that has been pushed has its remote copy and then its base merged into it, so
+that pushing it again never needs force. A branch built on another with --from moves
+to the member's base once that other has merged.
 
-Members are independent. One with uncommitted work, or whose landing branch has
-diverged from its remote copy, is skipped; --merge merges both sides of a diverged
-branch into the session instead, and the merge commit lands with the work. One that
-conflicts is put back as it was. The command exits with 2 when any member was skipped or conflicted. A failed
+Members are independent. One with uncommitted work is skipped, and so is one whose
+remote branch was deleted, as it is once a pull request is merged, or whose history
+was rewritten. One whose work has been merged is left as it is: remove the session
+and start a new one for more work, since a squash merge leaves the branch's commits
+off the base and they would conflict with it. One that conflicts is put back as it
+was. The command exits with 2 when any member was skipped or conflicted. A failed
 fetch only warns. --dry-run fetches, then shows what would be updated.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -156,7 +159,7 @@ fetch only warns. --dry-run fetches, then shows what would be updated.`,
 			var res core.UpdateResult
 			err = withEvents(cmd.ErrOrStderr(), c, func() error {
 				var uerr error
-				res, uerr = c.Update(s, core.UpdateOptions{Members: members, Merge: merge, NoFetch: noFetch, DryRun: dryRun})
+				res, uerr = c.Update(s, core.UpdateOptions{Members: members, NoFetch: noFetch, DryRun: dryRun})
 				return uerr
 			})
 			out := cmd.OutOrStdout()
@@ -174,7 +177,6 @@ fetch only warns. --dry-run fetches, then shows what would be updated.`,
 	}
 	f := cmd.Flags()
 	f.StringArrayVar(&members, "member", nil, "update only this member (repeatable)")
-	f.BoolVar(&merge, "merge", false, "merge both sides of a landing branch that has diverged from its remote copy")
 	f.BoolVar(&noFetch, "no-fetch", false, "update to the refs already on disk")
 	f.BoolVar(&dryRun, "dry-run", false, "show what would be updated without moving any branch")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
@@ -186,20 +188,25 @@ func printUpdate(w io.Writer, res core.UpdateResult, dryRun bool) {
 	for _, m := range res.Members {
 		text := m.Status + ": " + m.Reason
 		switch m.Status {
+		case core.UpdateMerged:
+			text = m.Reason
 		case core.UpdateCurrent:
-			text = "up to date with " + m.Onto
+			text = "up to date"
 		case core.UpdateDone:
-			text = fmt.Sprintf("updated onto %s (%d behind, %d of its own commits replayed)", m.Onto, m.Behind, m.Commits)
+			text = fmt.Sprintf("rebased onto %s (%d behind, %d of its own commits replayed)", m.Onto, m.Behind, m.Commits)
 			if m.Merge {
 				text = fmt.Sprintf("merged %s (%d commits brought in)", m.Onto, m.Behind)
 			}
 		case core.UpdateReady:
-			text = fmt.Sprintf("would update onto %s (%d behind, %d of its own commits to replay)", m.Onto, m.Behind, m.Commits)
+			text = fmt.Sprintf("would rebase onto %s (%d behind, %d of its own commits to replay)", m.Onto, m.Behind, m.Commits)
 			if m.Merge {
 				text = fmt.Sprintf("would merge %s (%d commits to bring in)", m.Onto, m.Behind)
 			}
 		}
 		fprintf(w, "%-16s %s\n", m.Name, text)
+		for _, n := range m.Notes {
+			fprintf(w, "%-16s note: %s\n", "", n)
+		}
 	}
 	if dryRun {
 		fprintf(w, "dry run: no branch moved\n")

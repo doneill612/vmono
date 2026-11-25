@@ -50,6 +50,17 @@ func baseOf(refs gitx.Refs, s *Session, mem manifest.Member, src string, warn fu
 	return b, nil
 }
 
+// displayRef names ref for people. origin/HEAD is spelled as the branch it stands
+// for.
+func displayRef(src, ref string) string {
+	if ref == "origin/HEAD" {
+		if b := gitx.DefaultBranch(src); b != "" {
+			return "origin/" + b
+		}
+	}
+	return shortRef(ref)
+}
+
 // resolveFrom returns the ref that what a member is built on stands for now. A
 // branch name is whichever of the local branch and its remote copy is further
 // ahead. It is "" when nothing by that name exists.

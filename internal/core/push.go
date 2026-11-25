@@ -162,10 +162,11 @@ func pushCounts(src, branch string, t pushTarget) (ahead, behind int, err error)
 // mergedHint is what to do about a member whose work has been merged.
 const mergedHint = "remove the session with `vmono session rm`, and start a new one for more work"
 
-// mergedReason says how a member's work was merged into base, and what to do.
-func mergedReason(how, base string) string {
+// mergedReason says how a member's work was merged into the ref base of its
+// source repo, and what to do.
+func mergedReason(src, how, base string) string {
 	verb := map[string]string{MergedSquash: "squash-merged", MergedRebase: "rebase-merged"}[how]
-	return fmt.Sprintf("already %s into %s; %s", firstNonEmpty(verb, "merged"), shortRef(base), mergedHint)
+	return fmt.Sprintf("already %s into %s; %s", firstNonEmpty(verb, "merged"), displayRef(src, base), mergedHint)
 }
 
 // deletedReason says that the branch a member was pushed to is gone, which is
@@ -231,7 +232,7 @@ func planPushMember(s *Session, mem manifest.Member, p *pushing) {
 	pub := publicationOf(refs, src, p.Branch, bases)
 	if pub.published() || pub.deleted() {
 		if how, into := mergedIntoAny(src, p.Branch, base.refs()); how != "" {
-			p.Status, p.Reason = PushMerged, mergedReason(how, into)
+			p.Status, p.Reason = PushMerged, mergedReason(src, how, into)
 			return
 		}
 	}

@@ -40,7 +40,7 @@ func TestStatusFollowsABranchFromEmptyToDiverged(t *testing.T) {
 	check("new", PublishEmpty, SessionInProgress, "no commits yet")
 	commitIn(t, wt, "one.txt")
 	m := check("committed", PublishLocal, SessionInProgress, "1 commit, not pushed")
-	if m.OwnCommits != 1 || m.Unpushed != 1 || m.BuiltOn != "origin/HEAD" || m.RemoteBranch != "" {
+	if m.OwnCommits != 1 || m.Unpushed != 1 || m.BuiltOn != "origin/main" || m.RemoteBranch != "" {
 		t.Errorf("committed: %+v", m)
 	}
 	if _, err := c.Push(s, PushOptions{}); err != nil {
@@ -80,7 +80,7 @@ func TestStatusSaysHowABranchWasMerged(t *testing.T) {
 
 			before := testutil.Git(t, a, "count-objects", "-v")
 			p, m := status(t, c, s, "alpha")
-			if m.Publish != PublishMerged || m.MergedBy != how || m.MergedInto != "origin/HEAD" || p.State != SessionMerged || p.Label() != "merged ("+how+")" {
+			if m.Publish != PublishMerged || m.MergedBy != how || m.MergedInto != "origin/main" || p.State != SessionMerged || p.Label() != "merged ("+how+")" {
 				t.Errorf("%s deleted=%v: %+v, %+v", how, deleted, p, m)
 			}
 			if after := testutil.Git(t, a, "count-objects", "-v"); after != before {

@@ -197,7 +197,7 @@ func TestPushLeavesMergedWorkAlone(t *testing.T) {
 				if err != nil || m.Status != PushMerged || !strings.Contains(m.Reason, "vmono session rm") {
 					t.Errorf("row = %+v, %v", m, err)
 				}
-				if how != MergedCommit && !strings.Contains(m.Reason, how+"-merged into origin/HEAD") {
+				if how != MergedCommit && !strings.Contains(m.Reason, how+"-merged into origin/main") {
 					t.Errorf("reason = %q", m.Reason)
 				}
 				if got := remoteBranches(t, env, "alpha"); len(got) != len(before) {
