@@ -82,9 +82,9 @@ func TestCreateFlowEditorPickerProgressLaunch(t *testing.T) {
 	d.key("right") // open the package's (empty) sessions view
 	d.key("n")
 	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
-	d.has("package shiny", "vmono/shiny/<session>")
+	d.has("package shiny", "<session>")
 	d.typeText("task")
-	d.has("vmono/shiny/task")
+	d.has("branch:  task")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 	d.has("default", "shiny/task")
@@ -115,7 +115,7 @@ func TestCreateAsksBeforeReusingExistingBranch(t *testing.T) {
 	env := testutil.NewEnv(t)
 	useSourceRoot(t, env)
 	a := env.NewSource(t, "alpha")
-	testutil.Git(t, a, "branch", "vmono/reuse/work")
+	testutil.Git(t, a, "branch", "work")
 	d := newDriver(t, env, "")
 
 	d.key("n")
@@ -133,7 +133,7 @@ func TestCreateAsksBeforeReusingExistingBranch(t *testing.T) {
 	d.has("Check it out instead")
 	d.key("y")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt after reuse")
-	if br := testutil.Git(t, filepath.Join(env.PackageRoot, "reuse", "work", "alpha"), "branch", "--show-current"); br != "vmono/reuse/work" {
+	if br := testutil.Git(t, filepath.Join(env.PackageRoot, "reuse", "work", "alpha"), "branch", "--show-current"); br != "work" {
 		t.Errorf("branch = %q", br)
 	}
 }

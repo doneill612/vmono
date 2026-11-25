@@ -42,20 +42,22 @@ func newRemovedCmd(name, instead string) *cobra.Command {
 
 // newSessionNewCmd builds `vmono session new`.
 func newSessionNewCmd() *cobra.Command {
-	var branch string
-	var into, track []string
-	var reuse bool
+	var flags sessionFlags
 	cmd := &cobra.Command{
-		Use:   "new [pkg] <name> [--branch B] [--into [MEMBER=]B]... [--track [MEMBER=]B]... [--reuse-branch]",
-		Short: "Start a session: a worktree of every member on a new branch",
-		Args:  cobra.RangeArgs(1, 2),
+		Use:   "new [pkg] <name> [--prefix P] [--branch [MEMBER=]B]... [--track [MEMBER=]B]... [--from [MEMBER=]REF]... [--reuse-branch]",
+		Short: "Start a session: a worktree of every member, each on a branch of its own",
+		Long: `Start a session. Every active member gets a worktree on a branch, which is the
+branch you push and open a pull request from. It is named after the session unless
+you say otherwise, starts from the member's base, and belongs to the session: a name
+that is already on the member's remote is refused.
+
+--track works on a branch that is already there, such as a teammate's or an open pull
+request's. --from builds the new branch on something other than the base, for work
+stacked on a branch that has not merged.`,
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg, rest := splitPkgArgs(args, 2)
-			intoAll, intoBy, err := parseBranches("--into", into)
-			if err != nil {
-				return err
-			}
-			trackAll, trackBy, err := parseBranches("--track", track)
+			opts, err := flags.options()
 			if err != nil {
 				return err
 			}
@@ -66,7 +68,7 @@ func newSessionNewCmd() *cobra.Command {
 			var s *core.Session
 			err = withEvents(cmd.ErrOrStderr(), c, func() error {
 				var cerr error
-				s, cerr = c.CreateSession(p, rest[0], core.SessionOptions{Branch: branch, Into: intoAll, IntoByMember: intoBy, Track: trackAll, TrackByMember: trackBy, ReuseBranch: reuse})
+				s, cerr = c.CreateSession(p, rest[0], opts)
 				return cerr
 			})
 			if err != nil {
@@ -76,10 +78,7 @@ func newSessionNewCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&branch, "branch", "", "session branch (default: <branch_prefix><pkg>/<session>)")
-	cmd.Flags().StringArrayVar(&into, "into", nil, intoHelp+"; default is the branch each source has checked out. A session starts from its landing branch when that is not the member's base branch and exists")
-	cmd.Flags().StringArrayVar(&track, "track", nil, trackHelp)
-	cmd.Flags().BoolVar(&reuse, "reuse-branch", false, "check out the branch if it already exists in a source repo")
+	flags.add(cmd, "")
 	return cmd
 }
 

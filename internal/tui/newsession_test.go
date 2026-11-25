@@ -1,62 +1,68 @@
 package tui
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
-func TestSessionPromptPrefillsEachMembersCheckedOutBranch(t *testing.T) {
+// sessionBranches returns the branch each member of a session of pay is on.
+func sessionBranches(t *testing.T, env *testutil.Env, session string, members ...string) []string {
+	t.Helper()
+	var out []string
+	for _, m := range members {
+		out = append(out, testutil.Git(t, filepath.Join(env.PackageRoot, "pay", session, m), "branch", "--show-current"))
+	}
+	return out
+}
+
+func TestSessionPromptPrefixAndMemberBranches(t *testing.T) {
 	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	b := env.NewSource(t, "beta")
-	seed(t, env, "pay", a, b)
-	testutil.Git(t, b, "checkout", "--quiet", "-b", "develop")
+	useFakeHarness(t, env)
+	seed(t, env, "pay", env.NewSource(t, "alpha"), env.NewSource(t, "beta"))
 	d := newDriver(t, env, "")
 
 	d.key("right", "n")
-	d.has("into alpha", "main", "into beta", "develop")
-	d.typeText("stacked")
+	d.has("prefix:", "none", "branch alpha", "branch beta", "each member's base")
+	d.typeText("retry")
+	d.key("tab")
+	d.typeText("feat")
+	d.has("branch:  feat/retry", "branch alpha  feat/retry")
+	d.key("tab", "tab", "tab", "tab", "tab") // branch, track, from, alpha, beta
+	d.typeText("other")
+	d.key("tab", "shift+tab") // away and back: the text stays
+	d.has("other")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
-
-	data, err := os.ReadFile(filepath.Join(env.PackageRoot, "pay", "stacked", ".vmono", "session.toml"))
-	if err != nil || !containsText(string(data), "alpha = \"main\"") || !containsText(string(data), "beta = \"develop\"") {
-		t.Errorf("session.toml = %q, %v", data, err)
+	if got := sessionBranches(t, env, "retry", "alpha", "beta"); got[0] != "feat/retry" || got[1] != "other" {
+		t.Errorf("branches = %v", got)
 	}
 }
 
-func TestSessionPromptLandingBranchCanBeEditedPerMember(t *testing.T) {
+func TestSessionPromptBuildsOnAPickedBranch(t *testing.T) {
 	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
 	a := env.NewSource(t, "alpha")
-	b := env.NewSource(t, "beta")
-	seed(t, env, "pay", a, b)
-	testutil.Git(t, a, "branch", "feature")
+	seed(t, env, "pay", a)
+	tip := testutil.Git(t, a, "commit-tree", "-m", "parent", "-p", "main", "main^{tree}")
+	testutil.Git(t, a, "push", "--quiet", "origin", tip+":refs/heads/parent")
 	d := newDriver(t, env, "")
 
 	d.key("right", "n")
-	d.typeText("stacked")
-	d.key("tab", "tab", "tab") // name -> branch -> start from -> alpha's into
-	for range "main" {
-		d.key("backspace")
-	}
-	d.typeText("feature")
-	d.key("tab", "shift+tab") // to beta's field and back: the text stays
-	d.has("feature")
+	d.typeText("child")
+	d.key("tab", "tab", "tab", "tab", "enter") // the from field opens the picker
+	d.has("build on a remote branch", "start from each member's base")
+	d.eventually(func() bool { return containsView(d, "parent") }, "the fetched branch")
+	d.typeText("parent")
 	d.key("enter")
+	d.has("new session", "from:    parent  (alpha)", "branch:  child")
+	d.key("tab", "enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
-
-	data, _ := os.ReadFile(filepath.Join(env.PackageRoot, "pay", "stacked", ".vmono", "session.toml"))
-	if !containsText(string(data), "alpha = \"feature\"") || !containsText(string(data), "beta = \"main\"") {
-		t.Errorf("session.toml = %q", data)
+	if got := sessionBranches(t, env, "child", "alpha"); got[0] != "child" {
+		t.Errorf("branches = %v", got)
 	}
-	want := testutil.Git(t, a, "rev-parse", "feature")
-	if got := testutil.Git(t, filepath.Join(env.PackageRoot, "pay", "stacked", "alpha"), "rev-parse", "HEAD"); got != want {
-		t.Errorf("alpha should start at feature: %s, want %s", got, want)
+	if got := testutil.Git(t, filepath.Join(env.PackageRoot, "pay", "child", "alpha"), "rev-parse", "HEAD"); got != tip {
+		t.Errorf("starts at %s, want %s", got, tip)
 	}
 }
-
-// containsText reports whether s contains sub.
-func containsText(s, sub string) bool { return indexOf(s, sub) >= 0 }

@@ -314,7 +314,7 @@ func TestAgentCommandsInferPackageFromCwd(t *testing.T) {
 	if s.Context != "Ticket PLAT-9." || len(s.Notes) != 1 || s.Notes[0].By != "agent:claude" || len(s.Members) != 2 {
 		t.Errorf("show = %+v", s)
 	}
-	if s.Session != "s1" || s.Branch != "vmono/work/s1" || len(s.Sessions) != 1 || s.Members[0].Branch != "vmono/work/s1" {
+	if s.Session != "s1" || s.Branch != "s1" || len(s.Sessions) != 1 || s.Members[0].Branch != "s1" {
 		t.Errorf("show from inside a session should report it: %+v", s)
 	}
 	if s.Members[0].Role != "Owns the gateway" || s.Members[1].Role != "SDK client" {
@@ -626,7 +626,7 @@ func TestSessionNewLsRmAndSelection(t *testing.T) {
 	if got := testutil.Git(t, filepath.Join(two, "alpha"), "branch", "--show-current"); got != "feat/PLAT-1" {
 		t.Errorf("--branch ignored: %q", got)
 	}
-	if got := testutil.Git(t, filepath.Join(one, "alpha"), "branch", "--show-current"); got != "vmono/duo/one" {
+	if got := testutil.Git(t, filepath.Join(one, "alpha"), "branch", "--show-current"); got != "one" {
 		t.Errorf("default branch = %q", got)
 	}
 
@@ -635,7 +635,7 @@ func TestSessionNewLsRmAndSelection(t *testing.T) {
 	if err != nil || json.Unmarshal([]byte(out), &rows) != nil || len(rows) != 2 {
 		t.Fatalf("session ls --json = %q, %v", out, err)
 	}
-	if text, _, _ := run(t, "session", "ls", "duo"); !strings.Contains(text, "feat/PLAT-1") || !strings.Contains(text, "vmono/duo/one") {
+	if text, _, _ := run(t, "session", "ls", "duo"); !strings.Contains(text, "feat/PLAT-1") || !strings.Contains(text, "one") {
 		t.Errorf("session ls table = %q", text)
 	}
 	if text, _, _ := run(t, "ls"); !strings.Contains(text, "duo") {
@@ -782,22 +782,50 @@ func TestPackageChangesReachEverySessionFromTheCLI(t *testing.T) {
 	}
 }
 
-func TestIntoBelongsToASession(t *testing.T) {
+func TestBranchFlagsBelongToASession(t *testing.T) {
 	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	if _, _, err := run(t, "new", "demo", "--active", a, "--into", "feature"); err == nil {
-		t.Error("--into without --session must be rejected")
+	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
+	for _, flag := range [][]string{{"--prefix", "feat"}, {"--branch", "x"}, {"--track", "x"}, {"--from", "x"}, {"--reuse-branch"}} {
+		if _, _, err := run(t, append([]string{"new", "demo", "--active", a}, flag...)...); err == nil {
+			t.Errorf("%v without --session must be rejected", flag)
+		}
 	}
-	if _, stderr, err := run(t, "new", "demo", "--active", a, "--session", "work", "--into", "feature"); err != nil {
+	if _, stderr, err := run(t, "new", "demo", "--active", a+","+b, "--session", "work", "--prefix", "feat", "--branch", "beta=other"); err != nil {
 		t.Fatalf("%v\n%s", err, stderr)
+	}
+	for member, want := range map[string]string{"alpha": "feat/work", "beta": "other"} {
+		if got := testutil.Git(t, filepath.Join(env.PackageRoot, "demo", "work", member), "branch", "--show-current"); got != want {
+			t.Errorf("%s is on %q, want %q", member, got, want)
+		}
 	}
 	out, _, _ := run(t, "session", "ls", "demo", "--json")
 	if !strings.Contains(out, `"state": "in-progress"`) {
 		t.Errorf("ls --json = %s", out)
 	}
-	data, err := os.ReadFile(filepath.Join(env.PackageRoot, "demo", "work", ".vmono", "session.toml"))
-	if err != nil || !strings.Contains(string(data), "[into]\nalpha = \"feature\"") {
-		t.Errorf("session.toml = %q, %v", data, err)
+	for name, args := range map[string][]string{
+		"two branches for all": {"--branch", "a", "--branch", "b"},
+		"empty member":         {"--branch", "=x"},
+		"empty branch":         {"--from", "alpha="},
+		"unknown member":       {"--branch", "ghost=x"},
+	} {
+		if _, _, err := run(t, append([]string{"session", "new", "demo", "two"}, args...)...); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestSessionNewFrom(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	testutil.Git(t, a, "branch", "parent")
+	if _, stderr, err := run(t, "new", "demo", "--active", a, "--session", "child", "--from", "parent"); err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	if out, _, err := run(t, "status", "demo/child", "--json"); err != nil || !strings.Contains(out, `"built_on": "parent"`) {
+		t.Errorf("status = %s, %v", out, err)
+	}
+	if _, _, err := run(t, "session", "new", "demo", "two", "--from", "alpha=nope"); ExitCode(err) != ExitNotFound {
+		t.Errorf("missing ref = %v", err)
 	}
 }
 
@@ -833,7 +861,7 @@ func TestHookSessionStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"work/s1", "vmono/work/s1", "in-progress", "alpha", "beta", "1 untracked", "/vmono:finish", "/vmono:note", "/vmono:status"} {
+	for _, want := range []string{"work/s1", "s1", "in-progress", "alpha", "beta", "1 untracked", "/vmono:finish", "/vmono:note", "/vmono:status"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("hook output missing %q:\n%s", want, got)
 		}

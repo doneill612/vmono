@@ -126,22 +126,26 @@ func BaseBranch(mem Member) string {
 	return base
 }
 
-// DefaultBranch returns the branch a session of pkg is cut on when none is
-// given: the prefix, then the package, then the session name. Including the
-// package keeps sessions of different packages from sharing a branch in a
-// repo they both use.
-func DefaultBranch(prefix, pkg, session string) string {
-	return prefix + pkg + "/" + session
+// DefaultBranch returns the branch a session is cut on when none is given: its
+// name, after the prefix and a slash when there is a prefix.
+func DefaultBranch(prefix, session string) string {
+	if prefix = strings.Trim(prefix, "/"); prefix != "" {
+		return prefix + "/" + session
+	}
+	return session
 }
 
-// ApplyDefaults fills defaulted fields. branchPrefix is used when the session
-// has no branch.
-func (s *Session) ApplyDefaults(branchPrefix string) {
+// ApplyDefaults fills defaulted fields.
+func (s *Session) ApplyDefaults() {
 	if s.Schema == 0 {
 		s.Schema = SessionSchemaVersion
 	}
-	if s.Branch == "" && s.Package != "" && s.Name != "" {
-		s.Branch = DefaultBranch(branchPrefix, s.Package, s.Name)
+	if s.Branch != "" || s.Name == "" {
+		return
+	}
+	s.Branch = DefaultBranch("", s.Name)
+	if s.Schema == LandingSessionSchema {
+		s.Branch = "vmono/" + s.Package + "/" + s.Name
 	}
 }
 
@@ -262,7 +266,7 @@ func ParseSession(data []byte) (*Session, error) {
 		}
 		return nil, fmt.Errorf("parse session: unknown keys: %s", strings.Join(keys, ", "))
 	}
-	s.ApplyDefaults("vmono/")
+	s.ApplyDefaults()
 	if err := s.Validate(); err != nil {
 		return nil, err
 	}

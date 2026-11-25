@@ -112,7 +112,7 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	}
 	existing := make(map[string]map[string]bool, len(ep.Sessions))
 	for _, s := range ep.Sessions {
-		ex, err := preflightMembers(ep.Next, s.BranchFor, ep.Srcs, adds, opts.ReuseBranch || len(replacing) > 0, removing)
+		ex, err := preflightMembers(ep.Next, s.BranchFor, ep.Srcs, adds, always(opts.ReuseBranch || len(replacing) > 0), removing)
 		if err != nil {
 			return plan, sessionErr(s, len(ep.Sessions), err)
 		}
@@ -144,7 +144,7 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 		}
 		for _, s := range ep.Sessions {
 			for _, mem := range list {
-				ss := c.addMemberSteps(s, mem, ep.Srcs[mem.Name], existing[s.Name][mem.Name])
+				ss := c.addMemberSteps(s, mem, ep.Srcs[mem.Name], branchPlan{exists: existing[s.Name][mem.Name]})
 				if multi {
 					labelSteps(ss, s.Name)
 				}
@@ -176,6 +176,17 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	}
 	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(addSteps(last, false)); err != nil {
 		return plan, err
+	}
+
+	if err := recordCreated(ep.Sessions, adds, existing); err != nil {
+		return plan, err
+	}
+	for _, mem := range removals {
+		if now, ok := ep.Next.Member(mem.Name); !ok || now.Mode != manifest.ModeActive {
+			if err := forgetMember(ep.Sessions, mem.Name); err != nil {
+				return plan, err
+			}
+		}
 	}
 
 	p.M = ep.Next

@@ -15,7 +15,7 @@ func TestEnterDrillsIntoSessionsThenMembersAndEscReturns(t *testing.T) {
 
 	d := newDriver(t, env, "")
 	d.key("right")
-	d.has("Sessions · payments (1)", "work", "vmono/payments", "packages › payments")
+	d.has("Sessions · payments (1)", "work", "packages › payments")
 	d.key("m")
 	d.has("Members · payments/work (2)", "alpha", "beta", "active", "role", "packages › payments › work")
 	d.has("untr")
@@ -65,7 +65,7 @@ func TestDescribePackageAndMember(t *testing.T) {
 	d.has("Packages (1)")
 
 	d.key("right", "d")
-	d.has("Describe · payments/work", "Session", "Branch", "vmono/payments", "MEMBERS", "alpha")
+	d.has("Describe · payments/work", "Session", "Branch", "MEMBERS", "alpha")
 	d.key("esc")
 	d.has("Sessions · payments")
 

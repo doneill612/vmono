@@ -227,7 +227,7 @@ func (c *Core) recreateMember(s *Session, mem manifest.Member, src string) error
 		}
 		exists = gitx.BranchExists(src, branch)
 	}
-	return (&apply.Runner{Events: c.Events}).Run(c.addMemberSteps(s, mem, src, exists))
+	return (&apply.Runner{Events: c.Events}).Run(c.addMemberSteps(s, mem, src, branchPlan{exists: exists}))
 }
 
 // moveRef moves a clean reference member to its latest fetched ref, using

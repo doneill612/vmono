@@ -28,7 +28,7 @@ func sample() *manifest.Manifest {
 // testSession returns the session the render tests render a package into.
 func testSession(m *manifest.Manifest) *manifest.Session {
 	s := &manifest.Session{Package: m.Name, Name: "work", Created: time.Now()}
-	s.ApplyDefaults("vmono/")
+	s.ApplyDefaults()
 	return s
 }
 
@@ -36,7 +36,7 @@ func TestAgentsBlockContents(t *testing.T) {
 	got := AgentsBlock(sample(), testSession(sample()))
 	for _, want := range []string{
 		BeginMarker, EndMarker, "# Package: platform-auth · session work", "Move token refresh",
-		"## Context", "Ticket PLAT-412.", "| `api-gateway/` | active | `vmono/platform-auth/work` |",
+		"## Context", "Ticket PLAT-412.", "| `api-gateway/` | active | `work` |",
 		`Owns \| refresh endpoint.`, "| `_ref/contracts/` | reference | `origin/HEAD` |", "Never edit anything under `_ref/`",
 	} {
 		if !strings.Contains(got, want) {

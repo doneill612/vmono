@@ -50,7 +50,6 @@ type Config struct {
 	Repos          []string           `toml:"repos"`
 	PackageRoot    string             `toml:"package_root"`
 	ScanDepth      int                `toml:"scan_depth"`
-	BranchPrefix   string             `toml:"branch_prefix"`
 	FetchOnCreate  bool               `toml:"fetch_on_create"`
 	DefaultHarness string             `toml:"default_harness"`
 	AutoCommit     bool               `toml:"auto_commit"`
@@ -200,7 +199,6 @@ func Defaults() Config {
 	return Config{
 		PackageRoot:    "~/.vmono",
 		ScanDepth:      2,
-		BranchPrefix:   "vmono/",
 		FetchOnCreate:  true,
 		DefaultHarness: "claude",
 		AutoCommit:     true,
@@ -279,9 +277,6 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 	if present["scan_depth"] {
 		dst.ScanDepth = src.ScanDepth
 	}
-	if present["branch_prefix"] {
-		dst.BranchPrefix = src.BranchPrefix
-	}
 	if present["fetch_on_create"] {
 		dst.FetchOnCreate = src.FetchOnCreate
 	}
@@ -344,9 +339,6 @@ func applyEnv(c *Config) error {
 	}
 	if v := os.Getenv("VMONO_SOURCE_ROOTS"); v != "" {
 		c.SourceRoots = filepath.SplitList(v)
-	}
-	if v := os.Getenv("VMONO_BRANCH_PREFIX"); v != "" {
-		c.BranchPrefix = v
 	}
 	if v := os.Getenv("VMONO_DEFAULT_HARNESS"); v != "" {
 		c.DefaultHarness = v

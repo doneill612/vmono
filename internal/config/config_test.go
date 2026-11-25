@@ -15,7 +15,7 @@ func TestDefaultsWhenMissing(t *testing.T) {
 	if cfg.Loaded {
 		t.Error("Loaded should be false when no file exists")
 	}
-	if cfg.PackageRoot != "~/.vmono" || cfg.BranchPrefix != "vmono/" || !cfg.AutoCommit || !cfg.FetchOnCreate {
+	if cfg.PackageRoot != "~/.vmono" || !cfg.AutoCommit || !cfg.FetchOnCreate {
 		t.Errorf("unexpected defaults: %+v", cfg)
 	}
 	if _, ok := cfg.Harness["claude"]; !ok {

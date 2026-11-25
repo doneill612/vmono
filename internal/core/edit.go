@@ -160,7 +160,7 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 	}
 	existing := make(map[string]map[string]bool, len(sessions))
 	for _, s := range sessions {
-		ex, err := preflightMembers(next, s.BranchFor, srcs, []manifest.Member{added}, opts.ReuseBranch, nil)
+		ex, err := preflightMembers(next, s.BranchFor, srcs, []manifest.Member{added}, always(opts.ReuseBranch), nil)
 		if err != nil {
 			return added, sessionErr(s, len(sessions), err)
 		}
@@ -172,7 +172,7 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 		steps = c.fetchStep(src)
 	}
 	for _, s := range sessions {
-		ss := c.addMemberSteps(s, added, src, existing[s.Name][added.Name])
+		ss := c.addMemberSteps(s, added, src, branchPlan{exists: existing[s.Name][added.Name]})
 		if len(sessions) > 1 {
 			labelSteps(ss, s.Name)
 		}
@@ -181,11 +181,55 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(steps); err != nil {
 		return added, err
 	}
+	if err := recordCreated(sessions, []manifest.Member{added}, existing); err != nil {
+		return added, err
+	}
 	p.M = next
 	if err := c.save(p, "add "+added.Name); err != nil {
 		return added, err
 	}
 	return added, nil
+}
+
+// always answers the same for every member.
+func always(v bool) func(member string) bool { return func(string) bool { return v } }
+
+// recordCreated records in each session that vmono made the branches of the
+// active members added to it, other than those in existing, by session and
+// member.
+func recordCreated(sessions []*Session, added []manifest.Member, existing map[string]map[string]bool) error {
+	for _, s := range sessions {
+		changed := false
+		for _, mem := range added {
+			rec := s.S.Members[mem.Name]
+			if mem.Mode != manifest.ModeActive || existing[s.Name][mem.Name] || rec.Created {
+				continue
+			}
+			rec.Created, changed = true, true
+			s.S.SetMember(mem.Name, rec)
+		}
+		if changed {
+			if err := manifest.SaveSession(s.Dir, s.S); err != nil {
+				return fmt.Errorf("session %s: %w", s.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// forgetMember drops what each session records about a member that has left
+// the package.
+func forgetMember(sessions []*Session, member string) error {
+	for _, s := range sessions {
+		if _, ok := s.S.Members[member]; !ok {
+			continue
+		}
+		s.S.SetMember(member, manifest.SessionMember{})
+		if err := manifest.SaveSession(s.Dir, s.S); err != nil {
+			return fmt.Errorf("session %s: %w", s.Name, err)
+		}
+	}
+	return nil
 }
 
 // sessionErr names the session in an error from a per-session check when the
@@ -251,6 +295,9 @@ func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (Delete
 		}
 	}
 	p.M.Members = kept
+	if err := forgetMember(sessions, name); err != nil {
+		return res, err
+	}
 	return res, c.save(p, "rm "+name)
 }
 

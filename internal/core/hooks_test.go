@@ -102,7 +102,7 @@ func TestGlobalHooks(t *testing.T) {
 	if _, err := os.Stat(p.SessionDir("one")); !os.IsNotExist(err) {
 		t.Error("an aborted create must leave no session")
 	}
-	if gitx.BranchExists(a, "vmono/gl/one") {
+	if gitx.BranchExists(a, "one") {
 		t.Error("an aborted create must leave no branch")
 	}
 

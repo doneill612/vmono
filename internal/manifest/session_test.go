@@ -14,19 +14,28 @@ func sampleSession() *Session {
 		Name:    "token-refresh",
 		Created: time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC),
 	}
-	s.ApplyDefaults("vmono/")
+	s.ApplyDefaults()
 	return s
 }
 
-func TestSessionDefaultBranchIncludesPackage(t *testing.T) {
-	s := sampleSession()
-	if s.Branch != "vmono/platform-auth/token-refresh" {
+func TestSessionDefaultBranch(t *testing.T) {
+	if s := sampleSession(); s.Branch != "token-refresh" {
 		t.Errorf("branch = %q", s.Branch)
 	}
-	s = &Session{Package: "p", Name: "s", Branch: "feat/PLAT-412"}
-	s.ApplyDefaults("vmono/")
+	s := &Session{Package: "p", Name: "s", Branch: "feat/PLAT-412"}
+	s.ApplyDefaults()
 	if s.Branch != "feat/PLAT-412" {
 		t.Errorf("explicit branch overwritten: %q", s.Branch)
+	}
+	s = &Session{Schema: LandingSessionSchema, Package: "p", Name: "s"}
+	s.ApplyDefaults()
+	if s.Branch != "vmono/p/s" {
+		t.Errorf("a file from before keeps the default of its time: %q", s.Branch)
+	}
+	for prefix, want := range map[string]string{"": "s", "feat": "feat/s", "feat/": "feat/s", "/": "s", "me/feat": "me/feat/s"} {
+		if got := DefaultBranch(prefix, "s"); got != want {
+			t.Errorf("prefix %q: %q, want %q", prefix, got, want)
+		}
 	}
 }
 
@@ -139,7 +148,7 @@ func TestSessionFileWithoutNewFieldsStillLoads(t *testing.T) {
 }
 
 func TestSessionValidateInto(t *testing.T) {
-	for _, bad := range []string{"-x", "a b", "a..b", "/x", "x/", "x.lock", "a~1", "a:b", "vmono/platform-auth/token-refresh", ""} {
+	for _, bad := range []string{"-x", "a b", "a..b", "/x", "x/", "x.lock", "a~1", "a:b", "token-refresh", ""} {
 		s := sampleSession()
 		s.Into = map[string]string{"api": bad}
 		if err := s.Validate(); err == nil {

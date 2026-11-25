@@ -58,7 +58,7 @@ func TestSessionPromptValidatesAndOverridesBranch(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("right", "n")
-	d.has("new session", "vmono/pay/<session>")
+	d.has("new session", "<session>")
 	d.key("enter") // empty name
 	d.has("invalid name")
 	d.typeText("Bad Name")
@@ -74,8 +74,8 @@ func TestSessionPromptValidatesAndOverridesBranch(t *testing.T) {
 		d.key("backspace")
 	}
 	d.typeText("hotfix")
-	d.has("vmono/pay/hotfix") // the placeholder follows the name
-	d.key("tab")
+	d.has("branch:  hotfix") // the placeholder follows the name
+	d.key("tab", "tab")
 	d.typeText("fix/PLAT-7")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
@@ -95,7 +95,7 @@ func TestPromptEscCancelsWithoutCreating(t *testing.T) {
 	d.typeText("nope")
 	d.key("esc")
 	d.has("Sessions · pay (1)")
-	d.lacks("vmono/pay/<session>")
+	d.lacks("<session>")
 	if _, err := os.Stat(filepath.Join(env.PackageRoot, "pay", "nope")); err == nil {
 		t.Error("cancelling must not create anything")
 	}

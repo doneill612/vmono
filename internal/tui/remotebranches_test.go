@@ -7,7 +7,7 @@ import (
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
-func TestNewSessionStartsFromAPickedRemoteBranch(t *testing.T) {
+func TestNewSessionWorksOnAPickedRemoteBranch(t *testing.T) {
 	env := testutil.NewEnv(t)
 	useFakeHarness(t, env)
 	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
@@ -21,7 +21,7 @@ func TestNewSessionStartsFromAPickedRemoteBranch(t *testing.T) {
 	d.typeText("work")
 	d.key("ctrl+t")
 	d.eventually(func() bool { return containsView(d, "feat/x") }, "the fetched branch")
-	d.has("not in: beta", "none: start from each member's default")
+	d.has("not in: beta", "none: start a new branch")
 	d.typeText("feat")
 	d.key("enter")
 	d.has("new session", "feat/x  (alpha)")
@@ -32,7 +32,10 @@ func TestNewSessionStartsFromAPickedRemoteBranch(t *testing.T) {
 		t.Errorf("alpha starts at %s, want %s", got, tip)
 	}
 	if got := testutil.Git(t, filepath.Join(dir, "beta"), "rev-parse", "HEAD"); got != testutil.Git(t, b, "rev-parse", "main") {
-		t.Errorf("beta should start from its default, got %s", got)
+		t.Errorf("beta should start from its base, got %s", got)
+	}
+	if got := sessionBranches(t, env, "work", "alpha", "beta"); got[0] != "feat/x" || got[1] != "feat/x" {
+		t.Errorf("branches = %v", got)
 	}
 }
 
@@ -48,7 +51,7 @@ func TestRemotePickerWorksOffline(t *testing.T) {
 
 	d.key("right", "n")
 	d.typeText("work")
-	d.key("tab", "tab", "enter") // the start-from field opens the picker
+	d.key("tab", "tab", "tab", "enter") // the track field opens the picker
 	d.eventually(func() bool { return containsView(d, "couldn't fetch alpha") }, "the fetch notice")
 	d.has("feat/x")
 	d.typeText("feat")
@@ -58,16 +61,15 @@ func TestRemotePickerWorksOffline(t *testing.T) {
 	// Picking none restores the default.
 	d.key("ctrl+t")
 	d.key("enter")
-	d.has("each member's default")
+	d.has("none, start a new branch")
 	d.lacks("feat/x")
-	d.key("tab", "enter")
+	d.key("tab", "tab", "enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 }
 
-// TestEditedIntoFieldIsNotTracked covers a field changed after the pick: it
-// lands where it says, and is created at finish rather than looked up on the
-// remote.
-func TestEditedIntoFieldIsNotTracked(t *testing.T) {
+// TestMemberBranchWinsOverAPickedOne covers a member given a branch of its own
+// after the pick: it starts a new one rather than tracking what was picked.
+func TestMemberBranchWinsOverAPickedOne(t *testing.T) {
 	env := testutil.NewEnv(t)
 	useFakeHarness(t, env)
 	a := env.NewSource(t, "alpha")
@@ -80,16 +82,11 @@ func TestEditedIntoFieldIsNotTracked(t *testing.T) {
 	d.key("ctrl+t")
 	d.eventually(func() bool { return containsView(d, "feat/x") }, "the branch")
 	d.typeText("feat")
-	d.key("enter", "tab", "tab", "tab")
-	d.typeText("2")
+	d.key("enter", "tab", "tab", "tab", "tab", "tab")
+	d.typeText("mine")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
-	p, err := d.app.env.core.Load("pay")
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := d.app.env.core.LoadSession(p, "work")
-	if err != nil || s.S.Into["alpha"] != "feat/x2" {
-		t.Errorf("into = %+v, %v", s, err)
+	if got := sessionBranches(t, env, "work", "alpha"); got[0] != "mine" {
+		t.Errorf("branches = %v", got)
 	}
 }

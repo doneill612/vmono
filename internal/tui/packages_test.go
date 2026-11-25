@@ -13,7 +13,7 @@ import (
 )
 
 // seed creates a package named name with the given sources as active members,
-// and one session named "work" on its default branch, vmono/<name>/work.
+// and one session named "work" on its default branch, work.
 func seed(t *testing.T, env *testutil.Env, name string, sources ...string) {
 	t.Helper()
 	cfg, err := config.Load()

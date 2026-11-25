@@ -9,7 +9,7 @@ import (
 )
 
 // payBranch is the branch of the session seedWork makes.
-const payBranch = "vmono/pay/work"
+const payBranch = "work"
 
 // seedWork seeds package "pay" over the named sources, and commits one file in
 // every member of its session "work". Each source's remote is the bare repo

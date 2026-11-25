@@ -85,10 +85,10 @@ func TestCreateSessionOverStaleRecordsOfAHandDeletedSession(t *testing.T) {
 	if countPruned(evs) != 1 {
 		t.Errorf("want one pruned record: %+v", evs)
 	}
-	if br := gitx.CurrentBranch(again.MemberDir(p.M.Members[0])); br != "vmono/sess/gone" {
+	if br := gitx.CurrentBranch(again.MemberDir(p.M.Members[0])); br != "gone" {
 		t.Errorf("branch = %q", br)
 	}
-	if st, err := gitx.StatusOf(keep.MemberDir(p.M.Members[0])); err != nil || st.Branch != "vmono/sess/keep" {
+	if st, err := gitx.StatusOf(keep.MemberDir(p.M.Members[0])); err != nil || st.Branch != "keep" {
 		t.Errorf("the sibling session must be untouched: %+v, %v", st, err)
 	}
 }

@@ -165,9 +165,8 @@ func indexOf(h, n string) int {
 // at "done", rather than showing it until the reload lands.
 func TestDeletedPackageLeavesListBeforeReload(t *testing.T) {
 	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	seed(t, env, "doomed", a)
-	seed(t, env, "keeper", a)
+	seed(t, env, "doomed", env.NewSource(t, "alpha"))
+	seed(t, env, "keeper", env.NewSource(t, "beta"))
 	d := newDriver(t, env, "")
 	d.has("doomed", "keeper")
 

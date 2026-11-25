@@ -25,7 +25,7 @@ func TestPreviewBesideTheListFollowsTheHighlight(t *testing.T) {
 	d.has("gamma") // back on a row already loaded
 
 	d.key("right")
-	d.has("branch", "vmono/auth/work", "MEMBERS", "gamma")
+	d.has("branch", "work", "MEMBERS", "gamma")
 	d.key("m")
 	d.has("built on", "origin/HEAD", "no commits yet")
 }
