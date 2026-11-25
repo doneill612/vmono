@@ -6,6 +6,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +16,7 @@ import (
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/harness"
 	"github.com/doneill612/vmono/internal/launcher"
+	"github.com/doneill612/vmono/internal/pkginit"
 )
 
 // LaunchRequest asks the caller to start a harness at a session once the
@@ -24,6 +26,8 @@ type LaunchRequest struct {
 	Package string
 	Session string
 	Harness string
+	// Init initializes the package instead of opening a session of it.
+	Init bool
 }
 
 // screen is one TUI view. Update returns the screen to keep showing, which
@@ -194,7 +198,13 @@ func (a *App) indexOf(s screen) int {
 }
 
 // Init implements tea.Model.
-func (a *App) Init() tea.Cmd { return tea.Batch(a.top().Init(), a.pollAgents()) }
+func (a *App) Init() tea.Cmd {
+	cmds := []tea.Cmd{a.pollAgents()}
+	for _, s := range a.stack {
+		cmds = append(cmds, s.Init())
+	}
+	return tea.Batch(cmds...)
+}
 
 // Update implements tea.Model. After handling a message it lets the list on
 // screen start loading the preview of whatever row the message left
@@ -536,6 +546,9 @@ func (a *App) summary() string {
 // observe the handoff without replacing the test process.
 var runHarness = harness.Run
 
+// runInitHarness runs the harness that initializes a package and waits for it.
+var runInitHarness = harness.RunAndReturn
+
 // Launch returns the launch request chosen during the session, if any.
 func (a *App) Launch() *LaunchRequest { return a.env.launch }
 
@@ -558,7 +571,12 @@ var resolveLauncher = launcher.Resolve
 // outside tmux follows return_to_tui like a direct launch, reopening the TUI
 // once the client detaches. A tmux failure reopens the TUI with tmux's
 // message instead of leaving the user at a bare shell.
+//
+// A request to initialize a package goes to initialize instead.
 func handoff(c *core.Core, req *LaunchRequest) (message string, again bool, err error) {
+	if req.Init {
+		return initialize(c, req)
+	}
 	target := req.Package
 	if req.Session != "" {
 		target += "/" + req.Session
@@ -596,11 +614,61 @@ func handoff(c *core.Core, req *LaunchRequest) (message string, again bool, err 
 	return "", true, nil
 }
 
+// initialize is handoff for a request to initialize a package. In this
+// terminal vmono stays to clean up after the harness, so the TUI always
+// reopens afterward, with what was recorded. In a multiplexer it quits, as it
+// does for a session, so that a popup closes.
+func initialize(c *core.Core, req *LaunchRequest) (message string, again bool, err error) {
+	p, err := c.Load(req.Package)
+	if err != nil {
+		return err.Error(), true, nil
+	}
+	ln, err := resolveLauncher(c.Cfg)
+	if err != nil {
+		return err.Error(), true, nil
+	}
+	res, err := pkginit.Run(c, p, pkginit.Options{
+		Harness: req.Harness, Launcher: ln, Replace: !c.Cfg.ReturnToTUI, RunDirect: runInitHarness, Err: os.Stderr,
+		Events: func(fn func() error) error {
+			fmt.Fprintln(os.Stderr, "vmono: preparing "+p.Name+" …")
+			return fn()
+		},
+	})
+	var exit *harness.ExitError
+	switch {
+	case errors.Is(err, harness.ErrStopped):
+		return "", false, err
+	case err != nil && !errors.As(err, &exit):
+		if res.Summary != "" {
+			return err.Error() + "; " + res.Summary, true, nil
+		}
+		return err.Error(), true, nil
+	case res.Direct:
+		if now, err := c.Load(p.Name); err == nil && len(now.M.Pending()) == 0 {
+			res.Summary += "; no commands to review"
+		}
+		return res.Summary, true, nil
+	}
+	return "", res.Launched == launcher.HandedOff && c.Cfg.ReturnToTUI, nil
+}
+
+// openReview shows the review of a package over the packages view, when there
+// is anything to review.
+func (a *App) openReview(pkg string) {
+	if pkg == "" {
+		return
+	}
+	if p, err := a.env.core.Load(pkg); err == nil && len(p.M.Pending()) > 0 {
+		a.stack = append(a.stack, newReview(a.env, pkg))
+	}
+}
+
 // Run opens the TUI and, when the user picks a harness, hands the terminal
 // over to it (see handoff). It loops while return_to_tui is on, reopening
-// the packages view after each harness exits.
+// the packages view after each harness exits, with the review of what an
+// initialization suggested on top of it.
 func Run() error {
-	message := ""
+	message, review := "", ""
 	for {
 		cfg, err := config.Load()
 		if err != nil {
@@ -612,6 +680,7 @@ func Run() error {
 		}
 		c.FindTerminal = launcher.FindSession
 		app := NewApp(c, message)
+		app.openReview(review)
 		if launcher.HasLive(cfg) {
 			app.watchAgents(launcher.TakeLive)
 		}
@@ -627,6 +696,9 @@ func Run() error {
 		if !again {
 			return err
 		}
-		message = msg
+		message, review = msg, ""
+		if req.Init {
+			review = req.Package
+		}
 	}
 }

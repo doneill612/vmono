@@ -19,7 +19,7 @@ type Plan struct {
 	// Update are members whose worktree is unaffected but whose metadata
 	// (role, copy, hooks, setup, teardown) changed.
 	Update []Member
-	// MetaChanged is true when purpose, context or harness changed.
+	// MetaChanged is true when purpose, context, overview or harness changed.
 	MetaChanged bool
 }
 
@@ -86,6 +86,7 @@ func Diff(oldM, newM *Manifest) Plan {
 	}
 	p.MetaChanged = strings.TrimRight(oldM.Purpose, " \t\r\n") != strings.TrimRight(newM.Purpose, " \t\r\n") ||
 		strings.TrimRight(oldM.Context, " \t\r\n") != strings.TrimRight(newM.Context, " \t\r\n") ||
+		oldM.Overview() != newM.Overview() ||
 		oldM.Harness != newM.Harness
 	return p
 }

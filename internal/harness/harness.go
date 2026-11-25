@@ -7,6 +7,7 @@ package harness
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"strings"
@@ -41,6 +42,10 @@ type Launch struct {
 	// process a fresh environment of their own, such as tmux, which starts
 	// it from its server's environment and only adds what it is told.
 	Overrides map[string]string
+	// Self, when set, is the vmono command line, without the program, that
+	// starts the same thing again in the current terminal. A launcher that
+	// types a command, or suggests one, uses it instead of `open`.
+	Self []string
 }
 
 // ExitError carries a child harness's exit status so vmono can exit with
@@ -81,9 +86,9 @@ func Prepare(c *core.Core, s *core.Session, harnessFlag string, extraArgs []stri
 	if err != nil {
 		return nil, err
 	}
-	path, err := exec.LookPath(h.Command)
+	path, err := lookup(name, h)
 	if err != nil {
-		return nil, fmt.Errorf("harness %q: command %q not found on PATH", name, h.Command)
+		return nil, err
 	}
 	if _, err := c.Render(s); err != nil {
 		return nil, fmt.Errorf("refresh generated files: %w", err)
@@ -98,18 +103,53 @@ func Prepare(c *core.Core, s *core.Session, harnessFlag string, extraArgs []stri
 		Dir:       s.Dir,
 		Path:      path,
 		Args:      args,
-		Env:       buildEnv(os.Environ(), s, name, h),
+		Env:       buildEnv(os.Environ(), envOverrides(core.SessionEnv(s), name, h)),
 		Package:   s.Pkg.Name,
 		Session:   s.Name,
-		Overrides: envOverrides(s, name, h),
+		Overrides: envOverrides(core.SessionEnv(s), name, h),
 	}, nil
 }
 
-// envOverrides returns the variables vmono sets for a harness: the session's
-// identity, the author stamped on notes it writes, then the harness's own
+// PrepareInit builds the invocation that explores an init workspace: the
+// harness at the workspace, its init arguments with prompt filled in, and an
+// environment that names the package but no session, even when vmono itself
+// runs in one. Nothing is recorded in the index, since no session is opened.
+// prompted is false when the harness has no init arguments to carry the
+// prompt, so the user has to paste it.
+func PrepareInit(w *core.InitWorkspace, name string, h config.Harness, prompt string) (l *Launch, prompted bool, err error) {
+	path, err := lookup(name, h)
+	if err != nil {
+		return nil, false, err
+	}
+	args := append([]string(nil), h.Args...)
+	for _, a := range h.InitArgs {
+		prompted = prompted || strings.Contains(a, config.PromptArg)
+		args = append(args, strings.ReplaceAll(a, config.PromptArg, prompt))
+	}
+	overrides := envOverrides(map[string]string{
+		"VMONO_PACKAGE": w.Pkg.Name, "VMONO_ROOT": w.Dir, "VMONO_SESSION": "", "VMONO_BRANCH": "",
+	}, name, h)
+	return &Launch{
+		Name: name, Harness: h, Dir: w.Dir, Path: path, Args: args,
+		Env:     buildEnv(os.Environ(), overrides),
+		Package: w.Pkg.Name, Session: core.InitName, Overrides: overrides,
+	}, prompted, nil
+}
+
+// lookup finds a harness's executable.
+func lookup(name string, h config.Harness) (string, error) {
+	path, err := exec.LookPath(h.Command)
+	if err != nil {
+		return "", fmt.Errorf("harness %q: command %q not found on PATH", name, h.Command)
+	}
+	return path, nil
+}
+
+// envOverrides returns the variables vmono sets for a harness: identity, which
+// says what it is working in, the author stamped on notes it writes, then the harness's own
 // env from config, which wins over vmono's on a clash.
-func envOverrides(s *core.Session, name string, h config.Harness) map[string]string {
-	overrides := core.SessionEnv(s)
+func envOverrides(identity map[string]string, name string, h config.Harness) map[string]string {
+	overrides := maps.Clone(identity)
 	overrides["VMONO_AUTHOR"] = "agent:" + name
 	for k, v := range h.Env {
 		overrides[k] = v
@@ -117,10 +157,9 @@ func envOverrides(s *core.Session, name string, h config.Harness) map[string]str
 	return overrides
 }
 
-// buildEnv layers vmono's variables and the harness's own env over base.
+// buildEnv layers overrides over base.
 // Later entries win, and duplicates of overridden keys are dropped.
-func buildEnv(base []string, s *core.Session, name string, h config.Harness) []string {
-	overrides := envOverrides(s, name, h)
+func buildEnv(base []string, overrides map[string]string) []string {
 	out := make([]string, 0, len(base)+len(overrides))
 	for _, kv := range base {
 		key, _, _ := strings.Cut(kv, "=")
@@ -149,11 +188,20 @@ func Run(l *Launch, replace bool) error {
 
 // runChild runs the harness as a child process with inherited stdio.
 func runChild(l *Launch) error {
+	return exitError(command(l).Run())
+}
+
+// command builds the child process for a launch, with inherited stdio.
+func command(l *Launch) *exec.Cmd {
 	cmd := exec.Command(l.Path, l.Args...)
 	cmd.Dir = l.Dir
 	cmd.Env = l.Env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	err := cmd.Run()
+	return cmd
+}
+
+// exitError turns a child's non-zero exit into an *ExitError.
+func exitError(err error) error {
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		return &ExitError{Code: ee.ExitCode()}

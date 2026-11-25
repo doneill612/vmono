@@ -218,3 +218,20 @@ func TestResolveHerdr(t *testing.T) {
 		t.Errorf("missing herdr = %s", got)
 	}
 }
+
+func TestHerdrTypesASelfLaunch(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeHerdr{}
+	f.install(t)
+	t.Setenv("VMONO_CONFIG_DIR", "/cfg")
+	l, err := SelfLaunch("claude", dir, "pay", ".init", []string{"package", "init", "pay"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Herdr{}).Launch(l, Opts{}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "pane run w9:p1 env VMONO_LAUNCHER=direct VMONO_CONFIG_DIR=/cfg /bin/vmono package init pay"; !slices.Contains(f.calls, want) {
+		t.Errorf("calls =\n%s", strings.Join(f.calls, "\n"))
+	}
+}

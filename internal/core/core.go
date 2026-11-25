@@ -529,6 +529,11 @@ func (c *Core) adapters() []string {
 // Render regenerates every generated file in a session, returning the
 // relative paths that changed. It never touches git.
 func (c *Core) Render(s *Session) ([]string, error) {
+	return render.Render(s.Dir, s.Pkg.M, s.S, c.renderOptions())
+}
+
+// renderOptions returns what rendering needs from the config.
+func (c *Core) renderOptions() render.Options {
 	opts := render.Options{Adapters: c.adapters()}
 	for _, name := range c.Cfg.HarnessNames() {
 		if h := c.Cfg.Harness[name]; h.Adapter == render.AdapterOpenCode {
@@ -536,7 +541,7 @@ func (c *Core) Render(s *Session) ([]string, error) {
 			break
 		}
 	}
-	return render.Render(s.Dir, s.Pkg.M, s.S, opts)
+	return opts
 }
 
 // RenderAll regenerates the generated files of every session of a package

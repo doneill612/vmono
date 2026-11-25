@@ -2,6 +2,8 @@ package manifest
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,6 +21,7 @@ func Encode(m *Manifest) []byte {
 	}
 	writeText(&b, "purpose", m.Purpose)
 	writeText(&b, "context", m.Context)
+	writeInit(&b, m.Init)
 	for _, mem := range m.Members {
 		b.WriteString("\n[[member]]\n")
 		fmt.Fprintf(&b, "name   = %s\n", quote(mem.Name))
@@ -38,11 +41,7 @@ func Encode(m *Manifest) []byte {
 			fmt.Fprintf(&b, "role   = %s\n", quote(mem.Role))
 		}
 		if len(mem.Copy) > 0 {
-			parts := make([]string, len(mem.Copy))
-			for i, c := range mem.Copy {
-				parts[i] = quote(c)
-			}
-			fmt.Fprintf(&b, "copy   = [%s]\n", strings.Join(parts, ", "))
+			fmt.Fprintf(&b, "copy   = %s\n", quoteList(mem.Copy))
 		}
 		if mem.Hooks {
 			b.WriteString("hooks  = true\n")
@@ -75,7 +74,51 @@ func writeCommands(b *strings.Builder, key string, cmds Commands) {
 	fmt.Fprintf(b, "%-6s = %s\n", key, val)
 }
 
-// writeText emits a top-level string key, using a multi-line literal block
+// writeInit emits the [init] table. It is a table, so it follows every
+// top-level key. Roles are written in name order to keep the file stable.
+func writeInit(b *strings.Builder, i *Init) {
+	if i == nil {
+		return
+	}
+	b.WriteString("\n[init]\n")
+	fmt.Fprintf(b, "at      = %s\n", i.At.Format(time.RFC3339))
+	fmt.Fprintf(b, "by      = %s\n", quote(i.By))
+	fmt.Fprintf(b, "members = %s\n", quoteList(i.Members))
+	writeText(b, "overview", i.Overview)
+	writeText(b, "purpose", i.Purpose)
+	if len(i.Roles) > 0 {
+		b.WriteString("\n[init.roles]\n")
+		for _, name := range slices.Sorted(maps.Keys(i.Roles)) {
+			fmt.Fprintf(b, "%s = %s\n", name, quote(i.Roles[name]))
+		}
+	}
+	writeSuggestions(b, "suggestion", i.Suggestions)
+	writeSuggestions(b, "settled", i.Settled)
+}
+
+// writeSuggestions emits suggestions as an array of tables of [init].
+func writeSuggestions(b *strings.Builder, key string, list []Suggestion) {
+	for _, s := range list {
+		fmt.Fprintf(b, "\n[[init.%s]]\n", key)
+		fmt.Fprintf(b, "member  = %s\n", quote(s.Member))
+		fmt.Fprintf(b, "kind    = %s\n", quote(s.Kind))
+		fmt.Fprintf(b, "command = %s\n", quote(s.Command))
+		if s.Reason != "" {
+			fmt.Fprintf(b, "reason  = %s\n", quote(s.Reason))
+		}
+	}
+}
+
+// quoteList renders a TOML array of strings.
+func quoteList(list []string) string {
+	parts := make([]string, len(list))
+	for i, s := range list {
+		parts[i] = quote(s)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// writeText emits a string key, using a multi-line literal block
 // when the value has newlines.
 func writeText(b *strings.Builder, key, val string) {
 	if val == "" {

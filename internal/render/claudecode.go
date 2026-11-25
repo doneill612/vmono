@@ -63,20 +63,7 @@ func renderClaudeCode(w *writer, m *manifest.Manifest) error {
 		if !ok {
 			continue
 		}
-		for _, group := range []struct {
-			effect Effect
-			list   []string
-		}{
-			{EffectAllow, cfg.Permissions.Allow},
-			{EffectAsk, cfg.Permissions.Ask},
-			{EffectDeny, cfg.Permissions.Deny},
-		} {
-			for _, rule := range group.list {
-				if rewritten, keep := RewriteRule(mem.Path, rule, group.effect); keep {
-					rules.add(rewritten, group.effect)
-				}
-			}
-		}
+		addClaudeRules(rules, mem.Path, cfg, EffectAllow, EffectAsk, EffectDeny)
 		if mem.Hooks {
 			mergeClaudeHooks(hooks, cfg.Hooks, mem.Path)
 		}
@@ -103,6 +90,21 @@ func renderClaudeCode(w *writer, m *manifest.Manifest) error {
 		return err
 	}
 	return syncMemberSkills(w, m, skillRoot{dest: ".claude/skills", sources: []string{".claude/skills"}})
+}
+
+// addClaudeRules adds a member's permission rules that have one of the given
+// effects, re-anchored under the member's folder.
+func addClaudeRules(rules *ruleSet, memberPath string, cfg claudeFile, effects ...Effect) {
+	lists := map[Effect][]string{
+		EffectAllow: cfg.Permissions.Allow, EffectAsk: cfg.Permissions.Ask, EffectDeny: cfg.Permissions.Deny,
+	}
+	for _, effect := range effects {
+		for _, rule := range lists[effect] {
+			if rewritten, keep := RewriteRule(memberPath, rule, effect); keep {
+				rules.add(rewritten, effect)
+			}
+		}
+	}
 }
 
 // readClaudeMember reads a member's .claude/settings.json.

@@ -25,6 +25,8 @@ type operation struct {
 	// instead of offering a launch or waiting on the done table. Creating a
 	// package uses it so the user decides whether to start a session.
 	home bool
+	// hint, when set, is asked after success for what to suggest next.
+	hint func() string
 	// force and reuse are passed to run; reuse is also set when the user
 	// answers the branch-exists prompt.
 	force, reuse bool
@@ -52,6 +54,17 @@ type operation struct {
 	// the packages screen drops it at once instead of showing it until the
 	// reload that follows returns.
 	removed string
+}
+
+// doneText is the notice shown on the packages screen after success.
+func (o operation) doneText() string {
+	text := o.title + " done"
+	if o.hint != nil {
+		if h := o.hint(); h != "" {
+			text += "; " + h
+		}
+	}
+	return text
 }
 
 // progressState is where the progress screen is in its life.
@@ -227,7 +240,7 @@ func (m *progressModel) finish(err error) (screen, tea.Cmd) {
 			return m, func() tea.Msg { return packageRemovedMsg{name} }
 		}
 		if m.op.home {
-			return m, goHome(m.op.title + " done")
+			return m, goHome(m.op.doneText())
 		}
 		if m.op.pkg != "" {
 			return m, goTo(m, newLaunchPicker(m.e, m.op.pkg, m.op.session, "Launch now?"))
@@ -271,7 +284,7 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			if m.op.done != nil {
 				return m, goTo(m, m.op.done())
 			}
-			return m, goHome(m.op.title + " done")
+			return m, goHome(m.op.doneText())
 		}
 	}
 	return m, nil

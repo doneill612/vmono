@@ -35,7 +35,14 @@ type Harness struct {
 	Adapter string `toml:"adapter,omitempty"`
 	// Env is extra environment set when launching the harness.
 	Env map[string]string `toml:"env,omitempty"`
+	// InitArgs are passed after Args when the harness is started to initialize
+	// a package. PromptArg in one stands for the first prompt. Empty means the
+	// harness starts with no prompt and the user pastes it.
+	InitArgs []string `toml:"init_args,omitempty"`
 }
+
+// PromptArg is replaced by the first prompt in a harness's InitArgs.
+const PromptArg = "{prompt}"
 
 // Config is the global configuration read from config.toml.
 type Config struct {
@@ -167,10 +174,17 @@ func Launchers() []string { return []string{LauncherDirect, LauncherAuto, Launch
 // config file defines none.
 func DefaultHarnesses() map[string]Harness {
 	return map[string]Harness{
-		"claude":   {Command: "claude", Adapter: "claude-code"},
-		"opencode": {Command: "opencode", Adapter: "opencode"},
-		"codex":    {Command: "codex", Adapter: "agent-skills"},
-		"pi":       {Command: "pi", Adapter: "agent-skills"},
+		// The mode is explicit because in plan mode, which a user may have as
+		// the default, Claude Code would not record anything.
+		"claude": {Command: "claude", Adapter: "claude-code",
+			InitArgs: []string{"--permission-mode", "default", PromptArg}},
+		"opencode": {Command: "opencode", Adapter: "opencode",
+			InitArgs: []string{"--prompt", PromptArg}},
+		"codex": {Command: "codex", Adapter: "agent-skills",
+			InitArgs: []string{"--sandbox", "read-only", "--ask-for-approval", "on-request", PromptArg}},
+		// Pi has no permission rules, and needs bash to record.
+		"pi": {Command: "pi", Adapter: "agent-skills",
+			InitArgs: []string{"--tools", "read,grep,find,ls,bash", PromptArg}},
 	}
 }
 
@@ -215,7 +229,7 @@ func LoadFrom(file string) (Config, error) {
 		}
 		meta := decodeKeys(data)
 		overlay(&cfg, onDisk, meta)
-		backfillAdapters(&cfg)
+		backfillHarnesses(&cfg)
 		cfg.Loaded = true
 	case errors.Is(err, os.ErrNotExist):
 	default:
@@ -290,19 +304,25 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 	}
 }
 
-// backfillAdapters gives a built-in harness its default adapter when the
-// config file lists it without one. A saved config carries the whole harness
-// table, so it would otherwise keep a harness that had no adapter when the
-// file was written from ever getting one added to the defaults. Only an
+// backfillHarnesses gives a built-in harness its default adapter and init
+// arguments when the config file lists it without them. A saved config carries the whole harness
+// table, so it would otherwise keep a harness written before one of these
+// existed from ever getting it. Only an
 // entry that still runs the built-in command is touched, so a harness the
 // user repointed at something else is left alone.
-func backfillAdapters(c *Config) {
+func backfillHarnesses(c *Config) {
 	for name, def := range DefaultHarnesses() {
 		h, ok := c.Harness[name]
-		if ok && h.Adapter == "" && h.Command == def.Command {
-			h.Adapter = def.Adapter
-			c.Harness[name] = h
+		if !ok || h.Command != def.Command {
+			continue
 		}
+		if h.Adapter == "" {
+			h.Adapter = def.Adapter
+		}
+		if len(h.InitArgs) == 0 {
+			h.InitArgs = def.InitArgs
+		}
+		c.Harness[name] = h
 	}
 }
 

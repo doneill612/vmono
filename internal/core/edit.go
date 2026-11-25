@@ -52,12 +52,15 @@ func clone(m *manifest.Manifest) *manifest.Manifest {
 type DescribeOptions struct {
 	Purpose *string
 	Context *string
+	// Overview is the text package init recorded; clearing it makes the
+	// package uninitialized again.
+	Overview *string
 }
 
-// Describe replaces the purpose and/or context.
+// Describe replaces the purpose, context and/or overview.
 func (c *Core) Describe(p *Package, opts DescribeOptions) error {
-	if opts.Purpose == nil && opts.Context == nil {
-		return errors.New("nothing to change: give a purpose or a context")
+	if opts.Purpose == nil && opts.Context == nil && opts.Overview == nil {
+		return errors.New("nothing to change: give a purpose, a context or an overview")
 	}
 	var what []string
 	if opts.Purpose != nil {
@@ -67,6 +70,17 @@ func (c *Core) Describe(p *Package, opts DescribeOptions) error {
 	if opts.Context != nil {
 		p.M.Context = *opts.Context
 		what = append(what, "context")
+	}
+	if opts.Overview != nil {
+		switch text := strings.TrimSpace(*opts.Overview); {
+		case text == "":
+			p.M.Init = nil
+		case p.M.Init == nil:
+			p.M.Init = &manifest.Init{At: time.Now().Truncate(time.Second), By: c.Author, Members: memberNames(p.M), Overview: text}
+		default:
+			p.M.Init.Overview = text
+		}
+		what = append(what, "overview")
 	}
 	return c.save(p, "describe "+strings.Join(what, "+"))
 }
@@ -284,12 +298,27 @@ type ShowResult struct {
 	Harness  string        `json:"harness,omitempty"`
 	Purpose  string        `json:"purpose"`
 	Context  string        `json:"context"`
+	Init     *ShowInit     `json:"init,omitempty"`
 	Notes    []ShowNote    `json:"notes"`
 	Sessions []ShowSession `json:"sessions"`
 	Members  []ShowMember  `json:"members"`
 }
 
-// Show reports the package's purpose, context, notes (newest first), its
+// ShowInit is what package init recorded, and how the members have changed
+// since.
+type ShowInit struct {
+	At       string `json:"at"`
+	By       string `json:"by"`
+	Overview string `json:"overview"`
+	// Added are members the overview does not cover, and Removed ones it
+	// covers that the package no longer has.
+	Added   []string `json:"added"`
+	Removed []string `json:"removed"`
+	// Suggestions are commands that await review.
+	Suggestions []manifest.Suggestion `json:"suggestions"`
+}
+
+// Show reports the package's purpose, context, overview, notes (newest first), its
 // sessions, and its members with mode and role. When s is not nil it is the
 // caller's own session, and each member also carries live git status from
 // that session's worktree and the result names the session and its branch.
@@ -298,6 +327,12 @@ func (c *Core) Show(p *Package, s *Session) ShowResult {
 		Name: p.Name, Path: p.Dir, Harness: p.M.Harness,
 		Purpose: strings.TrimSpace(p.M.Purpose), Context: strings.TrimSpace(p.M.Context),
 		Notes: []ShowNote{}, Sessions: []ShowSession{}, Members: []ShowMember{},
+	}
+	if in := p.M.Init; in != nil {
+		added, removed := p.M.InitDrift()
+		out.Init = &ShowInit{At: in.At.Format(time.RFC3339), By: in.By, Overview: p.M.Overview(),
+			Added: append([]string{}, added...), Removed: append([]string{}, removed...),
+			Suggestions: append([]manifest.Suggestion{}, p.M.Pending()...)}
 	}
 	if s != nil {
 		out.Path, out.Session, out.Branch = s.Dir, s.Name, s.S.Branch

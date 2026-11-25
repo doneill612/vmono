@@ -63,6 +63,10 @@ func newShowCmd() *cobra.Command {
 			fprintf(out, "%s\n%s\n\n", title, s.Path)
 			section(out, "Purpose", s.Purpose)
 			section(out, "Context", s.Context)
+			if s.Init != nil {
+				section(out, "Overview", s.Init.Overview)
+			}
+			hintInit(out, p)
 			if len(s.Sessions) > 0 {
 				fprintf(out, "Sessions\n")
 				for _, ss := range s.Sessions {
@@ -106,16 +110,28 @@ func section(w io.Writer, title, text string) {
 	fprintf(w, "%s\n  %s\n\n", title, strings.ReplaceAll(text, "\n", "\n  "))
 }
 
+// hintInit says when the recorded overview no longer covers the package's
+// members, and when commands it suggested await review. It says nothing for a
+// package that was never initialized.
+func hintInit(w io.Writer, p *core.Package) {
+	if drift := p.M.DriftText(); drift != "" {
+		fprintf(w, "overview out of date (%s); run `vmono package init %s` to update it\n", drift, p.Name)
+	}
+	if n := len(p.M.Pending()); n > 0 {
+		fprintf(w, "%s to review: `vmono package suggestions %s --review`\n", countCommands(n), p.Name)
+	}
+}
+
 // newDescribeCmd builds `vmono describe`.
 func newDescribeCmd() *cobra.Command {
-	var purpose, purposeFile, ctx, ctxFile string
+	var purpose, purposeFile, ctx, ctxFile, overview, overviewFile string
 	cmd := &cobra.Command{
-		Use:   "describe [pkg] (--purpose TEXT | --purpose-file F) (--context TEXT | --context-file F)",
-		Short: "Replace the package purpose and/or context",
+		Use:   "describe [pkg] (--purpose TEXT | --purpose-file F) (--context TEXT | --context-file F) (--overview TEXT | --overview-file F)",
+		Short: "Replace the package purpose, context and/or overview",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f := cmd.Flags()
-			if f.Changed("purpose") && f.Changed("purpose-file") || f.Changed("context") && f.Changed("context-file") {
+			if f.Changed("purpose") && f.Changed("purpose-file") || f.Changed("context") && f.Changed("context-file") || f.Changed("overview") && f.Changed("overview-file") {
 				return errors.New("give either the text flag or its -file flag, not both")
 			}
 			var opts core.DescribeOptions
@@ -139,6 +155,16 @@ func newDescribeCmd() *cobra.Command {
 				}
 				opts.Context = &text
 			}
+			switch {
+			case f.Changed("overview"):
+				opts.Overview = &overview
+			case f.Changed("overview-file"):
+				text, err := readTextFlag(cmd, overviewFile)
+				if err != nil {
+					return err
+				}
+				opts.Overview = &text
+			}
 			c, p, err := resolve(packageArg(args))
 			if err != nil {
 				return err
@@ -151,6 +177,8 @@ func newDescribeCmd() *cobra.Command {
 	f.StringVar(&purposeFile, "purpose-file", "", "replace the purpose from a file (- for stdin)")
 	f.StringVar(&ctx, "context", "", "replace the context")
 	f.StringVar(&ctxFile, "context-file", "", "replace the context from a file (- for stdin)")
+	f.StringVar(&overview, "overview", "", "replace the overview package init recorded")
+	f.StringVar(&overviewFile, "overview-file", "", "replace the overview from a file (- for stdin)")
 	return cmd
 }
 
@@ -227,6 +255,7 @@ func newAddCmd() *cobra.Command {
 			}
 			names, _ := p.Sessions()
 			fprintf(cmd.OutOrStdout(), "added %s (%s) to %d session(s)\n", r.Name, added, len(names))
+			hintInit(cmd.OutOrStdout(), p)
 			return nil
 		},
 	}
@@ -263,6 +292,7 @@ func newRmCmd() *cobra.Command {
 				return err
 			}
 			fprintf(cmd.OutOrStdout(), "removed %s\n", rest[0])
+			hintInit(cmd.OutOrStdout(), p)
 			for _, b := range res.BranchesKept {
 				fprintf(cmd.OutOrStdout(), "kept branch %s\n", b)
 			}

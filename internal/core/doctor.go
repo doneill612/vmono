@@ -26,6 +26,7 @@ const (
 	KindForeignDir      = "foreign-dir"
 	KindStaleWorktree   = "stale-worktree"
 	KindOrphanWorktree  = "orphan-worktree"
+	KindStaleInit       = "stale-init"
 	KindIndexRebuilt    = "index"
 )
 
@@ -70,7 +71,8 @@ func (r DoctorResult) Remaining() int {
 // always rebuilds the index cache from the package root. With fix it
 // repairs what is safe to repair: migrating a package from before sessions
 // into a package with one session, recreating missing worktrees, relocating a
-// moved source by matching its remote, and pruning stale entries.
+// moved source by matching its remote, pruning stale entries, and removing an
+// init workspace that a dead run left unchanged.
 // Directories and worktrees it cannot attribute are only reported, never
 // deleted.
 func (c *Core) Doctor(fix bool) (DoctorResult, error) {
@@ -222,6 +224,7 @@ func (c *Core) checkPackage(p *Package, known []knownRepo, fix bool, sources, cl
 	}
 
 	c.checkSessionDirs(p, add)
+	c.claimInit(p, fix, claimed, add)
 	names, _ := p.Sessions()
 	for _, name := range names {
 		s, err := c.LoadSession(p, name)

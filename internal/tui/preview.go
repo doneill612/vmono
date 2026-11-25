@@ -227,6 +227,18 @@ func sessionStateLabel(s core.SessionSummary) string {
 	return styleOK.Render("clean")
 }
 
+// initState says whether a package has an overview and whether it still covers
+// the members.
+func initState(m *manifest.Manifest) string {
+	if m.Init == nil {
+		return "none; i initializes"
+	}
+	if drift := m.DriftText(); drift != "" {
+		return "out of date: " + drift
+	}
+	return "recorded " + ago(m.Init.At)
+}
+
 // buildPackagePreview renders a package for the preview pane: its purpose,
 // harness, sessions and members.
 func buildPackagePreview(p *core.Package, sessions []core.SessionSummary) func(w int) string {
@@ -249,6 +261,10 @@ func buildPackagePreview(p *core.Package, sessions []core.SessionSummary) func(w
 		}
 		b.WriteString(previewField("harness", h, w))
 		b.WriteString(previewField("path", paths.Contract(p.Dir), w))
+		b.WriteString(previewField("overview", initState(p.M), w))
+		if n := len(p.M.Pending()); n > 0 {
+			b.WriteString(previewField("suggested", fmt.Sprintf("%d to review; v", n), w))
+		}
 		b.WriteString(previewSection("SESSIONS"))
 		if len(sessions) == 0 {
 			b.WriteString(" " + styleDim.Render("none yet") + "\n")

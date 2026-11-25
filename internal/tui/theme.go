@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Palette uses adaptive colors so the TUI reads on light and dark terminals.
@@ -89,6 +90,10 @@ func truncate(s string, n int) string {
 	}
 	return string(r) + "…"
 }
+
+// hardWrap breaks s into lines of at most width cells, inside words too, so
+// that all of it shows.
+func hardWrap(s string, width int) string { return ansi.Hardwrap(s, width, true) }
 
 // wrap hard-wraps text to width, preserving existing line breaks.
 func wrap(s string, width int) string {

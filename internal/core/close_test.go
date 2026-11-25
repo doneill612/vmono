@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/doneill612/vmono/internal/index"
@@ -53,7 +54,7 @@ func TestRemovingASessionClosesItsTerminalLast(t *testing.T) {
 	if _, err := c.Delete(p, DeleteOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
-	if len(closed) != 2 || closed[0] != "two" || closed[1] != "work" {
+	if strings.Join(closed, " ") != "two work "+InitName {
 		t.Errorf("closed = %v", closed)
 	}
 }

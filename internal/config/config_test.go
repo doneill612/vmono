@@ -219,3 +219,24 @@ func TestHooksRoundTripAndValidate(t *testing.T) {
 		t.Errorf("no hooks should write no table:\n%s", data)
 	}
 }
+
+func TestSavedHarnessesGetInitArgs(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.toml")
+	text := "[harness.claude]\ncommand = \"claude\"\nadapter = \"claude-code\"\n[harness.codex]\ncommand = \"my-codex\"\n[harness.pi]\ncommand = \"pi\"\ninit_args = [\"mine\"]\n"
+	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Harness["claude"].InitArgs; len(got) == 0 || got[len(got)-1] != PromptArg {
+		t.Errorf("claude = %v", got)
+	}
+	if got := cfg.Harness["codex"].InitArgs; got != nil {
+		t.Errorf("a repointed harness is left alone: %v", got)
+	}
+	if got := cfg.Harness["pi"].InitArgs; len(got) != 1 || got[0] != "mine" {
+		t.Errorf("the user's own args win: %v", got)
+	}
+}

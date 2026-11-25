@@ -208,8 +208,12 @@ func createTmuxSession(l *harness.Launch, tag string) (string, error) {
 	}
 	id := strings.TrimSpace(out)
 	if _, err := tmuxRun("set-option", "-t", id, TagOption, tag); err != nil {
+		again := "open " + tag
+		if l.Self != nil {
+			again = shellLine(l.Self)
+		}
 		return "", fmt.Errorf("tmux session for %s ended as soon as it started, so the harness probably exited at once; "+
-			"run `VMONO_LAUNCHER=direct vmono open %s` to see why (%w)", tag, tag, err)
+			"run `VMONO_LAUNCHER=direct vmono %s` to see why (%w)", tag, again, err)
 	}
 	return id, nil
 }

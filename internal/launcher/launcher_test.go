@@ -283,3 +283,42 @@ func TestTmuxSessionName(t *testing.T) {
 		}
 	}
 }
+
+func TestTmuxRunsASelfLaunch(t *testing.T) {
+	f := &fakeTmux{newID: "$7"}
+	f.install(t)
+	t.Setenv("TMUX", "x")
+	orig := selfPath
+	t.Cleanup(func() { selfPath = orig })
+	selfPath = func() (string, error) { return "/bin/vmono", nil }
+	l, err := SelfLaunch("claude", "/pk/pay", "pay", ".init", []string{"package", "init", "pay"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Tmux{}).Launch(l, Opts{}); err != nil {
+		t.Fatal(err)
+	}
+	got := f.call("new-session")
+	if tail := got[len(got)-4:]; !slices.Equal(tail, []string{"/bin/vmono", "package", "init", "pay"}) {
+		t.Errorf("new-session = %v", got)
+	}
+	for _, want := range []string{"pay/_init", "/pk/pay", "VMONO_LAUNCHER=direct", "VMONO_AUTHOR="} {
+		if !slices.Contains(got, want) {
+			t.Errorf("new-session lacks %q: %v", want, got)
+		}
+	}
+	f.sessions, f.calls = "$7\tpay/.init\n", nil
+	if _, err := (Tmux{}).Launch(l, Opts{}); err != nil || f.call("new-session") != nil {
+		t.Errorf("a second launch should go to the first: %v %v", f.calls, err)
+	}
+}
+
+func TestLiveHidesTheInitWorkspace(t *testing.T) {
+	root := t.TempDir()
+	l := Live{agents: []liveAgent{
+		{resolvePath(root + "/.init"), Running}, {resolvePath(root), Running}, {resolvePath(root + "/work"), Running},
+	}}
+	if got := l.Sessions(root); len(got) != 1 || got["work"] == "" {
+		t.Errorf("sessions = %v", got)
+	}
+}

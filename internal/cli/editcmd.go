@@ -92,6 +92,7 @@ func newEditCmd() *cobra.Command {
 			}
 			fprintf(out, "applied: %d added, %d removed, %d switched, %d updated\n",
 				len(plan.Add), len(plan.Remove), len(plan.Switch), len(plan.Update))
+			hintInit(out, p)
 			return nil
 		},
 	}

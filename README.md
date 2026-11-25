@@ -185,6 +185,8 @@ The shortcuts, none of which you have to use:
 | `o` / `l` | Open the most recently opened session with the default harness / pick a harness. A package with no sessions asks you to start one |
 | `d` | Describe |
 | `n` / `e` | New package / edit the selected one (applies to every session) |
+| `i` | Initialize the package: pick a harness to explore it and record an overview |
+| `v` | Review the commands an initialization suggested |
 | `s` / `f` | Sync every session / fetch every member's source |
 | `ctrl+d` | Delete the package and all its sessions (asks first; typed confirmation if work would be lost in any of them) |
 | `y` | Copy the package path |
@@ -227,6 +229,7 @@ Repos that are not under a source root, or every repo when no source root is set
 | Active member | Checked out on the session branch (default `vmono/<package>/<session>`). The agent may edit it and commit to it. |
 | Reference member | Checked out detached at a fixed ref under `_ref/`. Read-only context. |
 | Landing branch | The branch in a member's source repo that the session's work lands on when it is finished. Each member has its own, recorded in the session when it is created: by default the branch that member's source repo has checked out. |
+| Overview | What an agent learned by exploring the members, recorded by `vmono package init`. Kept apart from the text you write. |
 | Purpose / Context / Notes / Role | Free text that belongs to the package: what the work is, what to know, a dated log, and what each member contributes. Sessions share it; they have none of their own. |
 
 A package with two sessions looks like this:
@@ -289,6 +292,33 @@ on_failure = "abort"    # default "warn"
 | `post_finish` | After a session's work has landed | Fails the command and skips `--close`; what landed stays landed |
 
 They run in the session's directory, the same way as setup commands and with the same session variables, plus `VMONO_HOOK` and, for `post_finish`, `VMONO_LANDED` (`member:branch` pairs, separated by spaces). `--no-hooks` on any command, or `VMONO_NO_HOOKS=1`, skips hooks, setup and teardown.
+
+## Initializing a package
+
+`vmono package init [pkg]`, or `i` on a package in the TUI, opens a harness to explore the package and write down what every session should know. Run it when you create a package, and again when its members change.
+
+vmono checks every member out, detached at its base or ref, into a temporary `.init` directory in the package, and starts the harness there with the task. The agent reads the members and records, without asking first:
+
+- an **overview**, which appears in every session's `AGENTS.md`. Recording again replaces it.
+- the **purpose** and member **roles**, where they are empty or still exactly what it wrote before.
+
+Your own purpose, roles, context and notes are never changed. The agent then shows you what it recorded, and you ask for corrections. When the harness exits, the checkout is removed and vmono says what was recorded. Sessions, branches and setup commands are not involved, and a package needs no session to be initialized.
+
+When members are added or removed afterward, `vmono show` and the TUI say the overview is out of date. Edit it with `vmono describe --overview`; an empty one removes it.
+
+The exploration is read-only in layers. Claude Code and OpenCode get rules that deny edits, commits and pushes, Codex runs in its read-only sandbox, and Pi gets no edit tools. Members' own `ask` and `deny` rules apply; their `allow` rules, hooks and skills do not. None of this confines shell commands the agent is allowed to run, so it also matters that the worktrees are throwaway: they are on no branch, and no edit in them reaches a source repo's working tree.
+
+If files were changed, or the agent committed, the checkout is kept and reported. `vmono package init [pkg] --clean --force` discards it. One left by a crash is replaced by the next run, or removed by `--clean` or `vmono doctor --fix`. A package being initialized cannot be deleted.
+
+In tmux or herdr the initialization gets a place of its own named `package/.init` (`package/_init` in tmux), and starting another goes to it. An agent cannot start one.
+
+### Suggested commands
+
+The agent may also suggest [`setup` and `teardown` commands](#setup-and-teardown) for members, such as `pnpm install` where there is a `pnpm-lock.yaml`. Suggesting runs nothing. When the harness exits, vmono goes straight into a review that shows each command, when it would run, and the file it came from: `a` accepts, `e` edits first, `x` dismisses, `A` accepts all when they all show, and `q` leaves the rest for later.
+
+An accepted command is added after the member's own and runs in worktrees created or removed from then on. A settled suggestion is not offered again. Agents cannot accept or dismiss, because these commands run as you and outside the harness's sandbox.
+
+Return to a review with `v` on the package in the TUI or `vmono package suggestions [pkg] --review`. Without `--review` the command lists what is pending, and `--accept` and `--dismiss` take ids from that list. Inside herdr, a notification says there will be something to review as soon as the agent has recorded suggestions.
 
 ## Updating a session
 
@@ -410,13 +440,15 @@ Every read command takes `--json`. Anything that could discard work refuses unle
 | `vmono session finish [pkg/session] [--into [MEMBER=]B]... [--close] [--dry-run]` | Land the session's commits on each member's branch in its source repo. Nothing is pushed; see Finishing a session |
 | `vmono session push [pkg/session] [--member NAME]... [--dry-run] [--json]` | Push a finished session's landing branches to their remotes, never forced. See Pushing a finished session |
 | `vmono session rm <pkg>/<session> [--force] [--delete-branches]` | Remove a session; the package and its other sessions stay |
+| `vmono package init [pkg] [--harness H]` | Explore the members with a harness and record an overview. See Initializing a package. `--clean [--force]` removes a checkout an earlier run left behind |
+| `vmono package record [pkg] (FILE \| -)` | What the agent records with: JSON with `overview`, and optionally `purpose` and `roles` |
 | `vmono add [pkg] <repo> [--ref] [--role R]` | Add a member to the package, and so to every session (a known repo name or any path) |
 | `vmono rm [pkg] <member> [--force] [--delete-branch]` | Remove a member from every session |
 | `vmono edit [pkg]` | Edit the package manifest in `$EDITOR`; changes apply as a diff to every session |
 | `vmono sync [pkg[/session]] [--refs]` | Recreate missing worktrees and regenerate files, in one session or all of a package's; `--refs` moves reference members to their latest fetched ref |
 | `vmono status [pkg[/session]]` | The session's state, and per member: branch or ref, dirty, untracked, ahead/behind, and what is left to land |
 | `vmono show [pkg[/session]]` | Purpose, context, notes, sessions and members; with a session, each member's live state |
-| `vmono describe [pkg] --purpose T \| --context T` | Replace the purpose or context (`--purpose-file`, `--context-file` too) |
+| `vmono describe [pkg] --purpose T \| --context T \| --overview T` | Replace the purpose, context or overview (`--purpose-file`, `--context-file`, `--overview-file` too) |
 | `vmono role [pkg] <member> TEXT` | Set a member's role |
 | `vmono note [pkg] TEXT` | Append a note to the package, stamped with time and author |
 | `vmono open [pkg[/session]] [--harness H] [-- ARGS]` | Launch a harness at a session root |
@@ -459,7 +491,7 @@ command = "codex"
 adapter = "agent-skills"
 ```
 
-Any CLI that takes its working directory as its project can be a harness. The `adapter` says what vmono generates for it: `claude-code` (settings and the plugin), `opencode` (`opencode.json` and the skill), `agent-skills` (the skill under `.agents/skills/`, for Codex and Pi), or none. A built-in harness listed without an adapter still running its built-in command gets its default one, so a config saved before an adapter existed picks it up. Precedence: flags, then `VMONO_*` environment variables, then the file, then defaults. `VMONO_CONFIG_DIR` and `VMONO_STATE_DIR` relocate the config and the index cache.
+Any CLI that takes its working directory as its project can be a harness. The `adapter` says what vmono generates for it: `claude-code` (settings and the plugin), `opencode` (`opencode.json` and the skill), `agent-skills` (the skill under `.agents/skills/`, for Codex and Pi), or none. A built-in harness listed without an adapter still running its built-in command gets its default one, so a config saved before an adapter existed picks it up. `init_args` are added when a harness is started to [initialize a package](#initializing-a-package), with `{prompt}` replaced by the first prompt. Built-in harnesses have defaults; without any, vmono prints the prompt for you to paste. Precedence: flags, then `VMONO_*` environment variables, then the file, then defaults. `VMONO_CONFIG_DIR` and `VMONO_STATE_DIR` relocate the config and the index cache.
 
 ## Authentication
 
@@ -476,8 +508,9 @@ Fetches and pushes never prompt. Starting a session, adding members, sync and th
 - `vmono session push` is the only command that pushes, and only on request. It sends one branch per member, the landing branch, never forced, and refuses a session that is not finished. A branch the remote has moved past is left alone.
 - Deleting a package or session directory by hand leaves its worktrees registered in the source repos. `vmono doctor --fix` prunes those records, and starting a session and adding or editing members release any whose directory is gone before adding a worktree, warning about each. Branches are still kept, so recreating a session of the same name asks to reuse its branch. Prefer `vmono session rm` and `vmono delete`, which remove the worktrees properly.
 - On Windows, vmono refuses to remove a session, member or package while your working directory is inside it, since Windows cannot delete a directory in use. `cd` out and run the command again, naming the session (`vmono session finish PKG/SESSION --close`). Nothing has changed when it refuses, and `--force` does not apply. Another program holding the directory open, such as an editor or a second terminal, can still make the removal fail with git's own `Permission denied`.
-- Hooks and `setup` and `teardown` commands run as you, outside any sandbox the harness uses. They come only from your config and the package manifest, so treat a change to those like a change to a script.
+- Hooks and `setup` and `teardown` commands run as you, outside any sandbox the harness uses. They come only from your config and the package manifest, and one an agent suggested joins the manifest only when you accept it, so treat a change to those like a change to a script.
 - Symlinks are never followed or created.
+- `vmono package init` works in temporary detached worktrees. One whose files were changed is kept until you discard it with `--clean --force`.
 - Committing from a worktree writes into the source repo's git directory, outside the package. `vmono inspect --json` lists each `git_common_dir` so sandboxing wrappers can allow it.
 
 vmono enforces nothing about what an agent may do; the harness's own permission system does. The `claude-code` and `opencode` adapters add `ask` rules for `vmono rm`, `vmono session rm`, `vmono session finish`, `vmono edit` and `vmono delete` and a deny rule for edits under `_ref/`.

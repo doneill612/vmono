@@ -103,6 +103,7 @@ type Manifest struct {
 	Harness string    `toml:"harness,omitempty"`
 	Purpose string    `toml:"purpose,omitempty"`
 	Context string    `toml:"context,omitempty"`
+	Init    *Init     `toml:"init"`
 	Members []Member  `toml:"member"`
 	Notes   []Note    `toml:"note"`
 }
@@ -175,6 +176,11 @@ func (m *Manifest) Validate() error {
 	}
 	if err := ValidateName(m.Name); err != nil {
 		errs = append(errs, err)
+	}
+	if m.Init != nil {
+		if err := m.Init.validate(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	names := map[string]bool{}
 	paths := map[string]bool{}

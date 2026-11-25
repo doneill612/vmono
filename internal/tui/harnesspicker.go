@@ -20,10 +20,12 @@ type harnessPicker struct {
 	// session.
 	session string
 	title   string
-	names   []string
-	cursor  int
-	def     string
-	msg     string
+	// init initializes the package instead of launching into a session.
+	init   bool
+	names  []string
+	cursor int
+	def    string
+	msg    string
 }
 
 // newLaunchPicker builds a picker for launching into a session of pkg, with
@@ -42,6 +44,13 @@ func newLaunchPicker(e *env, pkg, session, title string) *harnessPicker {
 			p.cursor = i
 		}
 	}
+	return p
+}
+
+// newInitPicker builds a picker for the harness that initializes pkg.
+func newInitPicker(e *env, pkg string) *harnessPicker {
+	p := newLaunchPicker(e, pkg, "", "Explore the members and record an overview with")
+	p.init = true
 	return p
 }
 
@@ -87,7 +96,9 @@ func (p *harnessPicker) Update(msg tea.Msg) (screen, tea.Cmd) {
 			p.msg = fmt.Sprintf("%q is not on PATH; install it or pick another", h.Command)
 			return p, nil
 		}
-		return p, func() tea.Msg { return launchMsg{LaunchRequest{Package: p.pkg, Session: p.session, Harness: name}} }
+		return p, func() tea.Msg {
+			return launchMsg{LaunchRequest{Package: p.pkg, Session: p.session, Harness: name, Init: p.init}}
+		}
 	}
 	return p, nil
 }
@@ -120,5 +131,8 @@ func (p *harnessPicker) View(w, h int) string {
 		b.WriteString("\n " + styleWarn.Render(p.msg) + "\n")
 	}
 	b.WriteString("\n " + keyHelp("enter", "launch", "↑/↓", "choose", "esc", "not now"))
+	if p.init {
+		return dialog("initialize", b.String(), w-4)
+	}
 	return dialog("launch", b.String(), w-4)
 }
