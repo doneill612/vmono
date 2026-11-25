@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Token is the metadata token vmono sets on the workspaces it creates, holding
@@ -191,6 +192,25 @@ func AtPrompt(pane string) (bool, error) {
 		return false, err
 	}
 	return r.Info.Shell != 0 && r.Info.Foreground == r.Info.Shell, nil
+}
+
+// NotifyTimeout is how long Notify waits for herdr.
+const NotifyTimeout = 2 * time.Second
+
+// Notify shows a notification that asks for the user's attention. It does not
+// wait long for herdr, since nothing depends on it.
+func Notify(title, body string) error {
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run("notification", "show", title, "--body", body, "--sound", "request")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(NotifyTimeout):
+		return errors.New("herdr notification show: no answer")
+	}
 }
 
 // Focus shows a workspace in the clients attached to the server.
