@@ -66,6 +66,15 @@ Add `eval "$(vmono shell-init zsh)"` (or `bash`, `fish`, `pwsh`) to your shell r
 
 See [Concepts](docs/concepts.md) for the full vocabulary and what a package looks like on disk.
 
+## Integrations
+
+By default, opening a session runs the harness in your current terminal. Integrations change where it starts, so each session gets a place of its own and the TUI can act as a control panel for every running agent:
+
+- **tmux**: a tmux session per vmono session, plus a key binding that opens the TUI in a popup. [Setup](docs/integrations.md#tmux)
+- **herdr**: a [herdr](https://herdr.dev) workspace per session, with live agent state in the TUI. [Setup](docs/integrations.md#herdr)
+
+Install one with `vmono integration install <name>`. See [Integrations](docs/integrations.md) for what each one changes and how to remove it.
+
 ## Documentation
 
 | Topic | What's in it |
