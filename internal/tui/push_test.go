@@ -8,10 +8,13 @@ import (
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
-// finishedPay seeds package "pay" over the named sources, commits one file in
-// every member of its session "work", and finishes it. Each source's remote is
-// the bare repo testutil made for it.
-func finishedPay(t *testing.T, env *testutil.Env, names ...string) map[string]string {
+// payBranch is the branch of the session seedWork makes.
+const payBranch = "vmono/pay/work"
+
+// seedWork seeds package "pay" over the named sources, and commits one file in
+// every member of its session "work". Each source's remote is the bare repo
+// testutil made for it.
+func seedWork(t *testing.T, env *testutil.Env, names ...string) map[string]string {
 	t.Helper()
 	srcs := map[string]string{}
 	var list []string
@@ -23,172 +26,121 @@ func finishedPay(t *testing.T, env *testutil.Env, names ...string) map[string]st
 	for _, n := range names {
 		commitInSession(t, env, "pay", "work", n, n+".txt")
 	}
-	c := coreForTest(t)
-	s, err := c.ResolveSession("pay/work")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.Finish(s, core.FinishOptions{}); err != nil {
-		t.Fatal(err)
-	}
 	return srcs
 }
 
-// remoteHead returns the commit the named bare remote has on main.
-func remoteHead(t *testing.T, env *testutil.Env, name string) string {
+// remoteTip returns the commit the named bare remote has on the session's
+// branch, or "" when it does not have the branch.
+func remoteTip(t *testing.T, env *testutil.Env, name string) string {
 	t.Helper()
-	return testutil.Git(t, filepath.Join(env.Root, "remotes", name+".git"), "rev-parse", "refs/heads/main")
+	return testutil.Git(t, filepath.Join(env.Root, "remotes", name+".git"), "for-each-ref", "--format=%(objectname)", "refs/heads/"+payBranch)
 }
 
-func TestPushFromTheSessionsViewPublishesTheFinishedSession(t *testing.T) {
+func TestPushFromTheSessionsViewPublishesTheSession(t *testing.T) {
 	env := testutil.NewEnv(t)
-	srcs := finishedPay(t, env, "alpha")
-	before := remoteHead(t, env, "alpha")
+	srcs := seedWork(t, env, "alpha")
 	d := newDriver(t, env, "")
 
-	d.key("right")
-	d.has("Sessions · pay (1)", "finished")
-	d.eventually(func() bool { return containsView(d, "1 commit in 1 of 1 members") }, "the preview to say what is left to push")
-	d.key("P")
-	d.has("push session", "pay/work", "alpha", "1 commit of main → origin/main", "never forced", "last fetch")
+	d.key("right", "P")
+	d.has("push session", "pay/work", "alpha", "1 commit → origin/"+payBranch, "new", "never forced", "last fetch")
+	if remoteTip(t, env, "alpha") != "" {
+		t.Error("nothing is pushed until it is confirmed")
+	}
 	d.key("y")
 	d.eventually(func() bool { return containsView(d, "done") }, "the push to complete")
-	if got, want := remoteHead(t, env, "alpha"), testutil.Git(t, srcs["alpha"], "rev-parse", "main"); got != want || got == before {
-		t.Errorf("origin main = %s, want the landed tip %s (was %s)", got, want, before)
+	if got, want := remoteTip(t, env, "alpha"), testutil.Git(t, srcs["alpha"], "rev-parse", payBranch); got != want {
+		t.Errorf("the remote has %q, want %s", got, want)
 	}
 	d.key("enter")
-	d.has("Sessions · pay (1)", "finished")
+	d.has("Sessions · pay (1)")
 	d.lacks("push session")
-	d.eventually(func() bool { return containsView(d, "nothing, all on the remotes") }, "the preview to show nothing left to push")
 
 	d.key("P")
-	d.has("push session", "nothing to push", "already on its remote")
+	d.has("push session", "nothing to push", "There is nothing to push")
 	d.key("y") // nothing to confirm
 	d.has("push session")
 	d.key("esc")
 	d.lacks("push session")
 }
 
-func TestPushRefusesASessionThatIsNotFinished(t *testing.T) {
-	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	seed(t, env, "pay", a)
-	commitInSession(t, env, "pay", "work", "alpha", "one.txt")
-	before := remoteHead(t, env, "alpha")
-	d := newDriver(t, env, "")
-
-	d.key("right", "P")
-	d.has("push session", "not finished", "nothing landed to push", "F finish the session")
-	d.key("y") // there is nothing to confirm
-	d.has("not finished")
-	d.key("esc")
-	d.lacks("push session")
-
-	// F goes straight to finishing, and finishing then enables the push.
-	d.key("P", "F")
-	d.has("finish session", "1 commit → main")
-	d.key("y")
-	d.eventually(func() bool { return containsView(d, "done") }, "finish to complete")
-	d.key("enter", "P")
-	d.has("push session", "1 commit of main → origin/main")
-	if remoteHead(t, env, "alpha") != before {
-		t.Error("nothing is pushed until it is confirmed")
-	}
-}
-
 func TestPushFromTheMembersViewCanTargetOneMember(t *testing.T) {
 	env := testutil.NewEnv(t)
-	finishedPay(t, env, "alpha", "beta")
-	alphaBefore, betaBefore := remoteHead(t, env, "alpha"), remoteHead(t, env, "beta")
+	seedWork(t, env, "alpha", "beta")
 	d := newDriver(t, env, "")
 
 	d.key("right", "m")
-	d.has("Members · pay/work (2)", "alpha", "beta", "pushes to", "1 to push")
+	d.has("Members · pay/work (2)", "alpha", "beta")
 	d.key("p") // alpha is highlighted
-	d.has("push session", "alpha", "1 commit of main → origin/main")
+	d.has("push session", "alpha", "1 commit → origin/"+payBranch)
 	// The dialog is drawn over the members table, so look at its own plan.
 	if pc, ok := d.app.top().(*pushConfirm); !ok || len(pc.plan.Members) != 1 || pc.plan.Members[0].Name != "alpha" {
 		t.Fatalf("the dialog should plan alpha alone: %+v", d.app.top())
 	}
 	d.key("y")
 	d.eventually(func() bool { return containsView(d, "done") }, "the push to complete")
-	if remoteHead(t, env, "alpha") == alphaBefore {
+	if remoteTip(t, env, "alpha") == "" {
 		t.Error("alpha should have been pushed")
 	}
-	if remoteHead(t, env, "beta") != betaBefore {
+	if remoteTip(t, env, "beta") != "" {
 		t.Error("beta was not asked for and must not be pushed")
 	}
 	d.key("enter")
 	d.has("Members · pay/work (2)")
 
 	d.key("P")
-	d.has("push session", "alpha", "nothing to push", "beta", "1 commit of main → origin/main")
+	d.has("push session", "alpha", "nothing to push", "beta", "1 commit → origin/"+payBranch)
 	d.key("y")
 	d.eventually(func() bool { return containsView(d, "done") }, "the push to complete")
-	if remoteHead(t, env, "beta") == betaBefore {
+	if remoteTip(t, env, "beta") == "" {
 		t.Error("push all should have pushed beta")
 	}
 }
 
 func TestPushShowsABlockedMemberAndTheRestStillGo(t *testing.T) {
 	env := testutil.NewEnv(t)
-	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
-	seed(t, env, "pay", a, b)
-	commitInSession(t, env, "pay", "work", "alpha", "one.txt")
-	commitInSession(t, env, "pay", "work", "beta", "two.txt")
-	other := filepath.Join(env.Root, "other")
-	testutil.Git(t, env.Root, "clone", "--quiet", filepath.Join(env.Root, "remotes", "alpha.git"), other)
-	testutil.WriteFile(t, filepath.Join(other, "theirs.txt"), "x")
-	testutil.Git(t, other, "add", "-A")
-	testutil.Git(t, other, "commit", "--quiet", "-m", "theirs")
-	testutil.Git(t, other, "push", "--quiet", "origin", "main")
-	testutil.Git(t, a, "fetch", "--quiet", "origin")
+	srcs := seedWork(t, env, "alpha", "beta")
 	c := coreForTest(t)
 	s, err := c.ResolveSession("pay/work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Finish(s, core.FinishOptions{}); err != nil {
+	if _, err := c.Push(s, core.PushOptions{Members: []string{"alpha"}}); err != nil {
 		t.Fatal(err)
 	}
-	alphaBefore, betaBefore := remoteHead(t, env, "alpha"), remoteHead(t, env, "beta")
+	other := filepath.Join(env.Root, "other")
+	testutil.Git(t, env.Root, "clone", "--quiet", "--branch", payBranch, filepath.Join(env.Root, "remotes", "alpha.git"), other)
+	testutil.WriteFile(t, filepath.Join(other, "theirs.txt"), "x")
+	testutil.Git(t, other, "add", "-A")
+	testutil.Git(t, other, "commit", "--quiet", "-m", "theirs")
+	testutil.Git(t, other, "push", "--quiet", "origin", payBranch)
+	testutil.Git(t, srcs["alpha"], "fetch", "--quiet", "origin")
+	commitInSession(t, env, "pay", "work", "alpha", "mine.txt")
+	before := remoteTip(t, env, "alpha")
 	d := newDriver(t, env, "")
 
 	d.key("right", "P")
-	d.has("push session", "blocked:", "diverged", "Blocked members", "beta", "1 commit of main → origin/main")
+	d.has("push session", "blocked:", "diverged", "Blocked members", "beta", "1 commit → origin/"+payBranch)
 	d.key("y")
 	d.eventually(func() bool { return containsView(d, "diverged") && containsView(d, "go back") }, "the blocked member to be reported")
-	if remoteHead(t, env, "beta") == betaBefore {
+	if remoteTip(t, env, "beta") == "" {
 		t.Error("beta is independent of alpha and should have been pushed")
 	}
-	if remoteHead(t, env, "alpha") != alphaBefore {
+	if remoteTip(t, env, "alpha") != before {
 		t.Error("a diverged branch must never be forced")
 	}
 }
 
-func TestPushOfADirtySessionOffersNoFinish(t *testing.T) {
+func TestPushPointsOutUncommittedWork(t *testing.T) {
 	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	seed(t, env, "pay", a)
-	wt := commitInSession(t, env, "pay", "work", "alpha", "one.txt")
-	testutil.WriteFile(t, filepath.Join(wt, "forgotten.txt"), "x")
-	before := remoteHead(t, env, "alpha")
+	seedWork(t, env, "alpha")
+	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "pay", "work", "alpha", "forgotten.txt"), "x")
 	d := newDriver(t, env, "")
 
 	d.key("right", "P")
-	d.has("push session", "not finished, and cannot be yet", "alpha: 0 modified, 1 untracked", "Commit or resolve that")
-	d.lacks("F finish the session")
-	d.key("F")
-	d.has("push session", "cannot be yet")
-	d.lacks("finish session")
-	d.key("esc")
-	d.lacks("push session")
-
-	// The same holds from the members view.
-	d.key("m", "p")
-	d.has("push session", "cannot be yet", "alpha: 0 modified, 1 untracked")
-	d.lacks("F finish the session")
-	if remoteHead(t, env, "alpha") != before {
-		t.Error("nothing may be pushed")
+	d.has("push session", "1 commit → origin/"+payBranch, "1 untracked")
+	d.key("y")
+	d.eventually(func() bool { return containsView(d, "done") }, "the push to complete")
+	if remoteTip(t, env, "alpha") == "" {
+		t.Error("what is committed should have been pushed")
 	}
 }

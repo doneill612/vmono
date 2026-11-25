@@ -416,32 +416,33 @@ func describeLanding(m core.MemberLanding, dryRun bool) string {
 	return text
 }
 
-// newSessionPushCmd builds `vmono session push`, which publishes the landing
-// branches of a finished session. It is the only vmono command that pushes,
-// and it never forces.
+// newSessionPushCmd builds `vmono session push`, which publishes the branches a
+// session's work is on. It is the only vmono command that pushes, and it never
+// forces.
 func newSessionPushCmd() *cobra.Command {
 	var members []string
 	var dryRun, asJSON bool
 	cmd := &cobra.Command{
 		Use:   "push [pkg/session] [--member NAME]... [--dry-run] [--json]",
-		Short: "Push the landing branches of a finished session to their remotes",
-		Long: `Push the work a finished session landed. Each active member's landing branch is
-pushed from its source repo: to the remote branch it already tracks, or, when it
-has no upstream, to a branch of the same name on origin, which it then tracks.
-Members whose remote already has every commit are skipped.
+		Short: "Push the session's branches to their remotes",
+		Long: `Push the branch each active member is on: to the remote branch it already tracks,
+or, when it tracks none, to a branch of the same name on origin, which it then
+tracks. Members with no commits of their own, or whose remote already has every
+one, are skipped, and so are members whose work has been merged. Uncommitted work
+is not pushed, and is pointed out.
 
-Only the landing branch is sent, never the session's own branch, and nothing is
-forced: a remote branch that has commits yours lacks is refused, so pull or rebase
-in the member's source repo first. Nothing prompts for credentials, so load your
-key into ssh-agent or sign in through your git credential helper beforehand.
-Whether a branch is behind is judged from the last fetch; f in the TUI, or
-git fetch in the member's source repo, refreshes it.
+Nothing is forced: a remote branch that has commits yours lacks is refused, so run
+vmono session update first. A branch is never pushed to the branch it is meant to
+merge into, and one whose remote branch was deleted, as it is once a pull request
+is merged, is not pushed again. Nothing prompts for credentials, so load your key
+into ssh-agent or sign in through your git credential helper beforehand. Whether a
+branch is behind is judged from the last fetch; f in the TUI, or git fetch in the
+member's source repo, refreshes it.
 
-The session must be finished (` + "`vmono session finish`" + `), and still finished: work
-committed or edited since reopens it. --member limits the push to the named
-members (repeatable). Members are independent: one that cannot be pushed does not
-stop the others, and the command exits with 2 when any is blocked, 1 when git
-refused one. --dry-run shows the plan and pushes nothing.`,
+--member limits the push to the named members (repeatable). Members are
+independent: one that cannot be pushed does not stop the others, and the command
+exits with 2 when any is blocked, 1 when git refused one. --dry-run shows the plan
+and pushes nothing.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := loadCore()
@@ -482,6 +483,9 @@ refused one. --dry-run shows the plan and pushes nothing.`,
 func printPush(w io.Writer, res core.PushResult, dryRun bool) {
 	for _, m := range res.Members {
 		fprintf(w, "%-16s %s\n", m.Name, describePush(m, dryRun))
+		for _, n := range m.Notes {
+			fprintf(w, "%-16s note: %s\n", "", n)
+		}
 	}
 	if dryRun {
 		fprintf(w, "dry run: nothing pushed\n")
@@ -493,6 +497,8 @@ func describePush(m core.MemberPush, dryRun bool) string {
 	switch m.Status {
 	case core.PushNothing:
 		return "nothing to push"
+	case core.PushMerged:
+		return m.Reason
 	case core.PushBlocked:
 		return "blocked: " + m.Reason
 	case core.PushFailed:

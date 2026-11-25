@@ -38,10 +38,6 @@ func TestTrackStartsFromAndLandsOnARemoteBranch(t *testing.T) {
 	if tr, ok := gitx.UpstreamOf(a, "feat/x"); !ok || tr.Ref != "refs/remotes/origin/feat/x" {
 		t.Errorf("upstream = %+v, %v", tr, ok)
 	}
-	push, err := c.Push(s, PushOptions{})
-	if err != nil || push.Members[0].Status != PushPushed || push.Members[0].Commits != 1 || push.Members[0].New {
-		t.Errorf("push = %+v, %v", push, err)
-	}
 }
 
 func TestTrackRefusals(t *testing.T) {

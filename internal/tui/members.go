@@ -22,7 +22,7 @@ type membersMsg struct {
 
 // memberActions lists everything the members view can do, in the order its
 // menu shows it. Most act on the whole session; describe, copy path and push
-// member act on the highlighted member. The pushes are for a finished session. Each key is also the view's own shortcut.
+// member act on the highlighted member. Each key is also the view's own shortcut.
 var memberActions = []action{
 	{id: "launch", label: "Launch", key: "o"},
 	{id: "launch-with", label: "Launch with…", key: "l"},
