@@ -53,6 +53,9 @@ type sessionsModel struct {
 	filter string
 	pv     previewPane
 	spin   spinner.Model
+	// deleting is the session a removal was asked for while its agent was
+	// working, waiting for the key again.
+	deleting string
 	// updating is the session an update was asked for while its agent was
 	// working; asking again goes ahead.
 	updating string
@@ -390,6 +393,11 @@ func (m *sessionsModel) act(id string, sel core.SessionSummary) (screen, tea.Cmd
 		}
 		return m, flash("copied " + paths.Contract(sel.Path))
 	case "delete":
+		if m.e.sessionStates(m.name)[sel.Name] == herdr.Working && m.deleting != sel.Name {
+			m.deleting = sel.Name
+			return m, flashErr("an agent is working in " + sel.Name + " and deleting it closes its terminal; ctrl+d again to delete anyway")
+		}
+		m.deleting = ""
 		return m, m.startDelete(sel.Name)
 	case "push":
 		return m, startPush(m, m.e, m.name, sel.Name, nil)

@@ -87,6 +87,13 @@ func TestAgentStateInTheViews(t *testing.T) {
 	d.eventually(func() bool { return containsView(d, "done") }, "the update")
 	d.key("enter")
 
+	// So has deleting, which closes the agent's terminal.
+	d.key("ctrl+d")
+	d.has("ctrl+d again to delete anyway")
+	d.key("ctrl+d")
+	d.has("Delete session")
+	d.key("esc")
+
 	// Nothing is looked at while no view shows it.
 	d.key("m")
 	before := *looks

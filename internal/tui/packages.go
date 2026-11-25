@@ -11,6 +11,7 @@ import (
 
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/gitx"
+	"github.com/doneill612/vmono/internal/herdr"
 	"github.com/doneill612/vmono/internal/paths"
 )
 
@@ -57,13 +58,16 @@ var legacyActions = []action{{id: "copy", label: "Copy path", key: "y"}}
 // scoped to the packages that use one source repo, which the repos view
 // does when you open a repo.
 type packagesModel struct {
-	e      *env
-	tb     *table
-	all    []core.Summary
-	loaded bool
-	filter string
-	pv     previewPane
-	spin   spinner.Model
+	// deleting is the package a removal was asked for while an agent was working
+	// in it, waiting for the key again.
+	deleting string
+	e        *env
+	tb       *table
+	all      []core.Summary
+	loaded   bool
+	filter   string
+	pv       previewPane
+	spin     spinner.Model
 	// scopeRepo is the source path packages must use to be listed; empty
 	// lists everything. scopeName labels it in the frame title.
 	scopeRepo, scopeName string
@@ -461,6 +465,15 @@ func (m *packagesModel) startDelete(name string) tea.Cmd {
 	if err != nil {
 		return flashErr(err.Error())
 	}
+	if m.deleting != name {
+		for session, state := range m.e.sessionStates(name) {
+			if state == herdr.Working {
+				m.deleting = name
+				return flashErr("an agent is working in " + session + " and deleting the package closes its terminal; ctrl+d again to delete anyway")
+			}
+		}
+	}
+	m.deleting = ""
 	rows, err := c.PackageSafety(p)
 	if err != nil {
 		return flashErr(err.Error())

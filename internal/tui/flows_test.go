@@ -30,7 +30,7 @@ func TestDeleteCleanPackageWithY(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("ctrl+d")
-	d.has("Delete package", "work/alpha", "clean", "Everything is clean")
+	d.has("Delete package", "work/alpha", "nothing uncommitted", "work is deleted: nothing was committed", "Nothing would be lost")
 	d.key("n")
 	d.has("packages")
 	if _, err := os.Stat(filepath.Join(env.PackageRoot, "gone")); err != nil {

@@ -313,3 +313,59 @@ func TestUpdateRunsFromTheSessionsViewAndReturnsToIt(t *testing.T) {
 	d.has("clean")
 	d.lacks("Update pay/work")
 }
+
+// TestDeleteDialogSaysWhatBecomesOfTheBranch covers a branch that was
+// squash-merged, which is kept until the dialog is told to delete it.
+func TestDeleteDialogSaysWhatBecomesOfTheBranch(t *testing.T) {
+	env := testutil.NewEnv(t)
+	srcs := seedWork(t, env, "alpha")
+	a := srcs["alpha"]
+	commitInSession(t, env, "pay", "work", "alpha", "more.txt")
+	testutil.Git(t, a, "push", "--quiet", "-u", "origin", payBranch)
+	d := newDriver(t, env, "")
+	d.key("right", "ctrl+d")
+	d.has("Nothing would be lost", "work is kept: 2 commits not merged, on origin/work")
+	d.key("b")
+	d.has("work is kept")
+	d.key("esc")
+
+	testutil.Git(t, a, "merge", "--squash", "--quiet", payBranch)
+	testutil.Git(t, a, "commit", "--quiet", "-m", "squashed")
+	testutil.Git(t, a, "push", "--quiet", "origin", "main")
+	d.key("ctrl+r")
+	d.eventually(func() bool { return containsView(d, "merged (squash)") }, "the list to say it is merged")
+	d.has("everything is merged")
+	d.key("P")
+	d.has("already squash-merged into origin/main")
+	d.key("esc", "ctrl+d")
+	d.has("work is kept: merged (squash) into origin/main")
+	d.key("b")
+	d.has("work is deleted: merged (squash)")
+	d.key("y")
+	d.eventually(func() bool { return containsView(d, "done") }, "the delete")
+	if out := testutil.Git(t, a, "branch", "--list", payBranch); out != "" {
+		t.Errorf("the merged branch should be gone: %q", out)
+	}
+}
+
+func TestMergedSessionsSortBelowTheRest(t *testing.T) {
+	env := testutil.NewEnv(t)
+	srcs := seedWork(t, env, "alpha")
+	c := coreForTest(t)
+	p, err := c.Load("pay")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateSession(p, "zeta", core.SessionOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Git(t, srcs["alpha"], "push", "--quiet", "origin", payBranch, payBranch+":main")
+	testutil.Git(t, srcs["alpha"], "fetch", "--quiet")
+	d := newDriver(t, env, "")
+	d.key("right")
+	d.has("Sessions · pay (2)", "merged (merge)")
+	rows := d.app.top().(*sessionsModel).tb.rows
+	if len(rows) != 2 || rows[0].id != "zeta" || rows[1].id != "work" {
+		t.Errorf("a merged session belongs below the rest, got %+v", rows)
+	}
+}
