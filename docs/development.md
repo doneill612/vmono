@@ -1,0 +1,53 @@
+# Development
+
+[← vmono](../README.md)
+
+```sh
+go vet ./...
+go test ./...
+```
+
+Integration tests build throwaway source repos with a bare remote in a temp directory and run real create, edit, sync, migrate and delete cycles. They never touch your config, state or git identity. CI runs on Linux, macOS and Windows.
+
+## Build tasks
+
+On macOS and Linux, with `make`:
+
+```sh
+make build      # build to bin/vmono
+make test       # go vet, then go test
+make install    # build and copy to ~/.local/bin (see Installation)
+make uninstall  # remove the installed binary
+make clean      # remove bin/ and dist/
+make snapshot   # dry-run the release build (needs GoReleaser)
+```
+
+The same tasks on Windows, in PowerShell from the repo root:
+
+```powershell
+# Build to bin\vmono.exe (make build)
+$version = git describe --tags --always --dirty 2>$null; if (-not $version) { $version = 'dev' }
+go build -trimpath -ldflags "-X github.com/doneill612/vmono/internal/buildinfo.version=$version" -o bin\vmono.exe .\cmd\vmono
+
+# Test (make test)
+go vet ./...
+go test ./...
+
+# Clean (make clean)
+Remove-Item -Recurse -Force bin, dist -ErrorAction SilentlyContinue
+
+# Dry-run the release build (make snapshot); needs GoReleaser
+goreleaser release --snapshot --clean
+```
+
+For installing and uninstalling by hand on Windows, see [Installation](installation.md). [GoReleaser](https://goreleaser.com) is only needed for the dry run.
+
+## Releasing
+
+Push a version tag. CI runs the tests, publishes the release with GoReleaser, then installs it on Linux, macOS and Windows with the install scripts:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+A tag with a suffix, such as `v0.2.0-rc.1`, is published as a prerelease, which `latest` skips.

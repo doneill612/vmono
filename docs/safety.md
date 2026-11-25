@@ -1,0 +1,21 @@
+# Safety
+
+[← vmono](../README.md)
+
+## What vmono guarantees
+
+- A source repo's working tree and checked-out branch are never touched, with one exception: `vmono session finish` fast-forwards a landing branch that is checked out in a clean worktree, and refuses when that worktree has uncommitted changes.
+- A dirty worktree is never removed without `--force` (or typing the package or session name in the TUI). Removing a member, deleting a session or deleting a package checks every session it reaches, and one dirty worktree refuses the whole operation.
+- A branch with unmerged commits is never deleted, even with `--force`. A session branch counts as merged when it is merged into the member's base or into its landing branch, and commits already on the landing branch are not counted as unpushed.
+- `vmono session finish` moves no branch unless every member can land, and puts back the ones it moved if a later one fails.
+- `vmono session push` is the only command that pushes, and only on request. It sends one branch per member, the landing branch, never forced, and refuses a session that is not finished. A branch the remote has moved past is left alone.
+- Deleting a package or session directory by hand leaves its worktrees registered in the source repos. `vmono doctor --fix` prunes those records, and starting a session and adding or editing members release any whose directory is gone before adding a worktree, warning about each. Branches are still kept, so recreating a session of the same name asks to reuse its branch. Prefer `vmono session rm` and `vmono delete`, which remove the worktrees properly.
+- On Windows, vmono refuses to remove a session, member or package while your working directory is inside it, since Windows cannot delete a directory in use. `cd` out and run the command again, naming the session (`vmono session finish PKG/SESSION --close`). Nothing has changed when it refuses, and `--force` does not apply. Another program holding the directory open, such as an editor or a second terminal, can still make the removal fail with git's own `Permission denied`.
+- Hooks and `setup` and `teardown` commands run as you, outside any sandbox the harness uses. They come only from your config and the package manifest, and one an agent suggested joins the manifest only when you accept it, so treat a change to those like a change to a script.
+- Symlinks are never followed or created.
+- `vmono package init` works in temporary detached worktrees. One whose files were changed is kept until you discard it with `--clean --force`.
+- Committing from a worktree writes into the source repo's git directory, outside the package. `vmono inspect --json` lists each `git_common_dir` so sandboxing wrappers can allow it.
+
+## What your harness enforces
+
+vmono enforces nothing about what an agent may do; the harness's own permission system does. The `claude-code` and `opencode` adapters add `ask` rules for `vmono rm`, `vmono session rm`, `vmono session finish`, `vmono session push`, `vmono edit` and `vmono delete` and a deny rule for edits under `_ref/`. They allow, without asking, the commands that only read or display: `vmono show`, `status`, `ls`, `repos`, `path`, `inspect`, `session ls`, `session review`, `integration ls` and `print`, `doctor` (without `--fix`) and `--version`. Claude Code evaluates `ask` before `allow` whatever the specificity, so a command that asks cannot be exempted for a flag such as `--dry-run`; that is why the read-only form of `session finish` is the separate `session review`. A rule in a member's own settings that asks about or denies one of the allowed commands still wins.

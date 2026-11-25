@@ -1,0 +1,28 @@
+# Initializing a package
+
+[← vmono](../README.md)
+
+`vmono package init [pkg]`, or `i` on a package in the TUI, opens a harness to explore the package and write down what every session should know. Run it when you create a package, and again when its members change.
+
+vmono checks every member out, detached at its base or ref, into a temporary `.init` directory in the package, and starts the harness there with the task. The agent reads the members and records, without asking first:
+
+- an **overview**, which appears in every session's `AGENTS.md`. Recording again replaces it.
+- the **purpose** and member **roles**, where they are empty or still exactly what it wrote before.
+
+Your own purpose, roles, context and notes are never changed. The agent then shows you what it recorded, and you ask for corrections. When the harness exits, the checkout is removed and vmono says what was recorded. Sessions, branches and setup commands are not involved, and a package needs no session to be initialized.
+
+When members are added or removed afterward, `vmono show` and the TUI say the overview is out of date. Edit it with `vmono describe --overview`; an empty one removes it.
+
+The exploration is read-only in layers. Claude Code and OpenCode get rules that deny edits, commits and pushes, Codex runs in its read-only sandbox, and Pi gets no edit tools. Members' own `ask` and `deny` rules apply; their `allow` rules, hooks and skills do not. None of this confines shell commands the agent is allowed to run, so it also matters that the worktrees are throwaway: they are on no branch, and no edit in them reaches a source repo's working tree.
+
+If files were changed, or the agent committed, the checkout is kept and reported. `vmono package init [pkg] --clean --force` discards it. One left by a crash is replaced by the next run, or removed by `--clean` or `vmono doctor --fix`. A package being initialized cannot be deleted.
+
+In tmux or herdr the initialization gets a place of its own named `package/.init` (`package/_init` in tmux), and starting another goes to it. An agent cannot start one.
+
+## Suggested commands
+
+The agent may also suggest [`setup` and `teardown` commands](setup-and-teardown.md#setup-and-teardown) for members, such as `pnpm install` where there is a `pnpm-lock.yaml`. Suggesting runs nothing. When the harness exits, vmono goes straight into a review that shows each command, when it would run, and the file it came from: `a` accepts, `e` edits first, `x` dismisses, `A` accepts all when they all show, and `q` leaves the rest for later.
+
+An accepted command is added after the member's own and runs in worktrees created or removed from then on. A settled suggestion is not offered again. Agents cannot accept or dismiss, because these commands run as you and outside the harness's sandbox.
+
+Return to a review with `v` on the package in the TUI or `vmono package suggestions [pkg] --review`. Without `--review` the command lists what is pending, and `--accept` and `--dismiss` take ids from that list. Inside herdr, a notification says there will be something to review as soon as the agent has recorded suggestions.
