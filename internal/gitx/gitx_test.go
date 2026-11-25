@@ -566,3 +566,14 @@ func TestPushRefusesNonFastForward(t *testing.T) {
 		t.Error("a plain error is not a non-fast-forward")
 	}
 }
+
+func TestNewBranchTracksNothing(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "alpha")
+	if err := WorktreeAddBranch(src, filepath.Join(env.Root, "wt"), "feat", "origin/main"); err != nil {
+		t.Fatal(err)
+	}
+	if tr, ok := UpstreamOf(src, "feat"); ok {
+		t.Errorf("a branch cut from origin/main must not track it: %+v", tr)
+	}
+}

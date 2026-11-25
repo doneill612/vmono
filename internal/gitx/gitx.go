@@ -456,8 +456,11 @@ func BranchCheckedOutAt(repo, branch string) (string, error) {
 }
 
 // WorktreeAddBranch creates a worktree at path on a new branch cut from base.
+// The branch tracks nothing, whatever branch.autoSetupMerge says: git would
+// otherwise make a branch cut from origin/main track it, and a push that
+// follows the upstream would then publish the branch's commits to main.
 func WorktreeAddBranch(repo, path, branch, base string) error {
-	_, err := run(repo, "worktree", "add", "-b", branch, path, base)
+	_, err := run(repo, "worktree", "add", "--no-track", "-b", branch, path, base)
 	return err
 }
 
