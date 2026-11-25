@@ -10,6 +10,7 @@ import (
 
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/harness"
+	"github.com/doneill612/vmono/internal/herdr"
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
@@ -100,5 +101,90 @@ func TestPackageRecordRefusesBadInput(t *testing.T) {
 		if _, _, err := run(t, "package", "record", "demo", file); ExitCode(err) != code {
 			t.Errorf("%s: exit %d (%v)", text, ExitCode(err), err)
 		}
+	}
+}
+
+func TestPackageSuggestionsAreReviewedAfterInit(t *testing.T) {
+	var notified [][]string
+	origHerdr, origReview, origTerm := herdr.Run, runReview, interactive
+	t.Cleanup(func() { herdr.Run, runReview, interactive = origHerdr, origReview, origTerm })
+	herdr.Run = func(args ...string) ([]byte, error) {
+		notified = append(notified, args)
+		return nil, errors.New("herdr is not listening")
+	}
+	stop := false
+	initEnv(t, func(l *harness.Launch) error {
+		file := filepath.Join(t.TempDir(), "r.json")
+		testutil.WriteFile(t, file, `{"overview":"o","suggestions":[{"member":"alpha","kind":"setup","command":"make deps","reason":"Makefile"},{"member":"alpha","kind":"teardown","command":"make down"}]}`)
+		for range 2 {
+			if out, _, err := run(t, "package", "record", "demo", file); err != nil || !strings.Contains(out, "2 suggested commands") {
+				t.Errorf("record = %q %v", out, err)
+			}
+		}
+		if stop {
+			return harness.ErrStopped
+		}
+		return nil
+	})
+	t.Setenv("HERDR_ENV", "1")
+
+	// With no terminal, it says what there is to do.
+	interactive = func() bool { return false }
+	reviewed := 0
+	runReview = func(c *core.Core, pkg, notice string) error {
+		reviewed++
+		p, err := c.Load(pkg)
+		if err != nil {
+			return err
+		}
+		if c.FindInit(p) != nil || !strings.Contains(notice, "recorded") {
+			t.Errorf("the review comes after the cleanup, with the summary: %q", notice)
+		}
+		return c.ReviewSuggestions(p, []core.SuggestionDecision{{ID: p.M.Pending()[0].ID(), Accept: true}})
+	}
+	out, _, err := run(t, "package", "init", "demo")
+	if err != nil || reviewed != 0 || !strings.Contains(out, "2 suggested commands to review") {
+		t.Errorf("init = %q %v, reviewed %d", out, err, reviewed)
+	}
+	if len(notified) != 1 || notified[0][0] != "notification" || !strings.Contains(notified[0][2], "demo: 2 suggested commands") {
+		t.Errorf("one notification for new suggestions, none for repeats: %v", notified)
+	}
+
+	interactive = func() bool { return true }
+	stop = true
+	if _, _, err = run(t, "package", "init", "demo"); err == nil || reviewed != 0 {
+		t.Errorf("nobody is there to review when vmono was stopped: %v", err)
+	}
+	stop = false
+	if out, _, err = run(t, "package", "init", "demo"); err != nil || reviewed != 1 || !strings.Contains(out, "1 suggested command to review") {
+		t.Errorf("init = %q %v, reviewed %d", out, err, reviewed)
+	}
+	if out, _, _ = run(t, "show", "demo", "--json"); !strings.Contains(out, "make deps") {
+		t.Errorf("show = %s", out)
+	}
+
+	var list []suggestionJSON
+	out, _, _ = run(t, "package", "suggestions", "demo", "--json")
+	if json.Unmarshal([]byte(out), &list) != nil || len(list) != 1 || list[0].Command != "make down" {
+		t.Fatalf("suggestions = %q", out)
+	}
+	if out, _, _ = run(t, "package", "suggestions", "demo"); !strings.Contains(out, "$ make down") {
+		t.Errorf("suggestions = %q", out)
+	}
+	t.Setenv("VMONO_AUTHOR", "agent:claude")
+	for _, flag := range [][]string{{"--accept", list[0].ID}, {"--dismiss", list[0].ID}, {"--review"}} {
+		if _, _, err := run(t, append([]string{"package", "suggestions", "demo"}, flag...)...); !errors.Is(err, core.ErrAgentReview) {
+			t.Errorf("%v by an agent: %v", flag, err)
+		}
+	}
+	t.Setenv("VMONO_AUTHOR", "")
+	if _, _, err := run(t, "package", "suggestions", "demo", "--accept", "nope"); ExitCode(err) != ExitNotFound {
+		t.Errorf("unknown id: %v", err)
+	}
+	if _, _, err := run(t, "package", "suggestions", "demo", "--dismiss", list[0].ID); err != nil {
+		t.Error(err)
+	}
+	if out, _, _ = run(t, "package", "suggestions", "demo"); !strings.Contains(out, "nothing to review") {
+		t.Errorf("suggestions = %q", out)
 	}
 }

@@ -111,10 +111,14 @@ func section(w io.Writer, title, text string) {
 }
 
 // hintInit says when the recorded overview no longer covers the package's
-// members. It says nothing for a package that was never initialized.
+// members, and when commands it suggested await review. It says nothing for a
+// package that was never initialized.
 func hintInit(w io.Writer, p *core.Package) {
 	if drift := p.M.DriftText(); drift != "" {
 		fprintf(w, "overview out of date (%s); run `vmono package init %s` to update it\n", drift, p.Name)
+	}
+	if n := len(p.M.Pending()); n > 0 {
+		fprintf(w, "%s to review: `vmono package suggestions %s --review`\n", countCommands(n), p.Name)
 	}
 }
 
