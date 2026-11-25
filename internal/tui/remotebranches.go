@@ -24,9 +24,12 @@ type (
 		fetched bool
 	}
 	// remotePickedMsg reports the branch chosen, "" for none, and the members
-	// whose remote has it, to the prompt that opened the picker.
+	// whose remote has it, to the prompt that opened the picker. from and ref are
+	// the picker's.
 	remotePickedMsg struct {
 		owner   *sessionPrompt
+		from    bool
+		ref     string
 		branch  string
 		members []string
 	}
@@ -40,13 +43,18 @@ type remoteChoice struct {
 }
 
 // remotePicker is the dialog that chooses a branch on the members' remotes for
-// a new session to start from. Branches of the same name are one row, saying
-// which members have it; those most members have come first, then the most
+// a new session to work on, to build its branches on, or to check a reference
+// member out at. Branches of the same name are one row, saying which members
+// have it; those most members have come first, then the most
 // recent. It opens on what the last fetch saw and fetches meanwhile, so it is
 // usable at once and stays usable offline: a member that cannot be fetched or
 // listed is named in a notice and never blocks a choice.
 type remotePicker struct {
-	owner   *sessionPrompt
+	owner *sessionPrompt
+	// from is true when the choice is what to build on, rather than work on.
+	from bool
+	// ref is the reference member the choice is for, the only one listed then.
+	ref     string
 	c       *core.Core
 	p       *core.Package
 	in      textinput.Model
@@ -63,11 +71,11 @@ type remotePicker struct {
 }
 
 // newRemotePicker builds the picker for a new session of p.
-func newRemotePicker(owner *sessionPrompt, c *core.Core, p *core.Package) *remotePicker {
+func newRemotePicker(owner *sessionPrompt, c *core.Core, p *core.Package, from bool) *remotePicker {
 	in := newTextInput()
 	in.Prompt = "› "
 	in.CharLimit = 200
-	return &remotePicker{owner: owner, c: c, p: p, in: in, spin: newSpinner()}
+	return &remotePicker{owner: owner, from: from, c: c, p: p, in: in, spin: newSpinner()}
 }
 
 // modal implements modalScreen.
@@ -84,12 +92,20 @@ func (m *remotePicker) Init() tea.Cmd {
 // load lists the branches, after a fetch when asked, off the UI goroutine.
 func (m *remotePicker) load(fetch bool) tea.Cmd {
 	return func() tea.Msg {
-		return remoteBranchesMsg{owner: m, list: m.c.RemoteBranches(m.p, fetch), fetched: fetch}
+		return remoteBranchesMsg{owner: m, list: m.c.RemoteBranches(m.p, m.ref, fetch), fetched: fetch}
 	}
 }
 
 // Title implements screen.
-func (m *remotePicker) Title() string { return "start from" }
+func (m *remotePicker) Title() string {
+	if m.ref != "" {
+		return "remote branch for " + m.ref
+	}
+	if m.from {
+		return "build on a remote branch"
+	}
+	return "work on a remote branch"
+}
 
 // Crumb implements screen. The dialog adds no breadcrumb.
 func (m *remotePicker) Crumb() string { return "" }
@@ -222,7 +238,7 @@ func (m *remotePicker) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			ch := m.shown[m.cursor]
 			m.closing = true
 			return m, tea.Sequence(pop(m), func() tea.Msg {
-				return remotePickedMsg{owner: m.owner, branch: ch.branch, members: ch.members}
+				return remotePickedMsg{owner: m.owner, from: m.from, ref: m.ref, branch: ch.branch, members: ch.members}
 			})
 		}
 	default:
@@ -275,7 +291,12 @@ func (m *remotePicker) View(w, h int) string {
 		ch := m.shown[i]
 		label := ch.branch
 		if label == "" {
-			label = "none: start from each member's default"
+			label = "none: start a new branch"
+			if m.ref != "" {
+				label = "none: the package's ref"
+			} else if m.from {
+				label = "none: start from each member's base"
+			}
 		}
 		detail := choiceDetail(ch)
 		if detail != "" {
@@ -294,5 +315,5 @@ func (m *remotePicker) View(w, h int) string {
 		b.WriteString(" " + styleWarn.Render(clip(n, inner-1)) + "\n")
 	}
 	b.WriteString("\n " + keyHelp("enter", "pick", "↑/↓", "move", "esc", "cancel"))
-	return dialog("start from a remote branch", b.String(), width)
+	return dialog(m.Title(), b.String(), width)
 }

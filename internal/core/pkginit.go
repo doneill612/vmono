@@ -26,7 +26,7 @@ const initFile = "init.toml"
 
 // InitWorkspace is the temporary checkout an agent explores to initialize a
 // package: a detached worktree of every member, whatever its mode. It is not
-// a session: it has no branch, lands nothing, and is removed when the harness
+// a session: it has no branch, makes no changes, and is removed when the harness
 // exits. Its file, rather than the manifest, says what there is to remove,
 // since the members may change while it is open.
 type InitWorkspace struct {
@@ -109,7 +109,7 @@ func (c *Core) exploredMembers(p *Package) []string {
 
 // initView returns the package as an init workspace holds it: every member a
 // reference at its base or ref, with nothing to copy or run. The base is used
-// rather than a landing branch because what is recorded describes the
+// rather than a session's branch because what is recorded describes the
 // package, not one feature. The package itself is not changed.
 func initView(p *Package) *Package {
 	m := clone(p.M)
@@ -152,7 +152,7 @@ func (c *Core) OpenInit(p *Package) (*InitWorkspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := preflightMembers(view.M, "", srcs, view.M.Members, false, nil); err != nil {
+	if _, err := preflightMembers(view.M, nil, srcs, view.M.Members, always(false), nil); err != nil {
 		return nil, err
 	}
 	w := &InitWorkspace{Pkg: p, Dir: p.InitDir(), PID: os.Getpid(), Started: time.Now().Truncate(time.Second)}
@@ -178,7 +178,7 @@ func (c *Core) OpenInit(p *Package) (*InitWorkspace, error) {
 		Undo: func() error { return os.RemoveAll(w.Dir) },
 	})
 	for _, mem := range view.M.Members {
-		steps = append(steps, c.addMemberSteps(s, mem, srcs[mem.Name], false)...)
+		steps = append(steps, c.addMemberSteps(s, mem, srcs[mem.Name], branchPlan{})...)
 	}
 	steps = append(steps, apply.Step{Name: "render files", Run: func(func(string)) error {
 		for i := range w.Members {
@@ -278,7 +278,7 @@ func (c *Core) initRemovalSteps(w *InitWorkspace, force bool) ([]apply.Step, err
 		}
 		ms, err := c.removeMemberSteps(s, manifest.Member{
 			Name: mem.Name, Source: mem.Source, Path: mem.Path, Mode: manifest.ModeReference,
-		}, force, false, nil)
+		}, DeleteOptions{Force: force}, nil)
 		if err != nil {
 			return nil, err
 		}

@@ -30,7 +30,7 @@ func TestDeleteCleanPackageWithY(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("ctrl+d")
-	d.has("Delete package", "work/alpha", "clean", "Everything is clean")
+	d.has("Delete package", "work/alpha", "nothing uncommitted", "work is deleted: nothing was committed", "Nothing would be lost")
 	d.key("n")
 	d.has("packages")
 	if _, err := os.Stat(filepath.Join(env.PackageRoot, "gone")); err != nil {
@@ -165,9 +165,8 @@ func indexOf(h, n string) int {
 // at "done", rather than showing it until the reload lands.
 func TestDeletedPackageLeavesListBeforeReload(t *testing.T) {
 	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	seed(t, env, "doomed", a)
-	seed(t, env, "keeper", a)
+	seed(t, env, "doomed", env.NewSource(t, "alpha"))
+	seed(t, env, "keeper", env.NewSource(t, "beta"))
 	d := newDriver(t, env, "")
 	d.has("doomed", "keeper")
 

@@ -314,7 +314,7 @@ func TestAgentCommandsInferPackageFromCwd(t *testing.T) {
 	if s.Context != "Ticket PLAT-9." || len(s.Notes) != 1 || s.Notes[0].By != "agent:claude" || len(s.Members) != 2 {
 		t.Errorf("show = %+v", s)
 	}
-	if s.Session != "s1" || s.Branch != "vmono/work/s1" || len(s.Sessions) != 1 || s.Members[0].Branch != "vmono/work/s1" {
+	if s.Session != "s1" || s.Branch != "s1" || len(s.Sessions) != 1 || s.Members[0].Branch != "s1" {
 		t.Errorf("show from inside a session should report it: %+v", s)
 	}
 	if s.Members[0].Role != "Owns the gateway" || s.Members[1].Role != "SDK client" {
@@ -626,7 +626,7 @@ func TestSessionNewLsRmAndSelection(t *testing.T) {
 	if got := testutil.Git(t, filepath.Join(two, "alpha"), "branch", "--show-current"); got != "feat/PLAT-1" {
 		t.Errorf("--branch ignored: %q", got)
 	}
-	if got := testutil.Git(t, filepath.Join(one, "alpha"), "branch", "--show-current"); got != "vmono/duo/one" {
+	if got := testutil.Git(t, filepath.Join(one, "alpha"), "branch", "--show-current"); got != "one" {
 		t.Errorf("default branch = %q", got)
 	}
 
@@ -635,7 +635,7 @@ func TestSessionNewLsRmAndSelection(t *testing.T) {
 	if err != nil || json.Unmarshal([]byte(out), &rows) != nil || len(rows) != 2 {
 		t.Fatalf("session ls --json = %q, %v", out, err)
 	}
-	if text, _, _ := run(t, "session", "ls", "duo"); !strings.Contains(text, "feat/PLAT-1") || !strings.Contains(text, "vmono/duo/one") {
+	if text, _, _ := run(t, "session", "ls", "duo"); !strings.Contains(text, "feat/PLAT-1") || !strings.Contains(text, "one") {
 		t.Errorf("session ls table = %q", text)
 	}
 	if text, _, _ := run(t, "ls"); !strings.Contains(text, "duo") {
@@ -782,196 +782,64 @@ func TestPackageChangesReachEverySessionFromTheCLI(t *testing.T) {
 	}
 }
 
-func TestSessionFinish(t *testing.T) {
+func TestBranchFlagsBelongToASession(t *testing.T) {
 	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	out, stderr, err := run(t, "new", "demo", "--active", a, "--session", "work")
-	if err != nil {
-		t.Fatalf("new: %v\n%s", err, stderr)
-	}
-	wt := filepath.Join(strings.TrimSpace(out), "alpha")
-	commit := func(name string) {
-		testutil.WriteFile(t, filepath.Join(wt, name), name+"\n")
-		testutil.Git(t, wt, "add", "-A")
-		testutil.Git(t, wt, "commit", "--quiet", "-m", "add "+name)
-	}
-	commit("one.txt")
-
-	if text, _, err := run(t, "status", "demo/work"); err != nil || !strings.Contains(text, "in-progress") || !strings.Contains(text, "→ main: 1 to land") {
-		t.Errorf("status before finish = %q, %v", text, err)
-	}
-	text, _, err := run(t, "session", "finish", "demo/work", "--dry-run")
-	if err != nil || !strings.Contains(text, "would land 1 commit on main") || !strings.Contains(text, "dry run") {
-		t.Errorf("dry run = %q, %v", text, err)
-	}
-	if got := testutil.Git(t, a, "rev-parse", "main"); got == testutil.Git(t, wt, "rev-parse", "HEAD") {
-		t.Fatal("a dry run must not move main")
-	}
-
-	// review is the read-only spelling of finish --dry-run: same output, and
-	// it moves nothing, records nothing and does not mark the session finished.
-	sessionToml := filepath.Join(env.PackageRoot, "demo", "work", ".vmono", "session.toml")
-	before, err := os.ReadFile(sessionToml)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reviewText, _, err := run(t, "session", "review", "demo/work")
-	if err != nil || reviewText != text {
-		t.Errorf("review = %q, %v; want the output of finish --dry-run %q", reviewText, err, text)
-	}
-	if _, _, err := run(t, "session", "review", "demo/work", "--into", "somewhere-new"); err != nil {
-		t.Errorf("review --into: %v", err)
-	}
-	var preview core.FinishResult
-	if out, _, err := run(t, "session", "review", "demo/work", "--json"); err != nil || json.Unmarshal([]byte(out), &preview) != nil || preview.Finished || len(preview.Members) != 1 || preview.Members[0].Status != core.LandReady {
-		t.Errorf("review --json = %q, %v, %+v", out, err, preview)
-	}
-	if after, err := os.ReadFile(sessionToml); err != nil || string(after) != string(before) {
-		t.Errorf("review changed session.toml: %q, %v", after, err)
-	}
-	if got := testutil.Git(t, a, "rev-parse", "main"); got == testutil.Git(t, wt, "rev-parse", "HEAD") {
-		t.Fatal("review must not move main")
-	}
-
-	out, _, err = run(t, "session", "finish", "demo/work", "--json")
-	if err != nil {
-		t.Fatalf("finish: %v", err)
-	}
-	var res core.FinishResult
-	if err := json.Unmarshal([]byte(out), &res); err != nil {
-		t.Fatalf("finish --json: %v\n%s", err, out)
-	}
-	if !res.Finished || len(res.Members) != 1 || res.Members[0].Status != core.LandLanded || res.Members[0].Into != "main" {
-		t.Errorf("result = %+v", res)
-	}
-	if testutil.Git(t, a, "rev-parse", "main") != testutil.Git(t, wt, "rev-parse", "HEAD") {
-		t.Error("main should be at the session tip")
-	}
-	if text, _, _ := run(t, "session", "ls", "demo"); !strings.Contains(text, "finished") {
-		t.Errorf("session ls should show the state: %q", text)
-	}
-
-	// A finished session stays listed, and new work reopens it.
-	commit("two.txt")
-	if text, _, _ := run(t, "session", "ls", "demo"); !strings.Contains(text, "in-progress") {
-		t.Errorf("new work should reopen the session: %q", text)
-	}
-
-	// Inside the session no argument is needed; uncommitted work is refused
-	// with exit code 2 and the reasons on stdout as JSON.
-	// This uses os.Chdir rather than t.Chdir on purpose: t.Chdir keeps the
-	// directory it leaves open until the test ends, and on Windows that open
-	// handle stops the --close removal below from deleting the worktree.
-	origWD, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(origWD) })
-	chdir := func(dir string) {
-		t.Helper()
-		if err := os.Chdir(dir); err != nil {
-			t.Fatal(err)
+	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
+	for _, flag := range [][]string{{"--prefix", "feat"}, {"--branch", "x"}, {"--track", "x"}, {"--from", "x"}, {"--reuse-branch"}} {
+		if _, _, err := run(t, append([]string{"new", "demo", "--active", a}, flag...)...); err == nil {
+			t.Errorf("%v without --session must be rejected", flag)
 		}
-		t.Setenv("PWD", dir) // what t.Chdir does, so symlinked temp dirs resolve as before
 	}
-	chdir(wt)
-	testutil.WriteFile(t, filepath.Join(wt, "forgotten.txt"), "x")
-	out, _, err = run(t, "session", "finish", "--json")
-	if ExitCode(err) != ExitRefused {
-		t.Fatalf("exit code = %d (%v), want %d", ExitCode(err), err, ExitRefused)
-	}
-	if err := json.Unmarshal([]byte(out), &res); err != nil || res.Members[0].Status != core.LandBlocked || res.Finished {
-		t.Errorf("refused result = %+v (%v)\n%s", res, err, out)
-	}
-	if err := os.Remove(filepath.Join(wt, "forgotten.txt")); err != nil {
-		t.Fatal(err)
-	}
-	// Windows cannot delete the working directory, so step out and name the
-	// session explicitly.
-	chdir(env.Root)
-	if text, _, err := run(t, "session", "finish", "demo/work", "--close"); err != nil || !strings.Contains(text, "removed session demo/work") {
-		t.Errorf("finish --close = %q, %v", text, err)
-	}
-}
-
-func TestIntoBelongsToASession(t *testing.T) {
-	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	if _, _, err := run(t, "new", "demo", "--active", a, "--into", "feature"); err == nil {
-		t.Error("--into without --session must be rejected")
-	}
-	if _, stderr, err := run(t, "new", "demo", "--active", a, "--session", "work", "--into", "feature"); err != nil {
+	if _, stderr, err := run(t, "new", "demo", "--active", a+","+b, "--session", "work", "--prefix", "feat", "--branch", "beta=other"); err != nil {
 		t.Fatalf("%v\n%s", err, stderr)
+	}
+	for member, want := range map[string]string{"alpha": "feat/work", "beta": "other"} {
+		if got := testutil.Git(t, filepath.Join(env.PackageRoot, "demo", "work", member), "branch", "--show-current"); got != want {
+			t.Errorf("%s is on %q, want %q", member, got, want)
+		}
 	}
 	out, _, _ := run(t, "session", "ls", "demo", "--json")
 	if !strings.Contains(out, `"state": "in-progress"`) {
 		t.Errorf("ls --json = %s", out)
 	}
-	data, err := os.ReadFile(filepath.Join(env.PackageRoot, "demo", "work", ".vmono", "session.toml"))
-	if err != nil || !strings.Contains(string(data), "[into]\nalpha = \"feature\"") {
-		t.Errorf("session.toml = %q, %v", data, err)
-	}
-}
-
-func TestSessionIntoIsPerMember(t *testing.T) {
-	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	b := env.NewSource(t, "beta")
-	testutil.Git(t, b, "checkout", "--quiet", "-b", "develop")
-	if _, stderr, err := run(t, "new", "demo", "--active", a+","+b, "--session", "work"); err != nil {
-		t.Fatalf("new: %v\n%s", err, stderr)
-	}
-
-	read := func() map[string]string {
-		t.Helper()
-		out, _, err := run(t, "session", "into", "demo/work", "--json")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var rows []struct {
-			Member string `json:"member"`
-			Into   string `json:"into"`
-		}
-		if err := json.Unmarshal([]byte(out), &rows); err != nil {
-			t.Fatalf("%v\n%s", err, out)
-		}
-		got := map[string]string{}
-		for _, r := range rows {
-			got[r.Member] = r.Into
-		}
-		return got
-	}
-	if got := read(); got["alpha"] != "main" || got["beta"] != "develop" || len(got) != 2 {
-		t.Errorf("each member should land where its source was checked out: %v", got)
-	}
-
-	text, _, err := run(t, "session", "into", "demo/work", "--all", "release", "--member", "beta=hotfix")
-	if err != nil || !strings.Contains(text, "alpha") || !strings.Contains(text, "release") || !strings.Contains(text, "hotfix") {
-		t.Errorf("session into = %q, %v", text, err)
-	}
-	if got := read(); got["alpha"] != "release" || got["beta"] != "hotfix" {
-		t.Errorf("after the change: %v", got)
-	}
-
 	for name, args := range map[string][]string{
-		"unknown member":       {"session", "into", "demo/work", "--member", "ghost=x"},
-		"member without =":     {"session", "into", "demo/work", "--member", "beta"},
-		"two branches for all": {"session", "finish", "demo/work", "--dry-run", "--into", "a", "--into", "b"},
-		"empty member":         {"session", "finish", "demo/work", "--dry-run", "--into", "=x"},
+		"two branches for all": {"--branch", "a", "--branch", "b"},
+		"empty member":         {"--branch", "=x"},
+		"empty branch":         {"--from", "alpha="},
+		"unknown member":       {"--branch", "ghost=x"},
 	} {
-		if _, _, err := run(t, args...); err == nil {
+		if _, _, err := run(t, append([]string{"session", "new", "demo", "two"}, args...)...); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if _, _, err := run(t, "new", "other", "--active", a, "--into", "alpha=x"); err == nil {
-		t.Error("--into without --session must still be rejected")
-	}
-	if _, stderr, err := run(t, "session", "new", "demo", "second", "--into", "beta=feature/y"); err != nil {
+}
+
+func TestSessionNewFrom(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	testutil.Git(t, a, "branch", "parent")
+	if _, stderr, err := run(t, "new", "demo", "--active", a, "--session", "child", "--from", "parent"); err != nil {
 		t.Fatalf("%v\n%s", err, stderr)
 	}
-	out, _, _ := run(t, "session", "into", "demo/second", "--json")
-	if !strings.Contains(out, "feature/y") || !strings.Contains(out, "main") {
-		t.Errorf("per-member --into at create: %s", out)
+	if out, _, err := run(t, "status", "demo/child", "--json"); err != nil || !strings.Contains(out, `"built_on": "parent"`) {
+		t.Errorf("status = %s, %v", out, err)
+	}
+	if _, _, err := run(t, "session", "new", "demo", "two", "--from", "alpha=nope"); ExitCode(err) != ExitNotFound {
+		t.Errorf("missing ref = %v", err)
+	}
+}
+
+func TestRemovedSessionCommandsSayWhatToUseInstead(t *testing.T) {
+	testutil.NewEnv(t)
+	for _, args := range [][]string{{"session", "finish", "--json"}, {"session", "finish", "demo/work", "--close"}, {"session", "into", "demo/work", "--all", "x"}} {
+		_, _, err := run(t, args...)
+		if ExitCode(err) != ExitError || !strings.Contains(err.Error(), "was removed") || !strings.Contains(err.Error(), "vmono session") {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+	out, _, err := run(t, "session", "--help")
+	if err != nil || strings.Contains(out, "finish") || strings.Contains(out, "  into ") {
+		t.Errorf("removed commands should not be listed (%v):\n%s", err, out)
 	}
 }
 
@@ -993,7 +861,7 @@ func TestHookSessionStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"work/s1", "vmono/work/s1", "in-progress", "alpha", "beta", "1 untracked", "/vmono:finish", "/vmono:note", "/vmono:status"} {
+	for _, want := range []string{"work/s1", "s1", "in-progress", "alpha", "beta", "1 untracked", "/vmono:push", "/vmono:note", "/vmono:status"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("hook output missing %q:\n%s", want, got)
 		}
@@ -1043,21 +911,23 @@ func TestSessionPush(t *testing.T) {
 	testutil.Git(t, wt, "commit", "--quiet", "-m", "add one.txt")
 	remote := filepath.Join(env.Root, "remotes", "alpha.git")
 
-	// A session that has not been finished has nothing landed to push.
-	if _, _, err := run(t, "session", "push", "demo/work"); ExitCode(err) != ExitRefused {
-		t.Fatalf("push before finish: exit %d (%v), want %d", ExitCode(err), err, ExitRefused)
-	}
-	if _, stderr, err := run(t, "session", "finish", "demo/work"); err != nil {
-		t.Fatalf("finish: %v\n%s", err, stderr)
-	}
+	testutil.WriteFile(t, filepath.Join(wt, "forgotten.txt"), "x\n")
+	branch := testutil.Git(t, wt, "branch", "--show-current")
 	before := testutil.Git(t, remote, "rev-parse", "refs/heads/main")
 
 	text, _, err := run(t, "session", "push", "demo/work", "--dry-run")
-	if err != nil || !strings.Contains(text, "would push 1 commit of main to origin/main") || !strings.Contains(text, "dry run") {
+	if err != nil || !strings.Contains(text, "would push 1 commit of "+branch+" to origin/"+branch) || !strings.Contains(text, "note: ") || !strings.Contains(text, "dry run") {
 		t.Errorf("dry run = %q, %v", text, err)
 	}
-	if testutil.Git(t, remote, "rev-parse", "refs/heads/main") != before {
-		t.Fatal("a dry run must not push")
+	if review, _, err := run(t, "session", "review", "demo/work"); err != nil || review != text {
+		t.Errorf("review = %q, %v; want the output of push --dry-run", review, err)
+	}
+	var plan core.PushResult
+	if out, _, err := run(t, "session", "review", "demo/work", "--json"); err != nil || json.Unmarshal([]byte(out), &plan) != nil || len(plan.Members) != 1 || plan.Members[0].Status != core.PushReady {
+		t.Errorf("review --json = %q, %v", out, err)
+	}
+	if refs := testutil.Git(t, remote, "for-each-ref", "refs/heads/"+branch); refs != "" {
+		t.Fatalf("a dry run must not push: %s", refs)
 	}
 	if _, _, err := run(t, "session", "push", "demo/work", "--member", "nope"); err == nil {
 		t.Error("an unknown --member must be rejected")
@@ -1074,11 +944,21 @@ func TestSessionPush(t *testing.T) {
 	if len(res.Members) != 1 || res.Members[0].Status != core.PushPushed || res.Members[0].Commits != 1 {
 		t.Errorf("result = %+v", res)
 	}
-	if testutil.Git(t, remote, "rev-parse", "refs/heads/main") != testutil.Git(t, a, "rev-parse", "main") {
-		t.Error("origin/main should be at the landed tip")
+	if testutil.Git(t, remote, "rev-parse", "refs/heads/"+branch) != testutil.Git(t, a, "rev-parse", branch) {
+		t.Error("the remote should have the session branch")
+	}
+	if testutil.Git(t, remote, "rev-parse", "refs/heads/main") != before {
+		t.Error("main must not move")
 	}
 	if text, _, err := run(t, "session", "push", "demo/work"); err != nil || !strings.Contains(text, "nothing to push") {
 		t.Errorf("pushing again = %q, %v", text, err)
+	}
+
+	// A blocked member fails the review as it would the push.
+	testutil.Git(t, remote, "update-ref", "-d", "refs/heads/"+branch)
+	testutil.Git(t, a, "fetch", "--quiet", "--prune")
+	if text, _, err := run(t, "session", "review", "demo/work"); ExitCode(err) != ExitRefused || !strings.Contains(text, "was deleted") {
+		t.Errorf("review of a blocked member = %q, %v", text, err)
 	}
 }
 
@@ -1093,6 +973,7 @@ func TestSessionUpdate(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(a, "new.txt"), "new\n")
 	testutil.Git(t, a, "add", "-A")
 	testutil.Git(t, a, "commit", "--quiet", "-m", "new")
+	testutil.Git(t, a, "push", "--quiet", "origin", "main")
 
 	testutil.WriteFile(t, filepath.Join(wt, "README.md"), "edited\n")
 	out, _, err = run(t, "session", "update", "demo/work", "--json")
@@ -1102,7 +983,7 @@ func TestSessionUpdate(t *testing.T) {
 	}
 	testutil.Git(t, wt, "checkout", "--quiet", "README.md")
 	out, _, err = run(t, "session", "update", "demo/work")
-	if err != nil || !strings.Contains(out, "updated onto main (1 behind") {
+	if err != nil || !strings.Contains(out, "rebased onto origin/main (1 behind") {
 		t.Errorf("update = %q, %v", out, err)
 	}
 }
@@ -1114,8 +995,8 @@ func TestSessionNewTrack(t *testing.T) {
 	if _, _, err := run(t, "new", "demo", "--active", a, "--session", "one", "--track", "feat/x"); err != nil {
 		t.Fatal(err)
 	}
-	if out, _, err := run(t, "session", "into", "demo/one"); err != nil || !strings.Contains(out, "feat/x") {
-		t.Errorf("into = %q, %v", out, err)
+	if got, want := testutil.Git(t, filepath.Join(env.PackageRoot, "demo", "one", "alpha"), "rev-parse", "HEAD"), testutil.Git(t, a, "rev-parse", "origin/feat/x"); got != want {
+		t.Errorf("the session starts at %s, want %s", got, want)
 	}
 	if _, _, err := run(t, "session", "new", "demo", "two", "--track", "alpha=nope"); ExitCode(err) != ExitNotFound {
 		t.Errorf("missing branch = %v", err)

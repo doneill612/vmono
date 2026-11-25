@@ -281,3 +281,103 @@ func TestLegacySessionNameSkipsTakenNames(t *testing.T) {
 		t.Errorf("free name = %q", got)
 	}
 }
+
+// landingSession makes a session as it was when work landed on other branches:
+// its file is of the old schema and its branch tracks the base.
+func landingSession(t *testing.T, c *Core, env *testutil.Env) (*Session, string) {
+	t.Helper()
+	a := env.NewSource(t, "alpha")
+	p := mustPackage(t, c, request("old", []string{a}, nil))
+	s, err := c.CreateSession(p, "work", SessionOptions{Branch: "vmono/old/work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Git(t, a, "branch", "--set-upstream-to=origin/main", "vmono/old/work")
+	testutil.WriteFile(t, manifest.SessionPath(s.Dir), "schema  = 1\npackage = \"old\"\nname    = \"work\"\ncreated = 2026-11-16T09:00:00Z\nbranch  = \"vmono/old/work\"\nfinished = 2026-11-17T09:00:00Z\n\n[into]\nalpha = \"main\"\n")
+	if s, err = c.LoadSession(p, "work"); err != nil {
+		t.Fatal(err)
+	}
+	commitIn(t, filepath.Join(s.Dir, "alpha"), "work.txt")
+	return s, a
+}
+
+// finding returns doctor's finding of a kind.
+func finding(t *testing.T, res DoctorResult, kind string) (Finding, bool) {
+	t.Helper()
+	for _, f := range res.Findings {
+		if f.Kind == kind {
+			return f, true
+		}
+	}
+	return Finding{}, false
+}
+
+func TestLandingSessionWorksUnconverted(t *testing.T) {
+	c, env := newCore(t)
+	s, _ := landingSession(t, c, env)
+	main := sha(t, remoteOf(env, "alpha"), "refs/heads/main")
+	if _, m := status(t, c, s, "alpha"); m.Publish != PublishLocal {
+		t.Errorf("status = %+v", m)
+	}
+	res, err := c.Push(s, PushOptions{})
+	if m := pushRow(t, res, "alpha"); err != nil || m.Status != PushPushed || m.Dest != "vmono/old/work" {
+		t.Errorf("push = %+v, %v", m, err)
+	}
+	if sha(t, remoteOf(env, "alpha"), "refs/heads/main") != main {
+		t.Error("main must not be pushed to")
+	}
+	if _, err := c.DeleteSession(s, DeleteOptions{}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestDoctorConvertsLandingSessions(t *testing.T) {
+	c, env := newCore(t)
+	s, a := landingSession(t, c, env)
+	testutil.Git(t, a, "merge", "--quiet", "--ff-only", "vmono/old/work") // it landed, unpushed
+
+	res, err := c.Doctor(false)
+	f, ok := finding(t, res, KindLandingSession)
+	if err != nil || !ok || f.Fixed || !strings.Contains(f.Message, "alpha:main is not on a remote") {
+		t.Fatalf("finding = %+v, %v", f, err)
+	}
+	if loaded, _ := c.LoadSession(s.Pkg, "work"); loaded.S.Schema != manifest.LandingSessionSchema {
+		t.Error("only --fix converts")
+	}
+
+	res, err = c.Doctor(true)
+	if f, ok = finding(t, res, KindLandingSession); err != nil || !ok || !f.Fixed || !strings.Contains(f.Message, "push it by hand") {
+		t.Fatalf("finding = %+v, %v", f, err)
+	}
+	loaded, err := c.LoadSession(s.Pkg, "work")
+	if err != nil || loaded.S.Schema != manifest.SessionSchemaVersion || len(loaded.S.Into) != 0 || !loaded.S.Finished.IsZero() || loaded.BranchFor("alpha") != "vmono/old/work" {
+		t.Errorf("session = %+v, %v", loaded.S, err)
+	}
+	if loaded.S.Members["alpha"].Created {
+		t.Error("vmono cannot know it made the branch")
+	}
+	if tr, ok := gitx.UpstreamOf(a, "vmono/old/work"); ok {
+		t.Errorf("upstream = %+v", tr)
+	}
+	if res, err = c.Doctor(true); err != nil {
+		t.Fatal(err)
+	}
+	if f, ok := finding(t, res, KindLandingSession); ok {
+		t.Errorf("a second run found %+v", f)
+	}
+}
+
+func TestMigratedPackageBranchesTrackNothing(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	writeLegacyPackage(t, c, "old", "vmono/old", []string{a}, nil)
+	if _, ok := gitx.UpstreamOf(a, "vmono/old"); !ok {
+		t.Fatal("the fixture should track origin/main as it would have")
+	}
+	if _, err := c.Doctor(true); err != nil {
+		t.Fatal(err)
+	}
+	if tr, ok := gitx.UpstreamOf(a, "vmono/old"); ok {
+		t.Errorf("upstream = %+v", tr)
+	}
+}

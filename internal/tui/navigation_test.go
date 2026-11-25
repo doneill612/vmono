@@ -92,25 +92,15 @@ func TestRepeatedBackKeyClosesOneView(t *testing.T) {
 	}
 }
 
-// TestFinishThenPushReturnsToOneSessionsView guards against an operation's
-// progress screen rebuilding the view it came from on top of the original,
-// which nested the sessions view once more after every finish or push
-// ("packages > pay > pay > pay").
-func TestFinishThenPushReturnsToOneSessionsView(t *testing.T) {
+// TestPushReturnsToOneSessionsView guards against an operation's progress
+// screen rebuilding the view it came from on top of the original, which nested
+// the sessions view once more after every push ("packages > pay > pay").
+func TestPushReturnsToOneSessionsView(t *testing.T) {
 	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	seed(t, env, "pay", a)
-	commitInSession(t, env, "pay", "work", "alpha", "one.txt")
+	seedWork(t, env, "alpha")
 	d := newDriver(t, env, "")
 
-	d.key("right", "F", "y")
-	d.eventually(func() bool { return containsView(d, "done") }, "finish to complete")
-	d.key("enter")
-	if got := d.crumbs(); got != "packages > pay" {
-		t.Fatalf("after finish crumbs = %q, want %q", got, "packages > pay")
-	}
-
-	d.key("P")
+	d.key("right", "P")
 	d.has("push session")
 	d.key("y")
 	d.eventually(func() bool { return containsView(d, "done") }, "push to complete")
@@ -124,29 +114,11 @@ func TestFinishThenPushReturnsToOneSessionsView(t *testing.T) {
 	}
 }
 
-// TestFinishAndRemoveReturnsToOneSessionsView covers finishing with the
-// session removed afterward: the sessions view must come back once, empty.
-func TestFinishAndRemoveReturnsToOneSessionsView(t *testing.T) {
-	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	seed(t, env, "pay", a)
-	commitInSession(t, env, "pay", "work", "alpha", "one.txt")
-	d := newDriver(t, env, "")
-
-	d.key("right", "F", "c", "y")
-	d.eventually(func() bool { return containsView(d, "done") }, "finish to complete")
-	d.key("enter")
-	if got := d.crumbs(); got != "packages > pay" {
-		t.Fatalf("crumbs = %q, want %q", got, "packages > pay")
-	}
-	d.eventually(func() bool { return containsView(d, "No sessions yet") }, "the list to reload empty")
-}
-
 // TestPushFromMembersReturnsToMembers guards that a push started from the
 // members view returns to that view, not to a second copy of it.
 func TestPushFromMembersReturnsToMembers(t *testing.T) {
 	env := testutil.NewEnv(t)
-	finishedPay(t, env, "alpha")
+	seedWork(t, env, "alpha")
 	d := newDriver(t, env, "")
 
 	d.key("right", "m", "p", "y")
@@ -158,26 +130,4 @@ func TestPushFromMembersReturnsToMembers(t *testing.T) {
 	if _, ok := d.app.top().(*membersModel); !ok {
 		t.Fatalf("top = %T, want *membersModel", d.app.top())
 	}
-}
-
-// TestFinishAndRemoveFromMembersLeavesTheRemovedSession guards the members
-// view of a session that finishing removed: it has nothing left to show, so
-// leaving the operation must return to the sessions list, not to it.
-func TestFinishAndRemoveFromMembersLeavesTheRemovedSession(t *testing.T) {
-	env := testutil.NewEnv(t)
-	a := env.NewSource(t, "alpha")
-	seed(t, env, "pay", a)
-	commitInSession(t, env, "pay", "work", "alpha", "one.txt")
-	d := newDriver(t, env, "")
-
-	d.key("right", "m", "P", "F", "c", "y") // members > push (not finished) > finish
-	d.eventually(func() bool { return containsView(d, "done") }, "finish to complete")
-	d.key("enter")
-	if got := d.crumbs(); got != "packages > pay" {
-		t.Fatalf("crumbs = %q, want %q", got, "packages > pay")
-	}
-	if _, ok := d.app.top().(*sessionsModel); !ok {
-		t.Fatalf("top = %T, want *sessionsModel", d.app.top())
-	}
-	d.eventually(func() bool { return containsView(d, "No sessions yet") }, "the list to reload empty")
 }

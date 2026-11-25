@@ -11,7 +11,7 @@ const SkillName = "vmono"
 // It is assembled from named sections so that a harness integration with
 // more than one entry point, such as the Claude Code plugin's commands, can
 // quote the guidance it shares with the skill instead of restating it.
-const skillBody = skillHeader + skillIntro + whatGoesWhere + addMemberSection + statusSection + finishSection + updateSection + skillRules
+const skillBody = skillHeader + skillIntro + whatGoesWhere + addMemberSection + statusSection + pushSection + updateSection + mergedSection + skillRules
 
 // skillHeader is the frontmatter and generated-file note that open the
 // bundled skill.
@@ -30,7 +30,7 @@ const skillIntro = `# Working inside a vmono session
 A vmono **package** groups several git repositories (members) and records why:
 a purpose, free-form context, a dated log of notes, and a one-line role per
 member. A **session** is one piece of work on a package. Each session has its
-own git branch and its own worktree of every member, so several sessions of
+own git branches and its own worktree of every member, so several sessions of
 the same package can run side by side without touching each other. You are in
 one session, and the files around you are that session's worktrees.
 
@@ -95,94 +95,122 @@ terminal. Never run it yourself.
 
 `
 
-// statusSection says how to find out what is left to land, and what would
-// stop it from landing. The Claude Code plugin's status command quotes it.
+// statusSection says how to find out how far the work is from pushed and
+// merged. The Claude Code plugin's status command quotes it.
 const statusSection = `## Check where the session stands
 
-` + "`vmono status --json`" + ` reports the session's ` + "`state`" + ` (in-progress or finished) and, for
-each member, its branch, any uncommitted or untracked files, and how many
-commits are left to land on its ` + "`into`" + ` branch. Run it when you need to know what
-is left, and before finishing. Call out anything that would block
-` + "`vmono session finish`" + `: uncommitted work, a rebase in progress, a missing
-worktree. It only reads state; it changes nothing.
+` + "`vmono status --json`" + ` reports, for each member, its branch, any uncommitted or
+untracked files, how many commits it has of its own (` + "`own_commits`" + `) on top of
+` + "`built_on`" + `, and how far it is from published in ` + "`publish`" + `:
+
+- ` + "`empty`" + `: no commits yet. ` + "`unpublished`" + `: commits, none pushed.
+- ` + "`unpushed`" + `, ` + "`pushed`" + `, ` + "`behind`" + `, ` + "`diverged`" + `: compared with ` + "`remote_branch`" + `.
+- ` + "`merged`" + `: the work has been merged; ` + "`merged_by`" + ` says whether by a ` + "`merge`" + ` commit, a
+  ` + "`rebase`" + ` or a ` + "`squash`" + `.
+- ` + "`remote-deleted`" + `: the remote branch is gone, usually because its pull request was
+  merged, but the work is not recognizably on the base.
+
+The session's ` + "`state`" + ` is ` + "`in-progress`" + `, ` + "`pushed`" + ` or ` + "`merged`" + `. All of it is as of the
+last fetch. Run it when you need to know what is left, and before reviewing or
+pushing. Call out uncommitted work, a rebase in progress, a missing worktree, and
+members that are merged or ` + "`remote-deleted`" + ` (see After a pull request merges). It
+only reads state; it changes nothing.
 
 `
 
-// finishSection is the procedure for landing a session's commits, with the
-// rules that bound it. The Claude Code plugin's finish command quotes it.
-const finishSection = `## Finishing the session
+// pushSection is the procedure for wrapping up and pushing a session's
+// branches, with the rules that bound it. The Claude Code plugin's push command
+// quotes it.
+const pushSection = `## Wrapping up and pushing
 
-Finishing lands the session's commits on a branch in each member's source repo.
-Each member has its own landing branch, by default the branch its source repo had
-checked out when the session began; ` + "`vmono show --json`" + ` lists it as ` + "`into`" + ` on every
-member, and ` + "`vmono session into`" + ` prints them. Do it only when the user says the work
-is done or asks to land or merge it back.
+Each active member is on a branch of its own repository, and that branch is the
+result: it is what gets pushed and what a pull request is opened from. There is
+nothing to merge back. When the user says the work is done:
 
-1. Commit your work in every member, from inside the member's directory.
-   ` + "`vmono session finish`" + ` refuses uncommitted changes and untracked files.
-2. Preview with ` + "`vmono session review --json`" + ` and read it as in step 3, then run
-   ` + "`vmono session finish --json`" + `. The review changes nothing and needs no permission;
-   finishing asks the user for permission by design.
-3. Read the result. Each member is one of:
-   - ` + "`landed`" + `: its commits are now on the branch in ` + "`into`" + `.
-   - ` + "`nothing`" + `: it had no commits of its own.
-   - ` + "`blocked`" + `: ` + "`reason`" + ` says why. Fix what is in your session (commit, finish a
-     rebase) and run it again. If it names ` + "`vmono session update`" + `, see Updating the
-     session below. If the cause is in the source repo, such as
-     uncommitted changes where the branch is checked out, tell the user; do not
-     touch the source repo yourself.
-   - ` + "`conflict`" + `: the rebase onto the landing branch stopped. ` + "`conflicts`" + ` lists the
-     files, inside that member's directory. Resolve them keeping both sides'
-     intent, run ` + "`git add`" + ` on them, then ` + "`git -c core.editor=true rebase --continue`" + `,
-     and run ` + "`vmono session finish`" + ` again. Nothing has moved while any member is
-     blocked or conflicted, so it is safe to stop and ask the user.
-   A member's ` + "`notes`" + ` do not stop the finish. If the preview notes that a landing
-   branch has diverged from its upstream, landing works but the user's push will
-   be refused. Tell them, and offer ` + "`vmono session update --merge`" + ` before finishing.
-4. Tell the user which branch each member landed on and how many commits.
+1. Commit your work in every member, from inside the member's directory. Only commits
+   are pushed.
+2. Preview with ` + "`vmono session review --json`" + `. It changes nothing and needs no
+   permission.
+3. Report, per member: the branch, how many commits it has, and anything uncommitted or
+   blocked. Then stop, unless the user asked you to push.
 
-The session stays in place afterward, marked finished (` + "`vmono show --json`" + ` reports
-its ` + "`state`" + `). New commits reopen it, and finishing again lands only those.
+Push only when the user asks for it in this conversation, with
+` + "`vmono session push --json`" + `. It asks for permission by design where the harness has
+permission rules; where it has none, the user's request is the only permission there
+is, so never push on your own judgment. Never use ` + "`git push`" + ` instead, never force,
+and never open or merge a pull request unless the user asks for that too.
 
-- Never pass ` + "`--close`" + `: you are running inside the session. Tell the user they can
-  remove it from the vmono TUI or with ` + "`vmono session rm`" + `.
-- Never push, and never delete branches. Landing is local; pushing and pull
-  requests are the user's.
-- Change a landing branch only if the user names one: ` + "`vmono session into --member NAME=BRANCH`" + `
-  (or ` + "`--into NAME=BRANCH`" + ` on finish or review). Never pick a different branch yourself.
+Read the result. Each member is one of:
+
+- ` + "`pushed`" + `, or ` + "`ready`" + ` in a review: ` + "`branch`" + ` goes to ` + "`remote`" + `/` + "`dest`" + `; ` + "`new`" + ` means the
+  push creates it there.
+- ` + "`nothing`" + `: no commits, or the remote already has them.
+- ` + "`merged`" + `: the work has been merged already. See After a pull request merges.
+- ` + "`blocked`" + `: ` + "`reason`" + ` says why. If the branch has diverged from its remote copy, see
+  Updating the session. If its remote branch was deleted, see After a pull request
+  merges. Do not work around it.
+- ` + "`failed`" + `: git refused. Report ` + "`reason`" + `.
+
+A member's ` + "`notes`" + ` do not stop a push: uncommitted files were left out, or the worktree
+is on another branch. Tell the user about them.
 
 `
 
-// updateSection is how to catch a session up with its landing branches, and
-// what to do when one has diverged. The Claude Code plugin's finish command
-// quotes it, since finishing is where an agent usually needs it.
+// updateSection is how to bring a session up to date, and what to do when a
+// member cannot be. The Claude Code plugin's push command quotes it, since a
+// diverged branch is found by pushing.
 const updateSection = `## Updating the session
 
-` + "`vmono session update --json`" + ` fetches, then rebases each member's commits onto the
-latest of its landing branch. Run it when the user asks to update, sync with or
-rebase onto upstream, or when finish tells you to. Commit your work first, and
-make sure nothing else is working in the session, since it rewrites the session
-branch. Each member is one of:
+` + "`vmono session update --json`" + ` fetches, then brings each member's branch up to date. A
+branch that has not been pushed is rebased onto what it is built on. One that has been
+pushed has its remote copy and then its base merged into it, so that pushing it again
+never needs force. Run it when the user asks to update, sync with or rebase onto
+upstream, or when a push is blocked because the branch diverged. Commit your work first,
+and make sure nothing else is working in the session. Each member is one of:
 
-- ` + "`updated`" + ` or ` + "`up-to-date`" + `: nothing to do. After an update, check that the work
-  still builds and passes its tests.
+- ` + "`updated`" + ` or ` + "`up-to-date`" + `: after an update, check that the work still builds and passes
+  its tests. ` + "`notes`" + ` say when a branch stacked on another moved to the base.
+- ` + "`merged`" + `: see After a pull request merges.
 - ` + "`skipped`" + `: ` + "`reason`" + ` says why, and the member is unchanged. If it is uncommitted work,
-  commit it and run the update again. If the landing branch and its remote copy
-  have diverged, explain that to the user and ask before running
-  ` + "`vmono session update --merge --json`" + `. It merges both sides into the session, keeps
-  every commit, and lets finish and the user's push go through as fast-forwards,
-  but the merge commit lands with the work. Never use ` + "`--merge`" + ` without asking, and
-  never reconcile the branches in the source repo yourself.
+  commit it and run the update again. If history was rewritten, explain that to the user
+  and ask; never run ` + "`git reset --hard`" + ` or force-push on your own.
 - ` + "`conflict`" + `: it was aborted and the member is unchanged. ` + "`conflicts`" + ` lists the files and
-  ` + "`reason`" + ` gives the git commands that reproduce it. Run them in that member's
-  directory and resolve keeping both sides' intent. For a rebase, ` + "`git add`" + ` the files
-  and run ` + "`git -c core.editor=true rebase --continue`" + `; for a merge, commit it. Then run
-  the update again. Ask the user if the right resolution is not clear.
+  ` + "`reason`" + ` gives the git commands that reproduce it. Run them in that member's directory
+  and resolve keeping both sides' intent. For a rebase, ` + "`git add`" + ` the files and run
+  ` + "`git -c core.editor=true rebase --continue`" + `; for a merge, commit it. Then run the update
+  again. Ask the user if the right resolution is not clear.
 - ` + "`failed`" + `: report ` + "`reason`" + ` to the user.
 
-` + "`finish`" + ` blocks a member whose landing branch moved after the session took in
-upstream's commits, because rebasing would duplicate them. If the user already
-agreed to merge that member, or once they do, run ` + "`vmono session update --merge --json`" + ` and finish again.
+Never rebase or amend commits that have been pushed. Where a rebase is wanted on a pushed
+branch, that is the user's decision and their force-push.
+
+`
+
+// mergedSection is what becomes of a session once its work has been merged, and
+// why its branches must not be worked on then. The Claude Code plugin's status
+// and push commands quote it.
+const mergedSection = `## After a pull request merges
+
+A member whose ` + "`publish`" + ` is ` + "`merged`" + `, or ` + "`remote-deleted`" + `, is usually done with. Its branch
+must not be worked on further. After a squash or rebase merge the base holds the same
+changes as different commits, so the branch's own commits would conflict with the base
+and show up again in a new pull request. ` + "`vmono session update`" + ` and ` + "`vmono session push`" + `
+leave such members alone for that reason.
+
+- When everything is merged, tell the user, and that they can remove the session with
+  ` + "`vmono session rm PACKAGE/SESSION`" + `, or ctrl+d in the TUI. Say that branches are kept
+  unless they add ` + "`--delete-branches`" + `, which deletes the merged ones, squash merges
+  included. More work belongs in a new session.
+- ` + "`remote-deleted`" + ` cannot be told from a branch someone deleted unmerged. Say so, and ask
+  the user whether its pull request was merged.
+- If you committed to a branch after it was merged, those commits are not on the base.
+  Tell the user. To move them onto the base they need a fresh branch, such as in a new
+  session, and ` + "`git rebase --onto BASE LAST_MERGED_COMMIT`" + ` there. Offer it; do not do it
+  unasked.
+
+Never remove the session, and never delete a branch, locally or on a remote. You are
+running inside the session: removing it deletes the directory you work in and closes
+your terminal.
 
 `
 
@@ -193,8 +221,8 @@ const skillRules = `## What you must not do
 - Never remove a member, delete a session, or delete the package. Point the
   user to the vmono TUI (run ` + "`vmono`" + ` with no arguments) for those. ` + "`vmono rm`" + `,
   ` + "`vmono session rm`" + ` and ` + "`vmono delete`" + ` ask for permission by design, as do
-  ` + "`vmono session finish`" + `, ` + "`vmono session push`" + ` and ` + "`vmono edit`" + `; do not work
-  around that.
+  ` + "`vmono session push`" + ` and ` + "`vmono edit`" + `; do not work around that.
+- Never force-push, and never push with ` + "`git push`" + `.
 - Never edit anything under ` + "`_ref/`" + `. Reference members are read-only context.
 - Never touch another session's directory. Run git commands from inside a
   member's directory of your own session, never from the session root.

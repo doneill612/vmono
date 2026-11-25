@@ -102,7 +102,7 @@ func TestGlobalHooks(t *testing.T) {
 	if _, err := os.Stat(p.SessionDir("one")); !os.IsNotExist(err) {
 		t.Error("an aborted create must leave no session")
 	}
-	if gitx.BranchExists(a, "vmono/gl/one") {
+	if gitx.BranchExists(a, "one") {
 		t.Error("an aborted create must leave no branch")
 	}
 
@@ -111,26 +111,10 @@ func TestGlobalHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a warning post_create must not fail the create: %v", err)
 	}
-	commitIn(t, filepath.Join(s.Dir, "alpha"), "work.txt")
 
-	ref := "$VMONO_LANDED"
-	if runtime.GOOS == "windows" {
-		ref = "%VMONO_LANDED%"
-	}
-	c.Cfg.Hooks = map[string]config.Hook{
-		config.HookPostFinish: {Command: "echo landed=" + ref},
-		config.HookPreRemove:  abort("exit 1"),
-	}
-	events, err := record(c, func() error { _, err := c.Finish(s, FinishOptions{Close: true}); return err })
-	if !errors.Is(err, ErrRefused) {
-		t.Errorf("pre_remove must veto the close, got %v", err)
-	}
-	heard := false
-	for _, ev := range events {
-		heard = heard || ev.Status == apply.StatusOutput && strings.TrimSpace(ev.Message) == "landed=alpha:main"
-	}
-	if !heard {
-		t.Errorf("post_finish output missing in %+v", events)
+	c.Cfg.Hooks = map[string]config.Hook{config.HookPreRemove: abort("exit 1")}
+	if _, err := c.DeleteSession(s, DeleteOptions{Force: true}); !errors.Is(err, ErrRefused) {
+		t.Errorf("pre_remove must veto the removal, got %v", err)
 	}
 	if _, err := c.Delete(p, DeleteOptions{Force: true}); !errors.Is(err, ErrRefused) {
 		t.Errorf("pre_remove must veto a package delete, got %v", err)
@@ -141,6 +125,44 @@ func TestGlobalHooks(t *testing.T) {
 	c.Cfg.NoHooks = true
 	if _, err := c.DeleteSession(s, DeleteOptions{}); err != nil {
 		t.Errorf("NoHooks must skip the veto: %v", err)
+	}
+}
+
+func TestPostPushHook(t *testing.T) {
+	c, env := newCore(t)
+	s, _ := workSession(t, c, env, "alpha", "beta")
+	ref := "$VMONO_PUSHED"
+	if runtime.GOOS == "windows" {
+		ref = "%VMONO_PUSHED%"
+	}
+	heard := func(want string) bool {
+		t.Helper()
+		events, err := record(c, func() error { _, err := c.Push(s, PushOptions{Members: []string{"alpha"}}); return err })
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range events {
+			if ev.Status == apply.StatusOutput && strings.HasPrefix(ev.Message, "pushed=") {
+				if got := strings.TrimSpace(ev.Message); got != want {
+					t.Errorf("hook said %q, want %q", got, want)
+				}
+				return true
+			}
+		}
+		return false
+	}
+	c.Cfg.Hooks = map[string]config.Hook{config.HookPostPush: {Command: "echo pushed=" + ref}}
+	if !heard("pushed=alpha:" + s.S.Branch) {
+		t.Error("post_push should run after a push")
+	}
+	if heard("") {
+		t.Error("post_push must not run when nothing was pushed")
+	}
+
+	c.Cfg.Hooks = map[string]config.Hook{config.HookPostPush: {Command: "exit 1", OnFailure: config.OnFailureAbort}}
+	res, err := c.Push(s, PushOptions{})
+	if err == nil || pushRow(t, res, "beta").Status != PushPushed {
+		t.Errorf("a failing post_push is an error, and undoes nothing: %+v, %v", res, err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,153 +17,197 @@ import (
 	"github.com/doneill612/vmono/internal/render"
 )
 
-// SessionOptions tunes CreateSession.
+// SessionOptions tunes CreateSession. A member's branch is the one named for it
+// in BranchByMember or TrackByMember, else the one named for all of them in
+// Branch or Track, else the session's name, after Prefix and a slash when there
+// is one.
 type SessionOptions struct {
-	// Branch overrides the session's default branch,
-	// <branch_prefix><package>/<session>.
-	Branch string
-	// ReuseBranch checks out a session branch that already exists in a
-	// source repo instead of failing. The CLI requires --reuse-branch; the
-	// TUI asks and retries on BranchExistsError.
+	// Prefix comes before the session's name in the default branch.
+	Prefix string
+	// Branch names every active member's branch, and BranchByMember
+	// individual members'.
+	Branch         string
+	BranchByMember map[string]string
+	// ReuseBranch checks out a branch that already exists in a source repo
+	// instead of failing. The CLI requires --reuse-branch; the TUI asks and
+	// retries on BranchExistsError.
 	ReuseBranch bool
-	// Into sets the landing branch of every active member. IntoByMember sets
-	// individual members' and wins over Into. A member given neither lands on
-	// the branch its source repo has checked out when the session is created
-	// (see DefaultLanding). The choices are recorded in the session file.
-	//
-	// A landing branch other than the one the member's base names is also the
-	// session's starting point when it exists in the source, so a session can
-	// build on a feature branch and land back on it. When it does not exist it
-	// is created at finish.
-	Into         string
-	IntoByMember map[string]string
-	// Track names a branch on the members' remotes to start from and land back
-	// on: the landing branch of every active member whose remote has it. A
-	// member whose remote lacks it keeps its default. TrackByMember names one
-	// for individual members, wins over Track, and fails for a member whose
-	// remote lacks it. Tracking fetches first, whatever fetch_on_create says,
-	// since the branch may be one the source has never seen. No local branch
-	// is made until finish.
+	// Track names a branch on the members' remotes to work on, checked out as a
+	// local branch that tracks it. An active member whose remote lacks it gets a
+	// new branch of that name, and it fails when none has it. TrackByMember
+	// names one for individual members, and fails for one whose remote lacks it.
 	Track         string
 	TrackByMember map[string]string
+	// From names a branch or ref every active member's new branch is built on
+	// in place of the member's base, for work stacked on work that has not
+	// merged. A member without it is built on its base, and it fails when none
+	// has it. FromByMember names one for individual members, and fails for one
+	// without it. Both are ignored for a member that tracks a branch.
+	//
+	// FromByMember also names what a reference member is checked out at in place
+	// of the package's ref. From leaves reference members alone.
+	From         string
+	FromByMember map[string]string
 }
 
-// tracking reports whether the options start any member from a remote branch.
-func (o SessionOptions) tracking() bool { return o.Track != "" || len(o.TrackByMember) > 0 }
-
-// resolveTrack turns the tracked branches in opts into landing branches, as of
-// the last fetch, and returns the options with IntoByMember filled in. It
-// fails when a member named in TrackByMember has no such branch on its remote,
-// when no member has the one named for all of them, and when a member is given
-// both a tracked and a landing branch.
-func resolveTrack(p *Package, opts SessionOptions, srcs map[string]string, warn func(member, msg string)) (SessionOptions, error) {
-	if opts.Track != "" && opts.Into != "" {
-		return opts, errors.New("--track and --into cannot both name a branch for every member")
+// check rejects options that contradict each other or name a member p does not
+// have, or one a branch means nothing for.
+func (o SessionOptions) check(p *Package) error {
+	switch {
+	case o.Branch != "" && o.Track != "":
+		return errors.New("--branch and --track cannot both name a branch for every member")
+	case o.Prefix != "" && (o.Branch != "" || o.Track != ""):
+		return errors.New("--prefix belongs to the default branch, so it cannot be given with a branch for every member")
+	case o.Track != "" && o.From != "":
+		return errors.New("--track and --from cannot both be given for every member: a tracked branch starts where it is")
 	}
-	into := map[string]string{}
-	for member, b := range opts.IntoByMember {
-		if opts.TrackByMember[member] != "" {
-			return opts, fmt.Errorf("--track and --into both name a branch for %s", member)
-		}
-		into[member] = b
-	}
-	active := map[string]bool{}
-	found := 0
-	type miss struct{ member, msg string }
-	var missing []miss
-	for _, mem := range p.M.Members {
-		if mem.Mode != manifest.ModeActive {
-			continue
-		}
-		active[mem.Name] = true
-		branch, explicit := opts.TrackByMember[mem.Name], true
-		if branch == "" {
-			branch, explicit = opts.Track, false
-		}
-		if branch == "" || (!explicit && into[mem.Name] != "") {
-			continue
-		}
-		remote := primaryRemote(srcs[mem.Name])
-		if remote != "" && branch != "HEAD" && gitx.RefExists(srcs[mem.Name], "refs/remotes/"+remote+"/"+branch) {
-			into[mem.Name] = branch
-			found++
-			continue
-		}
-		msg := fmt.Sprintf("no branch %q on %s", branch, firstNonEmpty(remote, "any remote"))
-		if explicit {
-			return opts, NotFound("%s: %s", mem.Name, msg)
-		}
-		missing = append(missing, miss{mem.Name, msg + "; starting from its default"})
-	}
-	for member := range opts.TrackByMember {
-		if !active[member] {
-			return opts, fmt.Errorf("--track names %q, which is not an active member of %s", member, p.Name)
-		}
-	}
-	if opts.Track != "" && found == 0 {
-		return opts, NotFound("no member of %s has a branch %q on its remote", p.Name, opts.Track)
-	}
-	for _, m := range missing {
-		warn(m.member, m.msg)
-	}
-	opts.IntoByMember = into
-	return opts, nil
-}
-
-// DefaultLanding returns, for each active member of p, the branch its source
-// repo has checked out: where the user was working, and so where the work
-// most likely belongs. A source on a detached HEAD has no entry, and its
-// member lands on the branch its base names instead.
-func (c *Core) DefaultLanding(p *Package) map[string]string {
-	out := map[string]string{}
-	for _, mem := range p.M.Members {
-		if mem.Mode != manifest.ModeActive {
-			continue
-		}
-		src, err := paths.Abs(mem.Source)
-		if err != nil {
-			continue
-		}
-		if br := gitx.CurrentBranch(src); br != "" {
-			out[mem.Name] = br
-		}
-	}
-	return out
-}
-
-// landingFor builds the landing branches recorded in a new session: the
-// checked-out branch of each active member's source, replaced by opts.Into
-// for all members when given, and by opts.IntoByMember for the members it
-// names. A checked-out branch that is the session's own branch is not a
-// landing branch and is left out; an explicit one is kept, for validation to
-// refuse. It rejects a member that is not an active
-// member of the package.
-func (c *Core) landingFor(p *Package, branch string, opts SessionOptions) (map[string]string, error) {
-	into := c.DefaultLanding(p)
-	for name, b := range into {
-		if b == branch {
-			delete(into, name)
-		}
-	}
-	active := map[string]bool{}
-	for _, mem := range p.M.Members {
-		if mem.Mode == manifest.ModeActive {
-			active[mem.Name] = true
-			if opts.Into != "" {
-				into[mem.Name] = opts.Into
+	for flag, by := range map[string]map[string]string{"--branch": o.BranchByMember, "--track": o.TrackByMember, "--from": o.FromByMember} {
+		for member := range by {
+			mem, ok := p.M.Member(member)
+			switch {
+			case !ok:
+				return fmt.Errorf("%s names %q, which is not a member of %s", flag, member, p.Name)
+			case mem.Mode != manifest.ModeActive && flag != "--from":
+				return fmt.Errorf("%s names %q, which is not an active member of %s; choose what a reference member is checked out at with --from %s=REF", flag, member, p.Name, member)
 			}
 		}
 	}
-	for name, b := range opts.IntoByMember {
-		if !active[name] {
-			return nil, fmt.Errorf("--into names %q, which is not an active member of %s", name, p.Name)
+	for member := range o.TrackByMember {
+		if o.BranchByMember[member] != "" {
+			return fmt.Errorf("--track and --branch both name a branch for %s", member)
 		}
-		into[name] = b
+		if o.FromByMember[member] != "" {
+			return fmt.Errorf("--track and --from are both given for %s: a tracked branch starts where it is", member)
+		}
 	}
-	if len(into) == 0 {
-		return nil, nil
+	return nil
+}
+
+// refreshes reports whether the options name something that may have appeared
+// on a remote since the last fetch.
+func (o SessionOptions) refreshes() bool {
+	return o.Track != "" || len(o.TrackByMember) > 0 || o.From != "" || len(o.FromByMember) > 0
+}
+
+// trackFor returns the remote branch the member is to work on, "" for none, and
+// whether it was named for that member.
+func (o SessionOptions) trackFor(member string) (branch string, named bool) {
+	if b := o.TrackByMember[member]; b != "" {
+		return b, true
 	}
-	return into, nil
+	if o.BranchByMember[member] != "" {
+		return "", false
+	}
+	return o.Track, false
+}
+
+// fromFor returns what the member's branch is to be built on, "" for its base,
+// and whether it was named for that member.
+func (o SessionOptions) fromFor(member string) (from string, named bool) {
+	if f := o.FromByMember[member]; f != "" {
+		return f, true
+	}
+	return o.From, false
+}
+
+// session builds the session file the options describe, before anything that
+// depends on the repos is known.
+func (o SessionOptions) session(p *Package, name string) *manifest.Session {
+	branch := firstNonEmpty(o.Branch, o.Track, manifest.DefaultBranch(o.Prefix, name))
+	ms := &manifest.Session{Package: p.Name, Name: name, Branch: branch, Created: time.Now().Truncate(time.Second)}
+	ms.ApplyDefaults()
+	for _, mem := range p.M.Members {
+		if b := firstNonEmpty(o.BranchByMember[mem.Name], o.TrackByMember[mem.Name]); b != "" {
+			ms.SetMember(mem.Name, manifest.SessionMember{Branch: b})
+		}
+	}
+	return ms
+}
+
+// resolveTrack checks that the branches to track are there, as of the last
+// fetch, and returns the members that have theirs.
+func resolveTrack(p *Package, opts SessionOptions, srcs map[string]string, warn func(member, msg string)) (map[string]bool, error) {
+	tracked := map[string]bool{}
+	var missing []string
+	asked := false
+	for _, mem := range p.M.Members {
+		branch, named := opts.trackFor(mem.Name)
+		if mem.Mode != manifest.ModeActive || branch == "" {
+			continue
+		}
+		asked = asked || !named
+		remote := primaryRemote(srcs[mem.Name])
+		if remote != "" && branch != "HEAD" && gitx.RefExists(srcs[mem.Name], "refs/remotes/"+remote+"/"+branch) {
+			tracked[mem.Name] = true
+			continue
+		}
+		if named {
+			return nil, NotFound("%s: no branch %q on %s", mem.Name, branch, firstNonEmpty(remote, "any remote"))
+		}
+		missing = append(missing, mem.Name)
+	}
+	if asked && len(missing) > 0 {
+		found := false
+		for member := range tracked {
+			_, named := opts.trackFor(member)
+			found = found || !named
+		}
+		if !found {
+			return nil, NotFound("no member of %s has a branch %q on its remote", p.Name, opts.Track)
+		}
+	}
+	for _, member := range missing {
+		warn(member, fmt.Sprintf("no branch %q on its remote; starting a new one of that name", opts.Track))
+	}
+	return tracked, nil
+}
+
+// resolveFroms records in ms what each member is built on in place of its base,
+// and what each reference member is checked out at in place of the package's
+// ref, as of the last fetch. Members in tracked are left out.
+func resolveFroms(p *Package, ms *manifest.Session, opts SessionOptions, srcs map[string]string, tracked map[string]bool, warn func(member, msg string)) error {
+	asked, found := false, false
+	var missing []string
+	for _, mem := range p.M.Members {
+		from, named := opts.fromFor(mem.Name)
+		reference := mem.Mode == manifest.ModeReference
+		if from == "" || tracked[mem.Name] || (reference && !named) {
+			continue
+		}
+		asked = asked || !named
+		if !reference && from == ms.BranchFor(mem.Name) {
+			return fmt.Errorf("%s: %q cannot be built on itself", mem.Name, from)
+		}
+		src := srcs[mem.Name]
+		ref := resolveFrom(src, from)
+		if ref == "" {
+			if named {
+				return NotFound("%s: nothing named %q to start from", mem.Name, from)
+			}
+			missing = append(missing, mem.Name)
+			continue
+		}
+		found = found || !named
+		tip, err := gitx.ResolveRef(src, ref)
+		if err != nil {
+			return fmt.Errorf("%s: %w", mem.Name, err)
+		}
+		rec := ms.Members[mem.Name]
+		rec.BaseTip = tip
+		if reference {
+			rec.Ref = from
+		} else {
+			rec.From = from
+		}
+		ms.SetMember(mem.Name, rec)
+	}
+	if asked && !found {
+		return NotFound("no member of %s has anything named %q to start from", p.Name, opts.From)
+	}
+	for _, member := range missing {
+		warn(member, fmt.Sprintf("nothing named %q; starting from its base", opts.From))
+	}
+	return nil
 }
 
 // BranchExistsError reports that the session branch already exists in a
@@ -175,6 +220,19 @@ type BranchExistsError struct {
 // Error implements error.
 func (e *BranchExistsError) Error() string {
 	return fmt.Sprintf("%s: branch %q already exists in the source repo (use --reuse-branch to check it out)", e.Member, e.Branch)
+}
+
+// RemoteBranchExistsError reports that a branch about to be started is already
+// on the member's remote, where pushing it would meet someone else's work.
+type RemoteBranchExistsError struct {
+	Member string
+	Remote string
+	Branch string
+}
+
+// Error implements error.
+func (e *RemoteBranchExistsError) Error() string {
+	return fmt.Sprintf("%s: branch %q is already on %s; work on it with --track, or choose another name with --branch or --prefix", e.Member, e.Branch, e.Remote)
 }
 
 // prepareMember resolves one member's source to an absolute repo root,
@@ -299,12 +357,14 @@ func resolveRefIn(refs gitx.Refs, src, ref string, warn func(string)) (string, e
 }
 
 // preflightMembers checks the members in check before anything touches
-// disk, for a session on branch: sources are usable, no two active members
-// share a repo, the branch is not checked out elsewhere and does not collide
-// with another branch's ref path, and base/ref resolve. srcs maps every
-// member of m (not only check) to its absolute source. It returns the
-// members whose branch already exists in their source.
-func preflightMembers(m *manifest.Manifest, branch string, srcs map[string]string, check []manifest.Member, reuse bool, removing map[string]bool) (existing map[string]bool, err error) {
+// disk, for a session whose members are on the branches branchFor gives: sources
+// are usable, no two active members share a repo, the branch is not checked out
+// elsewhere, is valid, is not the one the member's work merges into, and does
+// not collide with another branch's ref path, and base/ref resolve. srcs maps
+// every member of m (not only check) to its absolute source. It returns the
+// members whose branch already exists in their source, which fails unless reuse
+// allows it.
+func preflightMembers(m *manifest.Manifest, branchFor func(member string) string, srcs map[string]string, check []manifest.Member, reuse func(member string) bool, removing map[string]bool) (existing map[string]bool, err error) {
 	existing = map[string]bool{}
 	if err := checkDistinctSources(m, srcs); err != nil {
 		return nil, err
@@ -313,13 +373,20 @@ func preflightMembers(m *manifest.Manifest, branch string, srcs map[string]strin
 		src := srcs[mem.Name]
 		switch mem.Mode {
 		case manifest.ModeActive:
+			branch := branchFor(mem.Name)
+			if !gitx.ValidBranchName(src, branch) {
+				return nil, fmt.Errorf("%s: %q is not a valid branch name", mem.Name, branch)
+			}
+			if branch == baseBranchOf(src, mem) {
+				return nil, fmt.Errorf("%s: %q is the branch its work merges into, so a session cannot work on it; choose another name with --branch or --prefix", mem.Name, branch)
+			}
 			if at, err := gitx.BranchCheckedOutAt(src, branch); err != nil {
 				return nil, fmt.Errorf("%s: %w", mem.Name, err)
 			} else if at != "" && !removing[realPath(at)] {
-				return nil, fmt.Errorf("%s: branch %q is already checked out at %s", mem.Name, branch, at)
+				return nil, fmt.Errorf("%s: branch %q is already checked out at %s; choose another name with --branch or --prefix", mem.Name, branch, at)
 			}
 			if gitx.BranchExists(src, branch) {
-				if !reuse {
+				if !reuse(mem.Name) {
 					return nil, &BranchExistsError{Member: mem.Name, Branch: branch}
 				}
 				existing[mem.Name] = true
@@ -340,54 +407,20 @@ func preflightMembers(m *manifest.Manifest, branch string, srcs map[string]strin
 	return existing, nil
 }
 
-// preflightInto checks each member's recorded landing branch against its
-// source before a session is created, or its landing branches change, so a
-// finish never fails late on a branch git could not hold. The name must be a
-// valid branch name, and a branch that does not exist yet must not collide
-// with another branch's ref path, since finish creates it. Members with no
-// recorded landing branch are skipped.
-func preflightInto(ms *manifest.Session, members []manifest.Member, srcs map[string]string) error {
-	for _, mem := range members {
-		into := ms.Into[mem.Name]
-		if mem.Mode != manifest.ModeActive || into == "" {
+// preflightRemotes rejects a branch that would be new but is already on the
+// member's remote as of the last fetch, for the members in check that are not
+// in have.
+func preflightRemotes(branchFor func(member string) string, check []manifest.Member, srcs map[string]string, have ...map[string]bool) error {
+	for _, mem := range check {
+		if mem.Mode != manifest.ModeActive || slices.ContainsFunc(have, func(m map[string]bool) bool { return m[mem.Name] }) {
 			continue
 		}
-		src := srcs[mem.Name]
-		if !gitx.ValidBranchName(src, into) {
-			return fmt.Errorf("%s: %q is not a valid branch name", mem.Name, into)
-		}
-		if gitx.BranchExists(src, into) {
-			continue
-		}
-		if other, clash := gitx.BranchRefConflict(src, into); clash {
-			return fmt.Errorf("%s: landing branch %q conflicts with existing branch %q (git cannot hold both); choose a different --into", mem.Name, into, other)
+		branch := branchFor(mem.Name)
+		if remote := primaryRemote(srcs[mem.Name]); remote != "" && gitx.RefExists(srcs[mem.Name], "refs/remotes/"+remote+"/"+branch) {
+			return &RemoteBranchExistsError{Member: mem.Name, Remote: remote, Branch: branch}
 		}
 	}
 	return nil
-}
-
-// cutPoint returns the ref a new session branch for mem is cut from. When the
-// member's recorded landing branch is not the branch its base names, and it
-// exists in the source as a local branch or on its remote, the session starts
-// from it: the work is meant to build on that branch and land back on it. When
-// it exists in both places the one further ahead is used, and the local one,
-// with a warning, when they have diverged. Otherwise it starts from the member's base. The branch the base names is
-// deliberately not used: the local copy can lag behind origin/main, and the
-// manifest's base already says where ordinary work starts.
-func cutPoint(src string, ms *manifest.Session, mem manifest.Member, warn func(string)) (string, error) {
-	if into := ms.Into[mem.Name]; into != "" && into != baseBranchOf(src, mem) {
-		if gitx.BranchExists(src, into) {
-			ref, diverged := freshest(src, into)
-			if diverged && warn != nil {
-				warn(fmt.Sprintf("%s has diverged from %s; starting from the local branch", into, shortRef(remoteCounterpart(src, into))))
-			}
-			return ref, nil
-		}
-		if ref := remoteCounterpart(src, into); ref != "" {
-			return ref, nil
-		}
-	}
-	return resolveRef(src, mem.Base, warn)
 }
 
 // baseBranchOf returns the name of the branch mem's base stands for: the one
@@ -488,8 +521,13 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	if err := manifest.ValidateName(name); err != nil {
 		return nil, err
 	}
-	ms := &manifest.Session{Package: p.Name, Name: name, Branch: opts.Branch, Created: time.Now().Truncate(time.Second)}
-	ms.ApplyDefaults(c.Cfg.BranchPrefix)
+	if err := opts.check(p); err != nil {
+		return nil, err
+	}
+	ms := opts.session(p, name)
+	if err := ms.Validate(); err != nil {
+		return nil, err
+	}
 	dir := p.SessionDir(name)
 	if _, err := os.Stat(dir); err == nil {
 		return nil, fmt.Errorf("package %s already has a session %q at %s", p.Name, name, dir)
@@ -502,39 +540,49 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	for _, mem := range p.M.Members {
 		srcList = append(srcList, srcs[mem.Name])
 	}
-	fetch := c.fetchStep(srcList...)
-	if opts.tracking() {
-		// The landing branches depend on what the remotes have, so this fetch
-		// has to happen ahead of the checks, and replaces the usual one.
-		fetch = nil
+	existing, err := preflightMembers(p.M, ms.BranchFor, srcs, p.M.Members, func(member string) bool {
+		track, _ := opts.trackFor(member)
+		return opts.ReuseBranch || track != ""
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	// What is on the remotes decides where branches start and which names are
+	// taken, so the fetch comes ahead of the rest rather than as a step of it.
+	if opts.refreshes() || c.Cfg.FetchOnCreate {
 		if err := (&apply.Runner{Events: c.Events}).Run([]apply.Step{{Name: "fetch", Run: func(warn func(string)) error {
 			fetchSources(srcList, warn)
 			return nil
 		}}}); err != nil {
 			return nil, err
 		}
-		if opts, err = resolveTrack(p, opts, srcs, func(member, msg string) { c.warnEvent(member, "track", msg) }); err != nil {
-			return nil, err
+	}
+	warn := func(step string) func(member, msg string) {
+		return func(member, msg string) { c.warnEvent(member, step, msg) }
+	}
+	tracked, err := resolveTrack(p, opts, srcs, warn("track"))
+	if err != nil {
+		return nil, err
+	}
+	if err := resolveFroms(p, ms, opts, srcs, tracked, warn("from")); err != nil {
+		return nil, err
+	}
+	if err := preflightRemotes(ms.BranchFor, p.M.Members, srcs, existing, tracked); err != nil {
+		return nil, err
+	}
+	for _, mem := range p.M.Members {
+		if mem.Mode == manifest.ModeActive && !existing[mem.Name] {
+			rec := ms.Members[mem.Name]
+			rec.Created = true
+			ms.SetMember(mem.Name, rec)
 		}
 	}
-	into, err := c.landingFor(p, ms.Branch, opts)
-	if err != nil {
-		return nil, err
-	}
-	ms.Into = into
 	if err := ms.Validate(); err != nil {
-		return nil, err
-	}
-	existing, err := preflightMembers(p.M, ms.Branch, srcs, p.M.Members, opts.ReuseBranch, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := preflightInto(ms, p.M.Members, srcs); err != nil {
 		return nil, err
 	}
 
 	s := &Session{Pkg: p, Name: name, Dir: dir, S: ms}
-	steps := append(fetch, apply.Step{
+	steps := []apply.Step{{
 		Name: "create session",
 		Run: func(func(string)) error {
 			if err := os.Mkdir(dir, 0o755); err != nil {
@@ -546,9 +594,9 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 			return manifest.SaveSession(dir, ms)
 		},
 		Undo: func() error { return os.RemoveAll(dir) },
-	})
+	}}
 	for _, mem := range p.M.Members {
-		steps = append(steps, c.addMemberSteps(s, mem, srcs[mem.Name], existing[mem.Name])...)
+		steps = append(steps, c.addMemberSteps(s, mem, srcs[mem.Name], branchPlan{exists: existing[mem.Name], forward: tracked[mem.Name]})...)
 	}
 	steps = append(steps,
 		apply.Step{Name: "render files", Run: func(func(string)) error {
@@ -624,19 +672,30 @@ func (c *Core) fetchStep(srcs ...string) []apply.Step {
 	}}}
 }
 
+// branchPlan is how an active member's branch comes to be checked out.
+type branchPlan struct {
+	// exists is true when the branch is already there in the source.
+	exists bool
+	// forward brings a branch that exists up to its remote copy when all it
+	// lacks is the copy's newer commits, and makes it track the copy.
+	forward bool
+}
+
 // addMemberSteps returns the apply steps that bring one member's worktree in
 // a session into existence: worktree add, copying files, and the member's setup
-// commands. It does not fetch; callers
-// put fetchStep ahead of the member steps. Rollback of the
-// worktree step removes the worktree and any branch it created.
-func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branchExists bool) []apply.Step {
+// commands. A new branch starts from the branch of the same name on its remote,
+// which it then tracks, when there is one, and else from what the session builds
+// the member on. It does not fetch; callers put fetchStep ahead of the member
+// steps. Rollback of the worktree step removes the worktree and any branch it
+// created, and puts back one it moved.
+func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, plan branchPlan) []apply.Step {
 	var steps []apply.Step
 	dst := s.MemberDir(mem)
-	branch := s.S.Branch
+	branch := s.BranchFor(mem.Name)
 
 	switch mem.Mode {
 	case manifest.ModeActive:
-		createdBranch := false
+		createdBranch, movedFrom := false, ""
 		steps = append(steps, apply.Step{Member: mem.Name, Name: "worktree add", Run: func(warn func(string)) error {
 			if err := releaseStaleWorktrees(src, warn); err != nil {
 				return err
@@ -644,14 +703,27 @@ func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branc
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				return err
 			}
-			if branchExists {
-				return gitx.WorktreeAddExisting(src, dst, branch)
-			}
-			base, err := cutPoint(src, s.S, mem, warn)
-			if err != nil {
+			pub := publicationOf(gitx.LiveRefs(src), src, branch, baseBranches(s, mem, src))
+			if plan.exists {
+				if err := gitx.WorktreeAddExisting(src, dst, branch); err != nil {
+					return err
+				}
+				if !plan.forward || !pub.published() {
+					return nil
+				}
+				var err error
+				movedFrom, err = catchUp(src, dst, branch, pub, warn)
 				return err
 			}
-			if err := gitx.WorktreeAddBranch(src, dst, branch, base); err != nil {
+			start := pub.ref
+			if !pub.published() {
+				base, err := baseOf(gitx.LiveRefs(src), s, mem, src, warn)
+				if err != nil {
+					return err
+				}
+				start = base.ref
+			}
+			if err := gitx.WorktreeAddBranch(src, dst, branch, start); err != nil {
 				// git creates the branch before it checks the target path, so
 				// a refused add (an occupied directory, say) leaves the branch
 				// behind. It did not exist before this step, so it is ours to
@@ -662,8 +734,16 @@ func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branc
 				return err
 			}
 			createdBranch = true
+			if pub.published() {
+				return gitx.SetUpstream(src, branch, shortRef(pub.ref))
+			}
 			return nil
 		}, Undo: func() error {
+			if movedFrom != "" {
+				if err := gitx.ResetKeep(dst, movedFrom); err != nil {
+					return err
+				}
+			}
 			return undoWorktree(src, dst, branch, createdBranch)
 		}})
 	case manifest.ModeReference:
@@ -674,9 +754,12 @@ func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branc
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				return err
 			}
-			ref, err := resolveRef(src, mem.Ref, warn)
+			ref, lost, err := refOf(s, mem, src, warn)
 			if err != nil {
 				return err
+			}
+			if lost != "" {
+				warn(fmt.Sprintf("%s, which the session checks it out at, is gone; using %s", lost, displayRef(src, ref)))
 			}
 			return gitx.WorktreeAddDetached(src, dst, ref)
 		}, Undo: func() error {
@@ -692,6 +775,31 @@ func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, branc
 	}
 	steps = append(steps, c.memberHookSteps(s, mem, src, "setup", mem.Setup)...)
 	return steps
+}
+
+// catchUp makes the branch checked out at wt track its remote copy, and moves it
+// there when all it lacks is the copy's newer commits. It returns where the
+// branch was when it moved. One that has diverged stays where it is, with a
+// warning.
+func catchUp(src, wt, branch string, pub publication, warn func(string)) (movedFrom string, err error) {
+	if !pub.upstream {
+		if err := gitx.SetUpstream(src, branch, shortRef(pub.ref)); err != nil {
+			return "", err
+		}
+	}
+	ahead, behind, err := gitx.AheadBehind(src, "refs/heads/"+branch, pub.ref)
+	switch {
+	case err != nil || behind == 0:
+		return "", err
+	case ahead > 0:
+		warn(fmt.Sprintf("%s has diverged from %s; starting from the local branch", branch, shortRef(pub.ref)))
+		return "", nil
+	}
+	tip, err := gitx.ResolveRef(wt, "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return tip, gitx.ResetKeep(wt, pub.ref)
 }
 
 // undoWorktree reverses a worktree add: force-remove the worktree, prune

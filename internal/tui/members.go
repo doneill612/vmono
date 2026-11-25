@@ -22,7 +22,7 @@ type membersMsg struct {
 
 // memberActions lists everything the members view can do, in the order its
 // menu shows it. Most act on the whole session; describe, copy path and push
-// member act on the highlighted member. The pushes are for a finished session. Each key is also the view's own shortcut.
+// member act on the highlighted member. Each key is also the view's own shortcut.
 var memberActions = []action{
 	{id: "launch", label: "Launch", key: "o"},
 	{id: "launch-with", label: "Launch with…", key: "l"},
@@ -36,7 +36,7 @@ var memberActions = []action{
 }
 
 // membersModel is the drill-down from a session: one row per member with its
-// branch or ref, upstream, and working tree state in that session.
+// branch or ref, how far that is published, and working tree state in that session.
 type membersModel struct {
 	e       *env
 	name    string
@@ -57,9 +57,7 @@ func newMembers(e *env, name, session string) *membersModel {
 		{title: "mode"},
 		{title: "branch/ref", max: 32},
 		{title: "head"},
-		{title: "upstream", max: 28},
-		{title: "↑", right: true},
-		{title: "↓", right: true},
+		{title: "published", max: 36},
 		{title: "dirty", right: true},
 		{title: "untr", right: true},
 		{title: "role", flex: true},
@@ -168,6 +166,16 @@ func count(n int, applicable bool) cell {
 	return keyed(fmt.Sprint(n), numKey(n), styleWarn)
 }
 
+// publishCell is how far a member's branch is from published and merged, in the
+// warning colour when that wants attention.
+func publishCell(ms core.MemberStatus) cell {
+	switch ms.Publish {
+	case core.PublishDiverged, core.PublishDeleted:
+		return styled(ms.PublishText(), styleWarn)
+	}
+	return styled(ms.PublishText(), styleDim)
+}
+
 // memberRow builds one table row from a member's status.
 func memberRow(ms core.MemberStatus) row {
 	mode := plain("active")
@@ -188,13 +196,11 @@ func memberRow(ms core.MemberStatus) row {
 	if len(head) > 8 {
 		head = head[:8]
 	}
-	tracked := ms.Upstream != ""
 	return row{
 		id:     ms.Name,
 		search: ms.Name + " " + ms.Branch + " " + ms.Role,
 		cells: []cell{
-			plain(ms.Name), mode, where, styled(head, styleDim), styled(ms.Upstream, styleDim),
-			count(ms.Ahead, tracked), count(ms.Behind, tracked),
+			plain(ms.Name), mode, where, styled(head, styleDim), publishCell(ms),
 			count(ms.Dirty, !ms.Missing), count(ms.Untracked, !ms.Missing),
 			styled(ms.Role, styleDim),
 		},

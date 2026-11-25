@@ -18,6 +18,7 @@ const (
 	KindBadManifest     = "bad-manifest"
 	KindLegacyPackage   = "legacy-package"
 	KindBadSession      = "bad-session"
+	KindLandingSession  = "landing-session"
 	KindOrphanSessDir   = "orphan-session-dir"
 	KindOrphanDir       = "orphan-dir"
 	KindMissingWorktree = "missing-worktree"
@@ -70,7 +71,8 @@ func (r DoctorResult) Remaining() int {
 // the source repos with nothing else pointing at them. It
 // always rebuilds the index cache from the package root. With fix it
 // repairs what is safe to repair: migrating a package from before sessions
-// into a package with one session, recreating missing worktrees, relocating a
+// into a package with one session, converting sessions from when work landed on
+// other branches, recreating missing worktrees, relocating a
 // moved source by matching its remote, pruning stale entries, and removing an
 // init workspace that a dead run left unchanged.
 // Directories and worktrees it cannot attribute are only reported, never
@@ -231,6 +233,22 @@ func (c *Core) checkPackage(p *Package, known []knownRepo, fix bool, sources, cl
 		if err != nil {
 			add(Finding{Kind: KindBadSession, Package: p.Name, Session: name, Message: err.Error()})
 			continue
+		}
+		if s.S.Schema == manifest.LandingSessionSchema {
+			f := Finding{Kind: KindLandingSession, Package: p.Name, Session: name,
+				Message: "session predates pushing its own branches; `vmono doctor --fix` converts it, keeping its branch"}
+			landed := s.S.Into
+			if fix {
+				if err := c.convertSession(s); err != nil {
+					f.Message = "could not convert the session: " + err.Error()
+				} else {
+					f.Message, f.Fixed = "converted to push its own branches, which keep their names", true
+				}
+			}
+			if left := unpushedLandings(s, landed, usable); len(left) > 0 {
+				f.Message += "; what it landed on " + strings.Join(left, ", ") + " is not on a remote, and vmono no longer pushes it, so push it by hand"
+			}
+			add(f)
 		}
 		for _, mem := range p.M.Members {
 			src, ok := usable[mem.Name]

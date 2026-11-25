@@ -50,7 +50,6 @@ type Config struct {
 	Repos          []string           `toml:"repos"`
 	PackageRoot    string             `toml:"package_root"`
 	ScanDepth      int                `toml:"scan_depth"`
-	BranchPrefix   string             `toml:"branch_prefix"`
 	FetchOnCreate  bool               `toml:"fetch_on_create"`
 	DefaultHarness string             `toml:"default_harness"`
 	AutoCommit     bool               `toml:"auto_commit"`
@@ -66,6 +65,10 @@ type Config struct {
 	// comes from VMONO_NO_HOOKS or --no-hooks and is never saved.
 	NoHooks bool `toml:"-"`
 
+	// Notices are settings in the config file that were ignored, for the front
+	// ends to point out.
+	Notices []string `toml:"-"`
+
 	// Loaded reports whether a config file existed on disk. It is false on
 	// first run, which triggers the setup flow.
 	Loaded bool `toml:"-"`
@@ -77,12 +80,15 @@ const (
 	HookPostCreate = "post_create"
 	// HookPreRemove runs before a session is removed.
 	HookPreRemove = "pre_remove"
-	// HookPostFinish runs once a session's work has landed.
-	HookPostFinish = "post_finish"
+	// HookPostPush runs once a session's branches have been pushed.
+	HookPostPush = "post_push"
+	// hookPostFinish ran once a session's work had landed on other branches,
+	// which no longer happens. A config that still has it loads without it.
+	hookPostFinish = "post_finish"
 )
 
 // HookNames lists every global hook.
-func HookNames() []string { return []string{HookPostCreate, HookPreRemove, HookPostFinish} }
+func HookNames() []string { return []string{HookPostCreate, HookPreRemove, HookPostPush} }
 
 // What happens when a hook's command fails.
 const (
@@ -193,7 +199,6 @@ func Defaults() Config {
 	return Config{
 		PackageRoot:    "~/.vmono",
 		ScanDepth:      2,
-		BranchPrefix:   "vmono/",
 		FetchOnCreate:  true,
 		DefaultHarness: "claude",
 		AutoCommit:     true,
@@ -229,6 +234,9 @@ func LoadFrom(file string) (Config, error) {
 		}
 		meta := decodeKeys(data)
 		overlay(&cfg, onDisk, meta)
+		if prefix := oldBranchPrefix(data); prefix != "" {
+			cfg.Notices = append(cfg.Notices, "config: branch_prefix = \""+prefix+"\" is no longer read; pass --prefix when starting a session, and remove it")
+		}
 		backfillHarnesses(&cfg)
 		cfg.Loaded = true
 	case errors.Is(err, os.ErrNotExist):
@@ -242,6 +250,19 @@ func LoadFrom(file string) (Config, error) {
 		cfg.ReturnToTUI = true
 	}
 	return cfg, cfg.Validate()
+}
+
+// oldBranchPrefix returns the branch_prefix of a config from when it was a
+// setting, or "" when there is none. The default of the time is left out: every
+// saved config has it, whether or not anyone chose it.
+func oldBranchPrefix(data []byte) string {
+	var old struct {
+		BranchPrefix string `toml:"branch_prefix"`
+	}
+	if _, err := toml.Decode(string(data), &old); err != nil || old.BranchPrefix == "vmono/" {
+		return ""
+	}
+	return old.BranchPrefix
 }
 
 // decodeKeys returns the set of top-level keys present in a config file so
@@ -272,9 +293,6 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 	if present["scan_depth"] {
 		dst.ScanDepth = src.ScanDepth
 	}
-	if present["branch_prefix"] {
-		dst.BranchPrefix = src.BranchPrefix
-	}
 	if present["fetch_on_create"] {
 		dst.FetchOnCreate = src.FetchOnCreate
 	}
@@ -298,6 +316,10 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 	}
 	if present["hooks"] {
 		dst.Hooks = src.Hooks
+		if _, ok := dst.Hooks[hookPostFinish]; ok {
+			delete(dst.Hooks, hookPostFinish)
+			dst.Notices = append(dst.Notices, "config: the "+hookPostFinish+" hook is ignored, since sessions are no longer finished; remove it, or rename it "+HookPostPush)
+		}
 	}
 	if present["harness"] && len(src.Harness) > 0 {
 		dst.Harness = src.Harness
@@ -333,9 +355,6 @@ func applyEnv(c *Config) error {
 	}
 	if v := os.Getenv("VMONO_SOURCE_ROOTS"); v != "" {
 		c.SourceRoots = filepath.SplitList(v)
-	}
-	if v := os.Getenv("VMONO_BRANCH_PREFIX"); v != "" {
-		c.BranchPrefix = v
 	}
 	if v := os.Getenv("VMONO_DEFAULT_HARNESS"); v != "" {
 		c.DefaultHarness = v

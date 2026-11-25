@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -192,4 +193,29 @@ func (d *driver) eventually(cond func() bool, what string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	d.t.Fatalf("timed out waiting for %s\n%s", what, d.view())
+}
+
+// commitInSession commits a new file in a session's member worktree and
+// returns that worktree.
+func commitInSession(t *testing.T, env *testutil.Env, pkg, session, member, name string) string {
+	t.Helper()
+	wt := filepath.Join(env.PackageRoot, pkg, session, member)
+	testutil.WriteFile(t, filepath.Join(wt, name), name+"\n")
+	testutil.Git(t, wt, "add", "-A")
+	testutil.Git(t, wt, "commit", "--quiet", "-m", "add "+name)
+	return wt
+}
+
+// coreForTest builds a Core over the isolated test environment.
+func coreForTest(t *testing.T) *core.Core {
+	t.Helper()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := core.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }

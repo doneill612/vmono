@@ -41,7 +41,7 @@ type claudePluginAuthor struct {
 func claudePluginFiles() (map[string]string, error) {
 	manifest, err := json.MarshalIndent(claudePluginManifest{
 		Name:        SkillName,
-		Description: "Work inside a vmono session: read its package, record what every future session needs, and land the work",
+		Description: "Work inside a vmono session: read its package, record what every future session needs, and push the work",
 		Author:      claudePluginAuthor{Name: "vmono"},
 	}, "", "  ")
 	if err != nil {
@@ -100,8 +100,8 @@ type claudeCommand struct {
 	// argumentHint is shown after the command name; empty for none.
 	argumentHint string
 	// allowedTools are the tool rules the command may use without asking.
-	// The finish command has none: the adapter's `ask` rule for
-	// `vmono session finish` must keep prompting.
+	// The push command has none: the adapter's `ask` rule for
+	// `vmono session push` must keep prompting.
 	allowedTools []string
 	// userOnly stops Claude from running the command on its own, for the
 	// commands that act on the user's say-so.
@@ -139,16 +139,16 @@ func (c claudeCommand) markdown() string {
 // are documented.
 var claudeCommands = []claudeCommand{
 	{
-		name:        "finish",
-		description: "Land this vmono session's commits on each member's landing branch",
+		name:        "push",
+		description: "Commit this vmono session's work and push each member's branch",
 		userOnly:    true,
-		body: `# Finish this vmono session
+		body: `# Push this vmono session
 
-The user ran this command, so they have said the work is done. If you are not
-inside a vmono session (see "Recognize a session" in the ` + "`vmono`" + ` skill), say so and
-stop.
+The user ran this command, so they have asked you to push. If you are not inside a
+vmono session (see "Recognize a session" in the ` + "`vmono`" + ` skill), say so and stop.
+Review first, and tell the user what will be pushed before running the push.
 
-` + finishSection + updateSection,
+` + pushSection + updateSection + mergedSection,
 	},
 	{
 		name:         "note",
@@ -176,7 +176,7 @@ inventing a note.
 	},
 	{
 		name:         "status",
-		description:  "Summarize this vmono session: each member's branch, uncommitted work and what is left to land",
+		description:  "Summarize this vmono session: each member's branch, uncommitted work and what is left to push",
 		allowedTools: []string{"Bash(vmono status:*)"},
 		body: `# Session status
 
@@ -184,7 +184,7 @@ If you are not inside a vmono session (see "Recognize a session" in the ` + "`vm
 skill), say so and stop. Otherwise run ` + "`vmono status --json`" + ` and summarize it for
 the user in a few lines.
 
-` + statusSection,
+` + statusSection + mergedSection,
 	},
 }
 

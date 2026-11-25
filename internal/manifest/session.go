@@ -2,8 +2,10 @@ package manifest
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -11,8 +13,14 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// SessionSchemaVersion is the session file schema this build reads and writes.
-const SessionSchemaVersion = 1
+// SessionSchemaVersion is the session file schema new sessions are written in.
+// Files of schema LandingSessionSchema are still read.
+const SessionSchemaVersion = 2
+
+// LandingSessionSchema is the schema of session files from when a session's
+// work landed on branches of their own, kept in Into, rather than being pushed
+// from the branches it is done on.
+const LandingSessionSchema = 1
 
 // SessionFile is the name of a session's metadata file, kept in the same
 // .vmono directory a package manifest uses.
@@ -28,31 +36,72 @@ type Session struct {
 	Package string    `toml:"package"`
 	Name    string    `toml:"name"`
 	Created time.Time `toml:"created"`
-	// Branch is checked out by every active member of the session.
+	// Branch is checked out by every active member of the session that Members
+	// gives no branch of its own. Use BranchFor to read a member's.
 	Branch string `toml:"branch"`
-	// Finished is when the session's work last landed. The zero time means it
-	// has never been finished. Whether the session still reads as finished
-	// also depends on its members' live git state; see core.SessionState.
-	Finished time.Time `toml:"finished,omitempty"`
-	// Into maps a member's name to the branch in its source repo that the
-	// session's work lands on when the session is finished. Landing branches
-	// are per member because repos need not share a branch name. A member
-	// with no entry, such as one added after the session began, lands on the
-	// branch its base names (see IntoFor). It is a table, so it is written
-	// last.
-	Into map[string]string `toml:"into,omitempty"`
+	// Finished and Into are read from files of LandingSessionSchema, and kept
+	// until the file is converted: when the session's work last landed, and the
+	// branch of each member's source repo it landed on.
+	Finished time.Time         `toml:"finished,omitempty"`
+	Into     map[string]string `toml:"into,omitempty"`
+	// Members maps a member's name to what the session records about it. An
+	// active member with no entry is on Branch, which it found already made, and
+	// is built on its base. A reference member with none is at the package's ref.
+	Members map[string]SessionMember `toml:"members,omitempty"`
 }
 
-// IntoFor returns the branch mem's work lands on when the session is finished,
-// and whether the session recorded it for this member. A recorded branch that
-// does not exist yet is created at finish. Without one, the branch is the one
-// the member's base names (see BaseBranch), or "" when the base names none,
-// in which case the caller resolves the source repo's default branch with git.
-func (s *Session) IntoFor(mem Member) (branch string, recorded bool) {
-	if b := s.Into[mem.Name]; b != "" {
-		return b, true
+// SessionMember is what a session records about one member: an active one's
+// branch, or what a reference one is checked out at.
+type SessionMember struct {
+	// Branch is the branch the member has checked out, when it is not the
+	// session's.
+	Branch string `toml:"branch,omitempty"`
+	// Created is true when vmono made the branch, so that one nothing was
+	// committed to can be deleted along with the session.
+	Created bool `toml:"created,omitempty"`
+	// From is the branch or ref the member's branch is built on in place of
+	// the member's base, for work stacked on work that has not merged.
+	From string `toml:"from,omitempty"`
+	// Ref is the branch or ref a reference member is checked out at in place of
+	// the package's, for work that depends on work that has not merged.
+	Ref string `toml:"ref,omitempty"`
+	// BaseTip is the commit of From the branch was last built on, or of Ref that
+	// was last checked out. When From goes away it says where the member's own
+	// commits begin.
+	BaseTip string `toml:"base_tip,omitempty"`
+}
+
+// BranchFor returns the branch the named active member has checked out in the
+// session.
+func (s *Session) BranchFor(member string) string {
+	if b := s.Members[member].Branch; b != "" {
+		return b
 	}
-	return BaseBranch(mem), false
+	return s.Branch
+}
+
+// RefFor returns the ref the reference member is checked out at in the session.
+func (s *Session) RefFor(mem Member) string {
+	if r := s.Members[mem.Name].Ref; r != "" {
+		return r
+	}
+	return mem.Ref
+}
+
+// SetMember records m for the named member. A branch that is the session's own
+// is left out, and an empty record removes the entry.
+func (s *Session) SetMember(member string, m SessionMember) {
+	if m.Branch == s.Branch {
+		m.Branch = ""
+	}
+	if m == (SessionMember{}) {
+		delete(s.Members, member)
+		return
+	}
+	if s.Members == nil {
+		s.Members = map[string]SessionMember{}
+	}
+	s.Members[member] = m
 }
 
 // BaseBranch returns the branch a member's base names: "origin/main" is
@@ -72,30 +121,34 @@ func BaseBranch(mem Member) string {
 	return base
 }
 
-// DefaultBranch returns the branch a session of pkg is cut on when none is
-// given: the prefix, then the package, then the session name. Including the
-// package keeps sessions of different packages from sharing a branch in a
-// repo they both use.
-func DefaultBranch(prefix, pkg, session string) string {
-	return prefix + pkg + "/" + session
+// DefaultBranch returns the branch a session is cut on when none is given: its
+// name, after the prefix and a slash when there is a prefix.
+func DefaultBranch(prefix, session string) string {
+	if prefix = strings.Trim(prefix, "/"); prefix != "" {
+		return prefix + "/" + session
+	}
+	return session
 }
 
-// ApplyDefaults fills defaulted fields. branchPrefix is used when the session
-// has no branch.
-func (s *Session) ApplyDefaults(branchPrefix string) {
+// ApplyDefaults fills defaulted fields.
+func (s *Session) ApplyDefaults() {
 	if s.Schema == 0 {
 		s.Schema = SessionSchemaVersion
 	}
-	if s.Branch == "" && s.Package != "" && s.Name != "" {
-		s.Branch = DefaultBranch(branchPrefix, s.Package, s.Name)
+	if s.Branch != "" || s.Name == "" {
+		return
+	}
+	s.Branch = DefaultBranch("", s.Name)
+	if s.Schema == LandingSessionSchema {
+		s.Branch = "vmono/" + s.Package + "/" + s.Name
 	}
 }
 
 // Validate checks the schema, that package and session names are slugs, and
 // that the branch is set.
 func (s *Session) Validate() error {
-	if s.Schema != SessionSchemaVersion {
-		return fmt.Errorf("unsupported session schema %d (this vmono reads %d)", s.Schema, SessionSchemaVersion)
+	if s.Schema != SessionSchemaVersion && s.Schema != LandingSessionSchema {
+		return fmt.Errorf("unsupported session schema %d (this vmono reads %d and %d)", s.Schema, LandingSessionSchema, SessionSchemaVersion)
 	}
 	if err := ValidateName(s.Package); err != nil {
 		return fmt.Errorf("session package: %w", err)
@@ -113,20 +166,33 @@ func (s *Session) Validate() error {
 		if into == "" {
 			return fmt.Errorf("session %s: into: %s has an empty branch", s.Name, member)
 		}
-		if err := validateInto(into); err != nil {
+		if err := validateBranch(into); err != nil {
 			return fmt.Errorf("session %s: into %s: %w", s.Name, member, err)
 		}
 		if into == s.Branch {
 			return fmt.Errorf("session %s: into %s: %q is the session's own branch", s.Name, member, into)
 		}
 	}
+	for member, m := range s.Members {
+		if err := ValidateName(member); err != nil {
+			return fmt.Errorf("session %s: members: %q: %w", s.Name, member, err)
+		}
+		if err := validateBranch(m.Branch); err != nil {
+			return fmt.Errorf("session %s: branch of %s: %w", s.Name, member, err)
+		}
+		for field, ref := range map[string]string{"from": m.From, "ref": m.Ref} {
+			if strings.HasPrefix(ref, "-") || strings.ContainsAny(ref, " \t\r\n") {
+				return fmt.Errorf("session %s: %s of %s: %q is not a ref", s.Name, field, member, ref)
+			}
+		}
+	}
 	return nil
 }
 
-// validateInto rejects the landing branch names that can never be valid git
-// branches or would be read as options. Full ref-format validation is git's
-// job and happens when a session is created.
-func validateInto(into string) error {
+// validateBranch rejects the branch names that can never be valid git branches
+// or would be read as options. Full ref-format validation is git's job and
+// happens when a session is created. An empty name is one that is not set.
+func validateBranch(into string) error {
 	switch {
 	case into == "":
 		return nil
@@ -163,6 +229,25 @@ func EncodeSession(s *Session) []byte {
 			fmt.Fprintf(&b, "%s = %s\n", member, quote(s.Into[member]))
 		}
 	}
+	for _, member := range slices.Sorted(maps.Keys(s.Members)) {
+		m := s.Members[member]
+		fmt.Fprintf(&b, "\n[members.%s]\n", member)
+		if m.Branch != "" {
+			fmt.Fprintf(&b, "branch = %s\n", quote(m.Branch))
+		}
+		if m.Created {
+			b.WriteString("created = true\n")
+		}
+		if m.From != "" {
+			fmt.Fprintf(&b, "from = %s\n", quote(m.From))
+		}
+		if m.Ref != "" {
+			fmt.Fprintf(&b, "ref = %s\n", quote(m.Ref))
+		}
+		if m.BaseTip != "" {
+			fmt.Fprintf(&b, "base_tip = %s\n", quote(m.BaseTip))
+		}
+	}
 	return []byte(b.String())
 }
 
@@ -181,7 +266,7 @@ func ParseSession(data []byte) (*Session, error) {
 		}
 		return nil, fmt.Errorf("parse session: unknown keys: %s", strings.Join(keys, ", "))
 	}
-	s.ApplyDefaults("vmono/")
+	s.ApplyDefaults()
 	if err := s.Validate(); err != nil {
 		return nil, err
 	}

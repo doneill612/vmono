@@ -14,19 +14,28 @@ func sampleSession() *Session {
 		Name:    "token-refresh",
 		Created: time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC),
 	}
-	s.ApplyDefaults("vmono/")
+	s.ApplyDefaults()
 	return s
 }
 
-func TestSessionDefaultBranchIncludesPackage(t *testing.T) {
-	s := sampleSession()
-	if s.Branch != "vmono/platform-auth/token-refresh" {
+func TestSessionDefaultBranch(t *testing.T) {
+	if s := sampleSession(); s.Branch != "token-refresh" {
 		t.Errorf("branch = %q", s.Branch)
 	}
-	s = &Session{Package: "p", Name: "s", Branch: "feat/PLAT-412"}
-	s.ApplyDefaults("vmono/")
+	s := &Session{Package: "p", Name: "s", Branch: "feat/PLAT-412"}
+	s.ApplyDefaults()
 	if s.Branch != "feat/PLAT-412" {
 		t.Errorf("explicit branch overwritten: %q", s.Branch)
+	}
+	s = &Session{Schema: LandingSessionSchema, Package: "p", Name: "s"}
+	s.ApplyDefaults()
+	if s.Branch != "vmono/p/s" {
+		t.Errorf("a file from before keeps the default of its time: %q", s.Branch)
+	}
+	for prefix, want := range map[string]string{"": "s", "feat": "feat/s", "feat/": "feat/s", "/": "s", "me/feat": "me/feat/s"} {
+		if got := DefaultBranch(prefix, "s"); got != want {
+			t.Errorf("prefix %q: %q, want %q", prefix, got, want)
+		}
 	}
 }
 
@@ -139,7 +148,7 @@ func TestSessionFileWithoutNewFieldsStillLoads(t *testing.T) {
 }
 
 func TestSessionValidateInto(t *testing.T) {
-	for _, bad := range []string{"-x", "a b", "a..b", "/x", "x/", "x.lock", "a~1", "a:b", "vmono/platform-auth/token-refresh", ""} {
+	for _, bad := range []string{"-x", "a b", "a..b", "/x", "x/", "x.lock", "a~1", "a:b", "token-refresh", ""} {
 		s := sampleSession()
 		s.Into = map[string]string{"api": bad}
 		if err := s.Validate(); err == nil {
@@ -160,29 +169,78 @@ func TestSessionValidateInto(t *testing.T) {
 	}
 }
 
-func TestIntoFor(t *testing.T) {
-	cases := []struct {
-		into     map[string]string
-		member   string
-		base     string
-		want     string
-		recorded bool
-	}{
-		{nil, "api", "origin/main", "main", false},
-		{nil, "api", "origin/release/1.0", "release/1.0", false},
-		{nil, "api", "main", "main", false},
-		{nil, "api", "origin/HEAD", "", false},
-		{nil, "api", "HEAD", "", false},
-		{nil, "api", "", "", false},
-		{map[string]string{"api": "feature/x"}, "api", "origin/main", "feature/x", true},
-		{map[string]string{"api": "feature/x"}, "sdk", "origin/main", "main", false}, // a member added later
-	}
-	for _, c := range cases {
-		s := sampleSession()
-		s.Into = c.into
-		got, recorded := s.IntoFor(Member{Name: c.member, Base: c.base})
-		if got != c.want || recorded != c.recorded {
-			t.Errorf("into=%v member=%s base=%q: got (%q, %v), want (%q, %v)", c.into, c.member, c.base, got, recorded, c.want, c.recorded)
+func TestBaseBranch(t *testing.T) {
+	for base, want := range map[string]string{
+		"origin/main": "main", "origin/release/1.0": "release/1.0", "main": "main",
+		"origin/HEAD": "", "HEAD": "", "": "", "upstream/HEAD": "",
+	} {
+		if got := BaseBranch(Member{Base: base}); got != want {
+			t.Errorf("base %q: got %q, want %q", base, got, want)
 		}
+	}
+}
+
+func TestSessionMembersRoundTrip(t *testing.T) {
+	s := sampleSession()
+	s.SetMember("sdk", SessionMember{Branch: s.Branch, Created: true})
+	s.SetMember("api", SessionMember{Branch: "feat/x", From: "feat/parent", BaseTip: "abc123"})
+	s.SetMember("web", SessionMember{Branch: s.Branch})
+	s.SetMember("lib", SessionMember{Ref: "feat/z", BaseTip: "def456"})
+	body := string(EncodeSession(s))
+	if strings.Index(body, "[members.api]") > strings.Index(body, "[members.sdk]") {
+		t.Errorf("members should be written in a stable order:\n%s", body)
+	}
+	got, err := ParseSession([]byte(body))
+	if err != nil {
+		t.Fatalf("parse: %v\n%s", err, body)
+	}
+	if got.Schema != SessionSchemaVersion || len(got.Members) != 3 {
+		t.Errorf("schema = %d, members = %+v", got.Schema, got.Members)
+	}
+	if got.Members["api"] != (SessionMember{Branch: "feat/x", From: "feat/parent", BaseTip: "abc123"}) || got.Members["sdk"] != (SessionMember{Created: true}) {
+		t.Errorf("members = %+v", got.Members)
+	}
+	if got.BranchFor("api") != "feat/x" || got.BranchFor("sdk") != s.Branch || got.BranchFor("unlisted") != s.Branch {
+		t.Errorf("branches = %q %q %q", got.BranchFor("api"), got.BranchFor("sdk"), got.BranchFor("unlisted"))
+	}
+	for name, want := range map[string]string{"lib": "feat/z", "docs": "origin/HEAD"} {
+		if ref := got.RefFor(Member{Name: name, Ref: "origin/HEAD"}); ref != want {
+			t.Errorf("%s is at %q, want %q", name, ref, want)
+		}
+	}
+	got.SetMember("sdk", SessionMember{})
+	if _, ok := got.Members["sdk"]; ok {
+		t.Error("an empty record should be dropped")
+	}
+}
+
+func TestSessionValidateMembers(t *testing.T) {
+	for name, bad := range map[string]map[string]SessionMember{
+		"branch":      {"api": {Branch: "a b"}},
+		"option":      {"api": {Branch: "-x"}},
+		"from":        {"api": {From: "-x"}},
+		"ref":         {"api": {Ref: "a b"}},
+		"member name": {"Bad Member": {Created: true}},
+	} {
+		s := sampleSession()
+		s.Members = bad
+		if err := s.Validate(); err == nil {
+			t.Errorf("%s: accepted %+v", name, bad)
+		}
+	}
+}
+
+func TestLandingSessionKeepsItsSchema(t *testing.T) {
+	old := "schema  = 1\npackage = \"p\"\nname    = \"s\"\ncreated = 2026-11-16T09:00:00Z\nbranch  = \"vmono/p/s\"\n\n[into]\napi = \"main\"\n"
+	s, err := ParseSession([]byte(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Schema != LandingSessionSchema || s.Into["api"] != "main" || s.BranchFor("api") != "vmono/p/s" {
+		t.Errorf("session = %+v", s)
+	}
+	again, err := ParseSession(EncodeSession(s))
+	if err != nil || again.Schema != LandingSessionSchema || again.Into["api"] != "main" {
+		t.Errorf("saving must not convert it: %+v, %v", again, err)
 	}
 }

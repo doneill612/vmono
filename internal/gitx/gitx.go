@@ -308,8 +308,8 @@ func ResolveRef(repo, ref string) (string, error) {
 // The fallback is never the literal "HEAD". A ref returned here is also
 // evaluated inside session worktrees, where "HEAD" is the session branch
 // itself: a base of "HEAD" there makes every one of the session's own commits
-// look like they are already on the base, so status and finish see nothing to
-// land. The fallback is therefore pinned to the source's checked-out branch
+// look like they are already on the base, so there never seems to be anything
+// to push. The fallback is therefore pinned to the source's checked-out branch
 // as a full ref name (refs/heads/<branch>, which every worktree of the repo
 // resolves the same way), or to a commit id when the source has a detached
 // HEAD or the checkout cannot be named.
@@ -456,8 +456,11 @@ func BranchCheckedOutAt(repo, branch string) (string, error) {
 }
 
 // WorktreeAddBranch creates a worktree at path on a new branch cut from base.
+// The branch tracks nothing, whatever branch.autoSetupMerge says: git would
+// otherwise make a branch cut from origin/main track it, and a push that
+// follows the upstream would then publish the branch's commits to main.
 func WorktreeAddBranch(repo, path, branch, base string) error {
-	_, err := run(repo, "worktree", "add", "-b", branch, path, base)
+	_, err := run(repo, "worktree", "add", "--no-track", "-b", branch, path, base)
 	return err
 }
 
@@ -645,28 +648,10 @@ func ConflictedFiles(worktree string) ([]string, error) {
 	return files, nil
 }
 
-// UpdateRefCAS moves ref to newSHA only if it still points at oldSHA, a
-// compare-and-swap that keeps two writers from clobbering each other. An
-// empty oldSHA means the ref must not exist yet, so it creates the ref.
-// reason is recorded in the ref's reflog. It never touches a working tree,
-// so callers must not use it on a branch that is checked out anywhere.
-func UpdateRefCAS(repo, ref, newSHA, oldSHA, reason string) error {
-	_, err := run(repo, "update-ref", "-m", reason, ref, newSHA, oldSHA)
-	return err
-}
-
-// MergeFFOnly fast-forwards the branch checked out in worktree to ref and
-// updates the working tree with it. Git refuses unless the move is a pure
-// fast-forward, or the working tree has changes that would be overwritten.
-func MergeFFOnly(worktree, ref string) error {
-	_, err := run(worktree, "merge", "--ff-only", "--quiet", ref)
-	return err
-}
-
 // ResetKeep moves the worktree's checked-out branch to ref and updates its
-// working tree, refusing when that would overwrite local changes. It undoes
-// a MergeFFOnly: git keeps uncommitted changes that do not conflict and
-// aborts when any would be lost, so it never discards work.
+// working tree, refusing when that would overwrite local changes: git keeps
+// uncommitted changes that do not conflict and aborts when any would be lost,
+// so it never discards work.
 func ResetKeep(worktree, ref string) error {
 	_, err := run(worktree, "reset", "--keep", "--quiet", ref)
 	return err
@@ -722,36 +707,12 @@ func StatusOf(path string) (Status, error) {
 	return s, nil
 }
 
-// Unpushed counts commits in the worktree that exist on no remote. With an
-// upstream it is the commits ahead of it; without one it is commits
-// reachable from HEAD but from no remote-tracking ref, so a branch with
-// nothing new beyond its base counts zero. Commits already on one of the
-// local branches in landedOn are not counted either: they have landed in the
-// source repo, which outlives the worktree. Names of branches that do not
-// exist are ignored.
-//
-// A detached HEAD, which is how reference members are checked out, has no
-// branch of its own to publish. Removing its worktree only loses commits that
-// nothing else holds, so commits on any branch or tag are not counted.
-func Unpushed(path string, landedOn ...string) (int, error) {
-	args := []string{"rev-list", "--count", "HEAD", "--not"}
-	if _, err := run(path, "symbolic-ref", "--quiet", "HEAD"); err != nil {
-		args = append(args, "--remotes", "--branches", "--tags")
-	} else if _, err := run(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil {
-		args = append(args, "@{upstream}")
-	} else {
-		args = append(args, "--remotes")
-	}
-	for _, b := range landedOn {
-		if b != "" && BranchExists(path, b) {
-			args = append(args, "refs/heads/"+b)
-		}
-	}
-	out, err := run(path, args...)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(out)
+// OnNoBranch counts the commits of the worktree's HEAD that no branch, tag or
+// remote branch holds. It is for a detached HEAD, as reference members are
+// checked out and a rebase leaves: removing the worktree loses only these. Those
+// reachable from known are not counted either.
+func OnNoBranch(path string, known ...string) (int, error) {
+	return RevCount(path, append([]string{"HEAD", "--not", "--branches", "--tags", "--remotes"}, known...)...)
 }
 
 // Tracking is the remote branch a local branch is configured to track.
@@ -814,6 +775,39 @@ func SetUpstream(repo, branch, upstream string) error {
 	return err
 }
 
+// UnsetUpstream makes the local branch track nothing. It fails when the branch
+// has no upstream.
+func UnsetUpstream(repo, branch string) error {
+	_, err := run(repo, "branch", "--unset-upstream", branch)
+	return err
+}
+
+// RefMove is one entry of a ref's reflog.
+type RefMove struct {
+	// Commit is where the ref pointed afterwards.
+	Commit string
+	// Reason is what moved it, in git's words, such as "update by push".
+	Reason string
+}
+
+// Pushed reports whether the move was a push from this repo.
+func (m RefMove) Pushed() bool { return m.Reason == "update by push" }
+
+// Reflog returns where ref has pointed, the most recent first. It is nil for a
+// ref with no reflog.
+func Reflog(repo, ref string) []RefMove {
+	out, err := run(repo, "reflog", "show", "--format=%H %gs", ref, "--")
+	if err != nil || out == "" {
+		return nil
+	}
+	var moves []RefMove
+	for _, line := range strings.Split(out, "\n") {
+		commit, reason, _ := strings.Cut(strings.TrimRight(line, "\r"), " ")
+		moves = append(moves, RefMove{Commit: commit, Reason: reason})
+	}
+	return moves
+}
+
 // Remotes returns the names of the repo's remotes, in git's order.
 func Remotes(repo string) []string {
 	out, err := run(repo, "remote")
@@ -872,8 +866,8 @@ func IsNonFastForward(err error) bool {
 	return false
 }
 
-// DefaultBranch returns the name of the branch a repo's work normally lands
-// on: the one origin/HEAD points at, or, for a repo with no remote HEAD, the
+// DefaultBranch returns the name of the branch a repo's work normally merges
+// into: the one origin/HEAD points at, or, for a repo with no remote HEAD, the
 // branch it has checked out. It returns "" when neither is known.
 func DefaultBranch(repo string) string {
 	if out, err := run(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {

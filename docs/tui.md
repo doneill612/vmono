@@ -11,15 +11,15 @@ You rarely need a key. **`enter` opens a menu of everything you can do to the hi
 | View | Opened by | Shows |
 | --- | --- | --- |
 | packages | start | Every package: members (`2A 1R` = two active, one reference), session count, harness, clean or dirty (any session), last opened. A package from before sessions shows `migrate` |
-| sessions | `→` on a package | Per session: branch, clean, dirty or finished (with when), last opened. Finished sessions are dimmed and sorted below the rest |
-| members | `m` on a session | Per member in that session: mode, branch or ref, HEAD, upstream, ahead/behind, dirty and untracked counts, role |
+| sessions | `→` on a package | Per session: branch, its state (clean, dirty, pushed, remote deleted, or merged and how), last opened. Merged sessions are dimmed and sorted below the rest |
+| members | `m` on a session | Per member in that session: mode, branch or ref, HEAD, how far it is published, dirty and untracked counts, role |
 | describe | `d` | Purpose, context, notes, sessions and members for a package; add a session's branch and live state when opened from one; location and git state for a member |
 | repos | palette | Every known repo and how many packages use it; `→` lists those packages |
 | harnesses | palette | Configured harnesses, whether each is on `PATH`, and the default |
 
 `esc` goes back. `:` (or `ctrl+p`) opens the command palette, a fuzzy-filtered list of everything you can do from where you are: go to a view (`repos`, `harnesses`, `settings`, `new package`, `sessions of <package>`), any action on the highlighted row, sort the list by a column, reload, quit. `/` filters the current list as you type. Nothing refreshes by itself, except agent state below: `ctrl+r` reloads the current view, and a view reloads when you come back to it.
 
-When sessions launch in [herdr or tmux](integrations.md), the sessions view has an `agent` column, and the packages view counts them. Under herdr it says what each agent is doing (`▲ blocked`, `● working`, `○ idle`, `✓ done`); under tmux, only that one is `running`. It is read every few seconds while one of those views is open. Updating a session whose agent is working asks for `u` a second time.
+When sessions launch in [herdr or tmux](integrations.md), the sessions view has an `agent` column, and the packages view counts them. Under herdr it says what each agent is doing (`▲ blocked`, `● working`, `○ idle`, `✓ done`); under tmux, only that one is `running`. It is read every few seconds while one of those views is open. Updating or deleting a session whose agent is working asks for the key a second time, and so does deleting its package.
 
 ## Shortcuts
 
@@ -41,26 +41,24 @@ None of which you have to use.
 
 | Key (sessions) | Does |
 | --- | --- |
-| `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, update, copy path, landing branches, finish, push, delete |
+| `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, update, copy path, push, delete |
 | `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
-| `n` | Start a new session: a name, optionally a branch (default `vmono/<package>/<session>`), and one `into` row per active member, filled in with the branch its source has checked out. `ctrl+t` picks a branch on the members' remotes to start from and land on |
-| `i` | Change the branch each member's work lands on, without starting a finish |
-| `F` | [Finish](sessions.md#finishing-a-session) the session: shows what would land on which branch, or what blocks it, then `y` lands it. `i` changes the members' landing branches, `c` also removes the session afterward. A conflict offers to launch the harness in the session to resolve it |
-| `P` | [Push](sessions.md#pushing-a-finished-session) a finished session: shows each member's landing branch and the remote it goes to, or what blocks it, then `y` pushes. Never forced. A session that is not finished gets a dialog saying why, with `F` to finish it unless uncommitted work stops that |
+| `n` | Start a new session: a name, and optionally a prefix, a branch, a remote branch to work on (`track`, or `ctrl+t`) or to build on (`from`), a branch per active member, and a ref per reference member (typed, or `space` to pick a remote branch). Empty fields show the branch or ref they will use |
+| `P` | [Push](sessions.md#pushing) the session: shows where each member's branch goes, what is uncommitted and left out, or what blocks it, then `y` pushes. Never forced |
 | `m` / `d` | Members of the session / describe it |
-| `u` | [Update](sessions.md#updating-a-session) the session: rebase its commits onto the latest of each member's landing branch |
+| `u` | [Update](sessions.md#updating) the session: rebase branches that are not pushed, and merge what is new into those that are |
 | `s` / `f` | Sync the session / fetch every member's source |
 | `e` | Edit the package |
-| `ctrl+d` | Delete the session; the package and its other sessions stay |
+| `ctrl+d` | [Delete](sessions.md#removing-a-session) the session; the package and its other sessions stay. Shows what becomes of each branch; `b` also deletes the merged ones |
 | `y` | Copy the session path |
 
 | Key (members) | Does |
 | --- | --- |
-| `p` | Push the highlighted member's landing branch (a finished session; same dialog as `P`, for one member) |
-| `P` | Push every member of the finished session |
+| `p` | Push the highlighted member's branch (same dialog as `P`, for one member) |
+| `P` | Push every member of the session |
 
-Members, repos and harnesses have menus too (`enter`), with the same keys where they apply. The members preview shows where each landing branch is pushed and how many commits it has that the remote lacks, and a finished session's preview sums them. Sorting is only in the palette (`sort by name`, `sort by opened`, …); choosing the same column again reverses it.
+Members, repos and harnesses have menus too (`enter`), with the same keys where they apply. The members preview shows what each branch is built on, its commits, and how far it is published or how it merged; a session's preview sums what is left to push. Sorting is only in the palette (`sort by name`, `sort by opened`, …); choosing the same column again reverses it.
 
 Creating a package returns to the packages screen; start a session from there (`enter`, then `New session`, or `→` then `n`) when you want one.
 

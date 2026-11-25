@@ -88,8 +88,8 @@ func RewriteOpenCodeResource(memberPath, action, resource string, e Effect) (str
 // The allow rules for vmono's read-only commands come first, then the member
 // permission rules in manifest order, then vmono's own so that, with
 // OpenCode's last-match-wins, the `_ref/**` edit deny and the ask rules for
-// `vmono rm` / `vmono delete` / `vmono session rm` / `vmono session finish` /
-// `vmono session push` / `vmono edit` cannot be overridden. The read-only
+// `vmono rm` / `vmono delete` / `vmono session rm` / `vmono session push` /
+// `vmono edit` cannot be overridden. The read-only
 // allows go first so that a member's stricter rule for the same command, or a
 // broader one such as `bash "*": "ask"`, still wins over them.
 //
@@ -144,7 +144,6 @@ func vmonoOpenCodeRules(pkgDir string, v2 bool) []ocRule {
 		ocRule{"bash", "vmono rm *", EffectAsk},
 		ocRule{"bash", "vmono delete *", EffectAsk},
 		ocRule{"bash", "vmono session rm *", EffectAsk},
-		ocRule{"bash", "vmono session finish *", EffectAsk},
 		ocRule{"bash", "vmono session push *", EffectAsk},
 		ocRule{"bash", "vmono edit *", EffectAsk},
 	)

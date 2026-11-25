@@ -218,20 +218,23 @@ func (c *Core) recreateMember(s *Session, mem manifest.Member, src string) error
 		return err
 	}
 	exists := false
+	branch := s.BranchFor(mem.Name)
 	if mem.Mode == manifest.ModeActive {
-		if at, err := gitx.BranchCheckedOutAt(src, s.S.Branch); err != nil {
+		if at, err := gitx.BranchCheckedOutAt(src, branch); err != nil {
 			return err
 		} else if at != "" {
-			return fmt.Errorf("branch %q is already checked out at %s", s.S.Branch, at)
+			return fmt.Errorf("branch %q is already checked out at %s", branch, at)
 		}
-		exists = gitx.BranchExists(src, s.S.Branch)
+		exists = gitx.BranchExists(src, branch)
 	}
-	return (&apply.Runner{Events: c.Events}).Run(c.addMemberSteps(s, mem, src, exists))
+	return (&apply.Runner{Events: c.Events}).Run(c.addMemberSteps(s, mem, src, branchPlan{exists: exists}))
 }
 
 // moveRef moves a clean reference member to its latest fetched ref, using
 // the refs prefetchForSync already brought in. It returns whether it moved
-// and, if it declined, why.
+// and, if it declined, why. One the session checks out at a branch whose remote
+// copy was deleted goes back to the package's ref once that has the branch's
+// work, and is left alone until then.
 func (c *Core) moveRef(s *Session, mem manifest.Member, src string) (moved bool, skip string) {
 	dir := s.MemberDir(mem)
 	st, err := gitx.StatusOf(dir)
@@ -241,25 +244,54 @@ func (c *Core) moveRef(s *Session, mem manifest.Member, src string) (moved bool,
 	if st.Dirty > 0 || st.Untracked > 0 {
 		return false, "reference member has local changes; left alone"
 	}
-	ref, err := resolveRef(src, mem.Ref, nil)
+	head, err := gitx.ResolveRef(dir, "HEAD")
 	if err != nil {
 		return false, err.Error()
+	}
+	ref, gone, err := refOf(s, mem, src, nil)
+	if err != nil {
+		return false, err.Error()
+	}
+	rec := s.S.Members[mem.Name]
+	if gone != "" && mergedInto(src, head, ref) == "" {
+		return false, fmt.Sprintf("%s is gone and does not look merged into %s; left where it is", gone, displayRef(src, ref))
+	}
+	if rec.Ref != "" && gone == "" && publicationOf(gitx.LiveRefs(src), src, rec.Ref, nil).deleted() {
+		// Only a local branch is left of it, which nothing moves once its work
+		// has merged.
+		own, err := resolveRef(src, mem.Ref, nil)
+		if err != nil {
+			return false, err.Error()
+		}
+		if mergedInto(src, ref, own) != "" {
+			ref, gone = own, rec.Ref
+		}
+	}
+	if gone != "" {
+		rec.Ref = ""
+		c.warnEvent(mem.Name, "sync refs", fmt.Sprintf("%s has merged, so it is now at %s", gone, displayRef(src, ref)))
 	}
 	target, err := gitx.ResolveRef(src, ref)
 	if err != nil {
 		return false, err.Error()
 	}
-	head, err := gitx.ResolveRef(dir, "HEAD")
-	if err != nil {
-		return false, err.Error()
+	if head != target {
+		if err := gitx.CheckoutDetached(dir, target); err != nil {
+			return false, err.Error()
+		}
+		moved = true
 	}
-	if head == target {
-		return false, ""
+	was := s.S.Members[mem.Name]
+	if rec.BaseTip = target; rec.Ref == "" {
+		rec.BaseTip = ""
 	}
-	if err := gitx.CheckoutDetached(dir, target); err != nil {
-		return false, err.Error()
+	if was.Ref != "" && rec != was {
+		s.S.SetMember(mem.Name, rec)
+		if err := manifest.SaveSession(s.Dir, s.S); err != nil {
+			return moved, err.Error()
+		}
 	}
-	return true, ""
+	return moved, ""
 }
 
 // unlistedDirs returns top-level (and _ref) directories that are neither

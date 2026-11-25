@@ -160,7 +160,7 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 	}
 	existing := make(map[string]map[string]bool, len(sessions))
 	for _, s := range sessions {
-		ex, err := preflightMembers(next, s.S.Branch, srcs, []manifest.Member{added}, opts.ReuseBranch, nil)
+		ex, err := preflightMembers(next, s.BranchFor, srcs, []manifest.Member{added}, always(opts.ReuseBranch), nil)
 		if err != nil {
 			return added, sessionErr(s, len(sessions), err)
 		}
@@ -172,7 +172,7 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 		steps = c.fetchStep(src)
 	}
 	for _, s := range sessions {
-		ss := c.addMemberSteps(s, added, src, existing[s.Name][added.Name])
+		ss := c.addMemberSteps(s, added, src, branchPlan{exists: existing[s.Name][added.Name]})
 		if len(sessions) > 1 {
 			labelSteps(ss, s.Name)
 		}
@@ -181,11 +181,72 @@ func (c *Core) AddMember(p *Package, opts AddOptions) (manifest.Member, error) {
 	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(steps); err != nil {
 		return added, err
 	}
+	if err := recordCreated(sessions, []manifest.Member{added}, existing); err != nil {
+		return added, err
+	}
 	p.M = next
 	if err := c.save(p, "add "+added.Name); err != nil {
 		return added, err
 	}
 	return added, nil
+}
+
+// always answers the same for every member.
+func always(v bool) func(member string) bool { return func(string) bool { return v } }
+
+// recordCreated records in each session that vmono made the branches of the
+// active members added to it, other than those in existing, by session and
+// member.
+func recordCreated(sessions []*Session, added []manifest.Member, existing map[string]map[string]bool) error {
+	for _, s := range sessions {
+		changed := false
+		for _, mem := range added {
+			rec := s.S.Members[mem.Name]
+			if mem.Mode != manifest.ModeActive || existing[s.Name][mem.Name] || rec.Created {
+				continue
+			}
+			rec.Created, changed = true, true
+			s.S.SetMember(mem.Name, rec)
+		}
+		if changed {
+			if err := manifest.SaveSession(s.Dir, s.S); err != nil {
+				return fmt.Errorf("session %s: %w", s.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// forgetRef drops what each session checks a member out at, for one that is no
+// longer a reference member.
+func forgetRef(sessions []*Session, member string) error {
+	for _, s := range sessions {
+		rec := s.S.Members[member]
+		if rec.Ref == "" {
+			continue
+		}
+		rec.Ref, rec.BaseTip = "", ""
+		s.S.SetMember(member, rec)
+		if err := manifest.SaveSession(s.Dir, s.S); err != nil {
+			return fmt.Errorf("session %s: %w", s.Name, err)
+		}
+	}
+	return nil
+}
+
+// forgetMember drops what each session records about a member that has left
+// the package.
+func forgetMember(sessions []*Session, member string) error {
+	for _, s := range sessions {
+		if _, ok := s.S.Members[member]; !ok {
+			continue
+		}
+		s.S.SetMember(member, manifest.SessionMember{})
+		if err := manifest.SaveSession(s.Dir, s.S); err != nil {
+			return fmt.Errorf("session %s: %w", s.Name, err)
+		}
+	}
+	return nil
 }
 
 // sessionErr names the session in an error from a per-session check when the
@@ -203,13 +264,13 @@ func sessionErr(s *Session, total int, err error) error {
 type RemoveOptions struct {
 	// Force removes the member even if it has unsaved work.
 	Force bool
-	// DeleteBranch deletes the package branch if it is merged into its base.
+	// DeleteBranch deletes the member's branches whose work has been merged.
 	DeleteBranch bool
 }
 
 // RemoveMember removes a member's worktree from every session and drops it
 // from the manifest. It returns a *RefusedError, changing nothing, when the
-// member has dirty files, untracked files or unpushed commits in any session
+// member has dirty files, untracked files or commits on no branch in any session
 // and force was not given.
 func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (DeleteResult, error) {
 	var res DeleteResult
@@ -232,7 +293,7 @@ func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (Delete
 	}
 	var steps []apply.Step
 	for _, s := range sessions {
-		ss, err := c.removeMemberSteps(s, target, opts.Force, opts.DeleteBranch, &res)
+		ss, err := c.removeMemberSteps(s, target, DeleteOptions{Force: opts.Force, DeleteBranches: opts.DeleteBranch}, &res)
 		if err != nil {
 			return res, err
 		}
@@ -251,6 +312,9 @@ func (c *Core) RemoveMember(p *Package, name string, opts RemoveOptions) (Delete
 		}
 	}
 	p.M.Members = kept
+	if err := forgetMember(sessions, name); err != nil {
+		return res, err
+	}
 	return res, c.save(p, "rm "+name)
 }
 
@@ -279,8 +343,7 @@ type ShowSession struct {
 	Name   string `json:"name"`
 	Path   string `json:"path"`
 	Branch string `json:"branch"`
-	// State is SessionFinished or SessionInProgress.
-	State string `json:"state"`
+	SessionProgress
 }
 
 // ShowResult is everything an agent needs to know about its package and, when
@@ -293,8 +356,8 @@ type ShowResult struct {
 	// Session and Branch are set only when Show was given a session.
 	Session string `json:"session,omitempty"`
 	Branch  string `json:"branch,omitempty"`
-	// State is SessionFinished or SessionInProgress; set with Session.
-	State    string        `json:"state,omitempty"`
+	// SessionProgress is that of Session, and empty without one.
+	SessionProgress
 	Harness  string        `json:"harness,omitempty"`
 	Purpose  string        `json:"purpose"`
 	Context  string        `json:"context"`
@@ -342,7 +405,7 @@ func (c *Core) Show(p *Package, s *Session) ShowResult {
 	}
 	if sessions, err := c.LoadSessions(p); err == nil {
 		for _, sess := range sessions {
-			out.Sessions = append(out.Sessions, ShowSession{Name: sess.Name, Path: sess.Dir, Branch: sess.S.Branch, State: c.SessionState(sess)})
+			out.Sessions = append(out.Sessions, ShowSession{Name: sess.Name, Path: sess.Dir, Branch: sess.S.Branch, SessionProgress: c.Status(sess).SessionProgress})
 		}
 	}
 	for _, mem := range p.M.Members {
@@ -363,7 +426,7 @@ func (c *Core) Show(p *Package, s *Session) ShowResult {
 		for i, m := range out.Members {
 			statuses[i] = m.MemberStatus
 		}
-		out.State = stateOf(s, statuses)
+		out.SessionProgress = progressOf(statuses)
 	}
 	return out
 }

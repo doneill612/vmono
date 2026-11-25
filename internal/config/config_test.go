@@ -15,7 +15,7 @@ func TestDefaultsWhenMissing(t *testing.T) {
 	if cfg.Loaded {
 		t.Error("Loaded should be false when no file exists")
 	}
-	if cfg.PackageRoot != "~/.vmono" || cfg.BranchPrefix != "vmono/" || !cfg.AutoCommit || !cfg.FetchOnCreate {
+	if cfg.PackageRoot != "~/.vmono" || !cfg.AutoCommit || !cfg.FetchOnCreate {
 		t.Errorf("unexpected defaults: %+v", cfg)
 	}
 	if _, ok := cfg.Harness["claude"]; !ok {
@@ -238,5 +238,40 @@ func TestSavedHarnessesGetInitArgs(t *testing.T) {
 	}
 	if got := cfg.Harness["pi"].InitArgs; len(got) != 1 || got[0] != "mine" {
 		t.Errorf("the user's own args win: %v", got)
+	}
+}
+
+// TestRemovedHookIsIgnored covers a config written when sessions were finished:
+// an unknown hook is an error, and would fail every command.
+func TestRemovedHookIsIgnored(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(file, []byte("[hooks]\npost_create = \"code .\"\npost_finish = \"notify\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Hooks) != 1 || len(cfg.Notices) != 1 || !strings.Contains(cfg.Notices[0], "post_finish") {
+		t.Errorf("hooks = %+v, notices = %v", cfg.Hooks, cfg.Notices)
+	}
+	if err := cfg.SaveTo(file); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = LoadFrom(file); err != nil || len(cfg.Notices) != 0 {
+		t.Errorf("saving should drop it: %v, %v", cfg.Notices, err)
+	}
+}
+
+func TestChosenBranchPrefixIsPointedOut(t *testing.T) {
+	for prefix, want := range map[string]int{"vmono/": 0, "": 0, "me/": 1} {
+		file := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(file, []byte("branch_prefix = \""+prefix+"\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadFrom(file)
+		if err != nil || len(cfg.Notices) != want {
+			t.Errorf("%q: notices = %v, %v", prefix, cfg.Notices, err)
+		}
 	}
 }

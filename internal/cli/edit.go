@@ -58,7 +58,7 @@ func newShowCmd() *cobra.Command {
 			}
 			title := s.Name
 			if s.Session != "" {
-				title += "/" + s.Session + "  (" + s.Branch + ", " + s.State + ")"
+				title += "/" + s.Session + "  (" + s.Branch + ", " + s.Label() + ")"
 			}
 			fprintf(out, "%s\n%s\n\n", title, s.Path)
 			section(out, "Purpose", s.Purpose)
@@ -74,14 +74,14 @@ func newShowCmd() *cobra.Command {
 					if ss.Name == s.Session {
 						mark = "*"
 					}
-					fprintf(out, "  %s %-16s %-28s %s\n", mark, ss.Name, ss.Branch, ss.State)
+					fprintf(out, "  %s %-16s %-28s %s\n", mark, ss.Name, ss.Branch, ss.Label())
 				}
 				fprintf(out, "\n")
 			}
 			fprintf(out, "Members\n")
 			for _, m := range s.Members {
 				if s.Session != "" {
-					fprintf(out, "  %-16s %-9s %-22s %s\n", m.Name, m.Mode, where(m.MemberStatus), cleanliness(m.MemberStatus))
+					fprintf(out, "  %-16s %-9s %-22s %-14s %s\n", m.Name, m.Mode, where(m.MemberStatus), cleanliness(m.MemberStatus), m.PublishText())
 				} else {
 					fprintf(out, "  %-16s %-9s\n", m.Name, m.Mode)
 				}
@@ -275,6 +275,7 @@ func newRmCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rm [pkg] <member> [--force] [--delete-branch]",
 		Short: "Remove a member from the package, and so from every session",
+		Long:  "Remove a member from the package and its worktree from every session.\n\n" + strings.ReplaceAll(branchesHelp, "--delete-branches", "--delete-branch"),
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg, rest := splitPkgArgs(args, 2)
@@ -293,13 +294,11 @@ func newRmCmd() *cobra.Command {
 			}
 			fprintf(cmd.OutOrStdout(), "removed %s\n", rest[0])
 			hintInit(cmd.OutOrStdout(), p)
-			for _, b := range res.BranchesKept {
-				fprintf(cmd.OutOrStdout(), "kept branch %s\n", b)
-			}
+			printBranches(cmd.OutOrStdout(), res)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "remove even if the member has unsaved work in any session")
-	cmd.Flags().BoolVar(&deleteBranch, "delete-branch", false, "also delete each session branch if merged into its base")
+	cmd.Flags().BoolVar(&deleteBranch, "delete-branch", false, "also delete the branches whose work has been merged")
 	return cmd
 }

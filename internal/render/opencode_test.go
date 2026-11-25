@@ -75,7 +75,7 @@ func TestOpenCodeV1Output(t *testing.T) {
 	if doc.Permission["edit"]["api/secrets/**"] != "deny" || doc.Permission["edit"]["api/*"] != "allow" {
 		t.Errorf("member edit rules not re-anchored:\n%s", text)
 	}
-	if doc.Permission["bash"]["vmono rm *"] != "ask" || doc.Permission["bash"]["vmono delete *"] != "ask" || doc.Permission["bash"]["vmono session rm *"] != "ask" || doc.Permission["bash"]["vmono session finish *"] != "ask" || doc.Permission["bash"]["vmono session push *"] != "ask" || doc.Permission["bash"]["vmono edit *"] != "ask" {
+	if doc.Permission["bash"]["vmono rm *"] != "ask" || doc.Permission["bash"]["vmono delete *"] != "ask" || doc.Permission["bash"]["vmono session rm *"] != "ask" || doc.Permission["bash"]["vmono session push *"] != "ask" || doc.Permission["bash"]["vmono edit *"] != "ask" {
 		t.Errorf("vmono bash asks missing:\n%s", text)
 	}
 	for _, res := range []string{"vmono show *", "vmono status *", "vmono session review *", "vmono doctor", "vmono --version"} {

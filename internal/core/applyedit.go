@@ -112,14 +112,14 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	}
 	existing := make(map[string]map[string]bool, len(ep.Sessions))
 	for _, s := range ep.Sessions {
-		ex, err := preflightMembers(ep.Next, s.S.Branch, ep.Srcs, adds, opts.ReuseBranch || len(replacing) > 0, removing)
+		ex, err := preflightMembers(ep.Next, s.BranchFor, ep.Srcs, adds, always(opts.ReuseBranch || len(replacing) > 0), removing)
 		if err != nil {
 			return plan, sessionErr(s, len(ep.Sessions), err)
 		}
 		existing[s.Name] = ex
 		for _, mem := range adds {
 			if !replacing[mem.Name] && ex[mem.Name] && !opts.ReuseBranch {
-				return plan, &BranchExistsError{Member: mem.Name, Branch: s.S.Branch}
+				return plan, &BranchExistsError{Member: mem.Name, Branch: s.BranchFor(mem.Name)}
 			}
 		}
 	}
@@ -144,7 +144,7 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 		}
 		for _, s := range ep.Sessions {
 			for _, mem := range list {
-				ss := c.addMemberSteps(s, mem, ep.Srcs[mem.Name], existing[s.Name][mem.Name])
+				ss := c.addMemberSteps(s, mem, ep.Srcs[mem.Name], branchPlan{exists: existing[s.Name][mem.Name]})
 				if multi {
 					labelSteps(ss, s.Name)
 				}
@@ -157,11 +157,15 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(addSteps(first, true)); err != nil {
 		return plan, err
 	}
+	again := map[string]bool{}
+	for _, mem := range adds {
+		again[mem.Name] = true
+	}
 	var rmSteps []apply.Step
 	var res DeleteResult
 	for _, s := range ep.Sessions {
 		for _, mem := range removals {
-			ss, err := c.removeMemberSteps(s, mem, opts.Force, false, &res)
+			ss, err := c.removeMemberSteps(s, mem, DeleteOptions{Force: opts.Force, keepBranches: again[mem.Name]}, &res)
 			if err != nil {
 				return plan, err
 			}
@@ -176,6 +180,25 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	}
 	if err := (&apply.Runner{Events: c.Events, Rollback: true}).Run(addSteps(last, false)); err != nil {
 		return plan, err
+	}
+
+	if err := recordCreated(ep.Sessions, adds, existing); err != nil {
+		return plan, err
+	}
+	// A member that comes back in the same mode keeps what the sessions record
+	// about it.
+	for _, mem := range removals {
+		now, ok := ep.Next.Member(mem.Name)
+		forget := forgetMember
+		switch {
+		case ok && now.Mode == mem.Mode:
+			continue
+		case ok && now.Mode == manifest.ModeActive:
+			forget = forgetRef
+		}
+		if err := forget(ep.Sessions, mem.Name); err != nil {
+			return plan, err
+		}
 	}
 
 	p.M = ep.Next

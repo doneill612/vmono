@@ -25,9 +25,9 @@ func TestPreviewBesideTheListFollowsTheHighlight(t *testing.T) {
 	d.has("gamma") // back on a row already loaded
 
 	d.key("right")
-	d.has("branch", "vmono/auth/work", "MEMBERS", "gamma")
+	d.has("branch", "work", "MEMBERS", "gamma")
 	d.key("m")
-	d.has("upstream", "0 ahead, 0 behind")
+	d.has("built on", "origin/main", "no commits yet")
 }
 
 func TestNarrowTerminalsGetTheListAlone(t *testing.T) {

@@ -1,6 +1,8 @@
 package launcher
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,7 +66,7 @@ func (h Herdr) Launch(l *harness.Launch, _ Opts) (Result, error) {
 	} else if pane, err = freePane(snap, id); err != nil {
 		return HandedOff, err
 	}
-	if err := herdr.Tag(id, tag); err != nil {
+	if err := herdr.Tag(id, herdrToken(tag, l.Dir)); err != nil {
 		return HandedOff, err
 	}
 	if pane != "" {
@@ -76,7 +78,7 @@ func (h Herdr) Launch(l *harness.Launch, _ Opts) (Result, error) {
 			return HandedOff, err
 		}
 	}
-	if h.NoFocus || strings.HasPrefix(os.Getenv("VMONO_AUTHOR"), "agent:") {
+	if h.NoFocus || byAgent() {
 		fmt.Fprintf(os.Stderr, "vmono: %s is running in herdr workspace %q; show it with: herdr workspace focus %s\n", l.Name, tag, id)
 		return Elsewhere, nil
 	}
@@ -89,22 +91,32 @@ func (h Herdr) Launch(l *harness.Launch, _ Opts) (Result, error) {
 	return Elsewhere, nil
 }
 
-// findHerdrWorkspace returns the id of the session's workspace, or "". Both
-// ways of finding it need a pane at or below the session root, unless the
-// token says it outright: a workspace is closed along with the session, so
-// one of the user's own must never be mistaken for it.
+// findHerdrWorkspace returns the id of the session's workspace, or "". Unless
+// the token says it outright, it must have a pane at or below the session root: a
+// workspace is closed along with the session, so one of the user's own must never
+// be mistaken for it. That goes for the label, and for a token from before it
+// held the directory, when it was the tag alone.
 func findHerdrWorkspace(snap herdr.Snapshot, tag, dir string) string {
 	for _, w := range snap.Workspaces {
-		if w.Tokens[herdr.Token] == tag {
+		if w.Tokens[herdr.Token] == herdrToken(tag, dir) {
 			return w.ID
 		}
 	}
 	for _, w := range snap.Workspaces {
-		if w.Label == tag && w.Tokens[herdr.Token] == "" && hasPaneIn(snap, w.ID, dir) {
+		if token := w.Tokens[herdr.Token]; (token == tag || token == "" && w.Label == tag) && hasPaneIn(snap, w.ID, dir) {
 			return w.ID
 		}
 	}
 	return ""
+}
+
+// herdrToken is the value of the token that marks the workspace of the session
+// tag at dir: the tag, and a short hash of the directory, which tells packages of
+// the same name under different package roots apart wherever the workspace's
+// shells have gone since.
+func herdrToken(tag, dir string) string {
+	sum := sha256.Sum256([]byte(resolvePath(dir)))
+	return tag + "/" + hex.EncodeToString(sum[:4])
 }
 
 // hasPaneIn reports whether a workspace has a pane at or below dir.
@@ -206,21 +218,21 @@ func shellQuote(s string) string {
 }
 
 // Find implements Closer.
-func (Herdr) Find(tag, dir string) (string, func() error, error) {
+func (Herdr) Find(tag, dir string) (*Place, error) {
 	snap, err := herdr.TakeSnapshot()
 	if herdr.IsCode(err, herdr.CodeNotRunning) {
-		return "", nil, nil
+		return nil, nil
 	}
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	id := findHerdrWorkspace(snap, tag, dir)
-	// The token alone does not say which package root it is for.
-	if id == "" || !hasPaneIn(snap, id, dir) {
-		return "", nil, nil
+	if id == "" {
+		return nil, nil
 	}
-	if id == herdr.CurrentWorkspace() {
-		return "", nil, errInside
-	}
-	return fmt.Sprintf("herdr workspace %q", tag), func() error { return herdr.Close(id) }, nil
+	return &Place{
+		Name:   fmt.Sprintf("herdr workspace %q", tag),
+		Inside: id == herdr.CurrentWorkspace(),
+		Close:  func() error { return herdr.Close(id) },
+	}, nil
 }

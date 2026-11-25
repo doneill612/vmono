@@ -41,8 +41,8 @@ func TestWorktreeLifecycleAndStatus(t *testing.T) {
 	if st.Branch != "vmono/x" || st.Dirty != 0 || st.Untracked != 0 {
 		t.Errorf("clean status wrong: %+v", st)
 	}
-	if n, err := Unpushed(wt); err != nil || n != 0 {
-		t.Errorf("Unpushed clean = %d, %v", n, err)
+	if n, err := OnNoBranch(wt); err != nil || n != 0 {
+		t.Errorf("OnNoBranch clean = %d, %v", n, err)
 	}
 
 	testutil.WriteFile(t, filepath.Join(wt, "README.md"), "changed\n")
@@ -57,8 +57,8 @@ func TestWorktreeLifecycleAndStatus(t *testing.T) {
 	}
 	testutil.Git(t, wt, "add", "-A")
 	testutil.Git(t, wt, "commit", "--quiet", "-m", "work")
-	if n, _ := Unpushed(wt); n != 1 {
-		t.Errorf("Unpushed after commit = %d, want 1", n)
+	if n, _ := OnNoBranch(wt); n != 0 {
+		t.Errorf("OnNoBranch after a commit on the branch = %d, want 0", n)
 	}
 	if IsMerged(src, "vmono/x", "origin/main") {
 		t.Error("branch with new commit must not be merged")
@@ -84,6 +84,10 @@ func TestDetachedAndCommonDir(t *testing.T) {
 	st, err := StatusOf(wt)
 	if err != nil || !st.Detached {
 		t.Fatalf("expected detached, got %+v, %v", st, err)
+	}
+	commitFile(t, wt, "stray.txt", "s\n", "stray")
+	if n, err := OnNoBranch(wt); err != nil || n != 1 {
+		t.Errorf("OnNoBranch of a detached commit = %d, %v", n, err)
 	}
 	cd, err := CommonDir(wt)
 	if err != nil {
@@ -368,7 +372,7 @@ func commitFile(t *testing.T, dir, name, content, msg string) {
 	testutil.Git(t, dir, "commit", "--quiet", "-m", msg)
 }
 
-func TestRebaseOntoAndLandPrimitives(t *testing.T) {
+func TestRebaseOnto(t *testing.T) {
 	env := testutil.NewEnv(t)
 	src := env.NewSource(t, "gamma")
 	wt := filepath.Join(env.Root, "wt", "gamma")
@@ -397,31 +401,6 @@ func TestRebaseOntoAndLandPrimitives(t *testing.T) {
 	if n, _ := RevCount(src, "main..vmono/x"); n != 1 {
 		t.Errorf("rebased branch is %d ahead of main, want 1", n)
 	}
-
-	tip, _ := ResolveRef(src, "vmono/x")
-	oldMain, _ := ResolveRef(src, "main")
-
-	// A branch that is not checked out moves by compare-and-swap.
-	if err := UpdateRefCAS(src, "refs/heads/feature", tip, "", "test: create"); err != nil {
-		t.Fatalf("create ref: %v", err)
-	}
-	if err := UpdateRefCAS(src, "refs/heads/feature", tip, "", "test: create again"); err == nil {
-		t.Error("creating a ref that exists must fail")
-	}
-	if err := UpdateRefCAS(src, "refs/heads/feature", oldMain, oldMain, "test: stale"); err == nil {
-		t.Error("a stale expected value must fail")
-	}
-
-	// A checked-out branch advances through its worktree.
-	if err := MergeFFOnly(src, "vmono/x"); err != nil {
-		t.Fatalf("ff-only: %v", err)
-	}
-	if got, _ := ResolveRef(src, "main"); got != tip {
-		t.Errorf("main = %s, want %s", got, tip)
-	}
-	if _, err := os.Stat(filepath.Join(src, "a.txt")); err != nil {
-		t.Errorf("working tree should have the landed file: %v", err)
-	}
 }
 
 func TestRebaseOntoStopsOnConflict(t *testing.T) {
@@ -445,35 +424,9 @@ func TestRebaseOntoStopsOnConflict(t *testing.T) {
 	if err != nil || len(files) != 1 || files[0] != "README.md" {
 		t.Errorf("ConflictedFiles = %v, %v", files, err)
 	}
-	if err := MergeFFOnly(src, "vmono/x"); err == nil {
-		t.Error("ff-only onto a branch with an unrebased commit must fail")
-	}
 	testutil.Git(t, wt, "rebase", "--abort")
 	if RebaseInProgress(wt) {
 		t.Error("aborted rebase must not read as in progress")
-	}
-}
-
-func TestUnpushedIgnoresCommitsOnLandedBranches(t *testing.T) {
-	env := testutil.NewEnv(t)
-	src := env.NewSource(t, "epsilon")
-	wt := filepath.Join(env.Root, "wt", "epsilon")
-	if err := WorktreeAddBranch(src, wt, "vmono/x", "origin/main"); err != nil {
-		t.Fatal(err)
-	}
-	commitFile(t, wt, "a.txt", "a\n", "work")
-	if n, _ := Unpushed(wt); n != 1 {
-		t.Fatalf("Unpushed = %d, want 1", n)
-	}
-	if n, _ := Unpushed(wt, "", "no-such-branch", "main"); n != 1 {
-		t.Errorf("empty, missing and unrelated branches must not hide commits: %d", n)
-	}
-	testutil.Git(t, src, "merge", "--ff-only", "--quiet", "vmono/x")
-	if n, _ := Unpushed(wt, "main"); n != 0 {
-		t.Errorf("commits on a landed branch must not count: %d", n)
-	}
-	if n, _ := Unpushed(wt); n != 1 {
-		t.Errorf("without naming it, the commit still counts: %d", n)
 	}
 }
 
@@ -564,5 +517,49 @@ func TestPushRefusesNonFastForward(t *testing.T) {
 	}
 	if IsNonFastForward(errors.New("boom")) {
 		t.Error("a plain error is not a non-fast-forward")
+	}
+}
+
+func TestNewBranchTracksNothing(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "alpha")
+	if err := WorktreeAddBranch(src, filepath.Join(env.Root, "wt"), "feat", "origin/main"); err != nil {
+		t.Fatal(err)
+	}
+	if tr, ok := UpstreamOf(src, "feat"); ok {
+		t.Errorf("a branch cut from origin/main must not track it: %+v", tr)
+	}
+}
+
+func TestUnsetUpstream(t *testing.T) {
+	env := testutil.NewEnv(t)
+	src := env.NewSource(t, "alpha")
+	if err := UnsetUpstream(src, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := UpstreamOf(src, "main"); ok {
+		t.Error("main should track nothing")
+	}
+	if err := UnsetUpstream(src, "main"); err == nil {
+		t.Error("a branch with no upstream has none to unset")
+	}
+}
+
+func TestReflog(t *testing.T) {
+	src, wt := branchWithWork(t, "alpha")
+	tip, _ := ResolveRef(wt, "HEAD")
+	first, _ := ResolveRef(wt, "HEAD~1")
+	log := Reflog(src, "refs/heads/feat")
+	if len(log) != 3 || log[0].Commit != tip || log[1].Commit != first || log[0].Pushed() {
+		t.Errorf("reflog = %v, want %s then %s then where it was cut", log, tip, first)
+	}
+	if err := Push(src, "origin", "feat", "feat", true); err != nil {
+		t.Fatal(err)
+	}
+	if log := Reflog(src, "refs/remotes/origin/feat"); len(log) != 1 || log[0].Commit != tip || !log[0].Pushed() {
+		t.Errorf("reflog of the pushed branch = %v", log)
+	}
+	if got := Reflog(src, "refs/heads/nope"); got != nil {
+		t.Errorf("a missing ref has no reflog: %v", got)
 	}
 }

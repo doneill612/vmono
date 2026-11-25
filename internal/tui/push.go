@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -9,11 +8,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/doneill612/vmono/internal/core"
-	"github.com/doneill612/vmono/internal/manifest"
 )
 
-// pushConfirm is the dialog that precedes pushing a finished session: one row
-// per member saying which branch would go to which remote, or why it cannot.
+// pushConfirm is the dialog that precedes pushing a session: one row per member
+// saying which branch would go to which remote, or why it cannot.
 // y runs the push on the progress screen; the members that are blocked are
 // left alone and the rest still go, since each member is pushed on its own.
 // Nothing is forced.
@@ -32,9 +30,8 @@ func newPushConfirm(e *env, pkg, session string, members []string, plan core.Pus
 }
 
 // startPush plans a push of the session and opens the confirmation for it. A
-// session that is not finished gets a dialog saying so, which offers to finish
-// it unless uncommitted work stops it from finishing; a member named that is
-// not an active one is flashed. members limits the push, and is empty for all.
+// member named that is not an active one is flashed. members limits the push,
+// and is empty for all.
 // from is the screen asking, which the push returns to, reloaded, when it ends.
 func startPush(from screen, e *env, pkg, session string, members []string) tea.Cmd {
 	c := e.core
@@ -43,11 +40,7 @@ func startPush(from screen, e *env, pkg, session string, members []string) tea.C
 		return flashErr(err.Error())
 	}
 	plan, err := c.PlanPush(s, core.PushOptions{Members: members})
-	var nf *core.PushNotFinishedError
-	switch {
-	case errors.As(err, &nf):
-		return push(from, newPushNotFinished(e, pkg, session, unfinishable(c.Status(s))))
-	case err != nil:
+	if err != nil {
 		return flashErr(err.Error())
 	}
 	return push(from, newPushConfirm(e, pkg, session, members, plan))
@@ -108,8 +101,8 @@ func (m *pushConfirm) Update(msg tea.Msg) (screen, tea.Cmd) {
 }
 
 // run builds the progress screen that pushes the session. It resolves the
-// session afresh, so it pushes what is landed now rather than what the dialog
-// was opened on. Whether it succeeds or fails, the user returns to the screen
+// session afresh, so it pushes what is committed now rather than what the
+// dialog was opened on. Whether it succeeds or fails, the user returns to the screen
 // the dialog came from, reloaded, rather than to a new copy of it.
 func (m *pushConfirm) run() screen {
 	c, pkg, session, members := m.e.core, m.pkg, m.session, m.members
@@ -132,6 +125,8 @@ func pushText(r core.MemberPush) (string, lipgloss.Style) {
 	switch r.Status {
 	case core.PushNothing:
 		return "nothing to push", styleDim
+	case core.PushMerged:
+		return r.Reason, styleDim
 	case core.PushBlocked:
 		return "blocked: " + r.Reason, styleWarn
 	case core.PushFailed:
@@ -141,7 +136,10 @@ func pushText(r core.MemberPush) (string, lipgloss.Style) {
 	if r.Commits != 1 {
 		text += "s"
 	}
-	text += fmt.Sprintf(" of %s → %s/%s", r.Branch, r.Remote, r.Dest)
+	if r.Branch != r.Dest {
+		text += " of " + r.Branch
+	}
+	text += " → " + r.Remote + "/" + r.Dest
 	switch {
 	case r.New && r.SetsUpstream:
 		text += ", new branch, will track it"
@@ -153,6 +151,19 @@ func pushText(r core.MemberPush) (string, lipgloss.Style) {
 	return text, styleOK
 }
 
+// pushRow renders a member's row, its text wrapped in a column of its own so a
+// long branch name or reason is never cut off.
+func pushRow(name, text string, st lipgloss.Style, width int) string {
+	var b strings.Builder
+	for i, line := range strings.Split(wrap(text, max(width-26, 20)), "\n") {
+		if i > 0 {
+			name = ""
+		}
+		b.WriteString(fmt.Sprintf("   %-18s %s\n", name, st.Render(line)))
+	}
+	return b.String()
+}
+
 // View implements screen.
 func (m *pushConfirm) View(w, h int) string {
 	var b strings.Builder
@@ -160,9 +171,13 @@ func (m *pushConfirm) View(w, h int) string {
 	if len(m.plan.Members) == 0 {
 		b.WriteString("   " + styleDim.Render("no active members") + "\n")
 	}
+	width := min(w-8, 84)
 	for _, r := range m.plan.Members {
 		text, st := pushText(r)
-		b.WriteString(fmt.Sprintf("   %-18s %s\n", r.Name, st.Render(text)))
+		b.WriteString(pushRow(r.Name, text, st, width))
+		for _, n := range r.Notes {
+			b.WriteString(pushRow("", n, styleWarn, width))
+		}
 	}
 	b.WriteString("\n")
 	switch {
@@ -170,127 +185,15 @@ func (m *pushConfirm) View(w, h int) string {
 		b.WriteString(" " + styleWarn.Render("Nothing can be pushed until the members above are fixed.") + "\n\n ")
 		b.WriteString(keyHelp("esc", "back"))
 	case m.ready() == 0:
-		b.WriteString(" Everything landed is already on its remote.\n\n ")
+		b.WriteString(" There is nothing to push.\n\n ")
 		b.WriteString(keyHelp("esc", "back"))
 	default:
-		b.WriteString(" Each branch above is pushed from its source repo, never forced.\n The session's own branch is not pushed.")
+		b.WriteString(" Each branch above is pushed to its remote, never forced.")
 		if m.blocked() > 0 {
 			b.WriteString(" Blocked members\n are left alone and the rest still go.")
 		}
 		b.WriteString("\n " + styleDim.Render("Compared with the last fetch; f refreshes it.") + "\n\n ")
 		b.WriteString(keyHelp("y", "push", "esc", "cancel"))
-	}
-	width := w - 8
-	if width > 84 {
-		width = 84
-	}
-	return dialog(m.Title(), b.String(), width)
-}
-
-// unfinishable lists what stops the active members of a session from being
-// finished, one line each: uncommitted or untracked files, a rebase in
-// progress, a worktree that is missing or cannot be read. These are the same
-// conditions that make finishing refuse, so a session with none of them can
-// always be offered a finish. Reference members are left out, since they have
-// no work of their own.
-func unfinishable(st core.SessionStatus) []string {
-	var out []string
-	for _, ms := range st.Members {
-		if ms.Mode != manifest.ModeActive {
-			continue
-		}
-		switch {
-		case ms.Missing:
-			out = append(out, ms.Name+": its worktree is missing; sync recreates it")
-		case ms.Error != "":
-			out = append(out, ms.Name+": cannot read its state")
-		case ms.Rebasing:
-			out = append(out, ms.Name+": a rebase is in progress")
-		case ms.Dirty > 0 || ms.Untracked > 0:
-			out = append(out, fmt.Sprintf("%s: %d modified, %d untracked", ms.Name, ms.Dirty, ms.Untracked))
-		}
-	}
-	return out
-}
-
-// pushNotFinished is the dialog shown when a push is asked of a session that
-// is not finished. A flash in the status bar is too easy to miss for a key
-// that did nothing, so this says why. When the session could be finished it
-// also offers the next step: F opens the finish dialog. When uncommitted work
-// stops it, blockers lists that work and F does nothing, since the finish
-// would only be refused.
-type pushNotFinished struct {
-	e            *env
-	pkg, session string
-	blockers     []string
-}
-
-// newPushNotFinished builds the dialog. blockers is what unfinishable found.
-func newPushNotFinished(e *env, pkg, session string, blockers []string) *pushNotFinished {
-	return &pushNotFinished{e: e, pkg: pkg, session: session, blockers: blockers}
-}
-
-// modal implements modalScreen.
-func (m *pushNotFinished) modal() {}
-
-// Init implements screen.
-func (m *pushNotFinished) Init() tea.Cmd { return nil }
-
-// Title implements screen.
-func (m *pushNotFinished) Title() string { return "push session" }
-
-// Crumb implements screen. The dialog adds no breadcrumb.
-func (m *pushNotFinished) Crumb() string { return "" }
-
-// Hints implements screen.
-func (m *pushNotFinished) Hints() []hint { return nil }
-
-// Update implements screen. F replaces the dialog with the session's finish
-// dialog, planned afresh, unless something blocks finishing; any other close
-// key just closes it.
-func (m *pushNotFinished) Update(msg tea.Msg) (screen, tea.Cmd) {
-	k, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-	switch k.String() {
-	case "esc", "enter", "n", "q":
-		return m, pop(m)
-	case "F":
-		if len(m.blockers) > 0 {
-			return m, nil
-		}
-		c := m.e.core
-		s, err := c.ResolveSession(m.pkg + "/" + m.session)
-		if err != nil {
-			return m, flashErr(err.Error())
-		}
-		return m, goTo(m, newFinishConfirm(m.e, m.pkg, m.session, c.PlanFinish(s, core.FinishOptions{})))
-	}
-	return m, nil
-}
-
-// View implements screen.
-func (m *pushNotFinished) View(w, h int) string {
-	var b strings.Builder
-	b.WriteString(" " + styleDim.Render("session ") + styleLabel.Render(m.pkg+"/"+m.session) + "\n\n")
-	if len(m.blockers) > 0 {
-		b.WriteString(" " + styleWarn.Render("This session is not finished, and cannot be yet:") + "\n\n")
-		for _, l := range m.blockers {
-			b.WriteString("   " + styleWarn.Render(l) + "\n")
-		}
-		b.WriteString("\n Commit or resolve that, finish the session, then push.\n\n ")
-		b.WriteString(keyHelp("esc", "close"))
-		return dialog(m.Title(), b.String(), min(w-8, 84))
-	}
-	b.WriteString(" " + styleWarn.Render("This session is not finished, so there is nothing landed to push.") + "\n\n")
-	b.WriteString(" Finishing lands each member's commits on its landing branch, and\n")
-	b.WriteString(" push then publishes them. A finished session that has new commits\n")
-	b.WriteString(" or uncommitted edits since counts as not finished again.\n\n ")
-	b.WriteString(keyHelp("F", "finish the session", "esc", "close"))
-	width := w - 8
-	if width > 84 {
-		width = 84
 	}
 	return dialog(m.Title(), b.String(), width)
 }

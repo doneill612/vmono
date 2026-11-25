@@ -14,14 +14,12 @@ type readOnlyCommand struct {
 // vmonoReadOnlyCommands are the vmono commands the generated rules allow, and
 // that the two adapters share so they cannot drift apart. Every one of them
 // changes no package, session or repository: they print state, and nothing
-// else. `session review` is the read-only form of `session finish` (it plans
-// the landing and moves nothing), which is a command of its own because a
-// harness rule that asks for `session finish` would also ask for
-// `session finish --dry-run`.
+// else. `session review` is the read-only form of `session push` (it plans the
+// push and sends nothing), which is a command of its own because a harness rule
+// that asks for `session push` would also ask for `session push --dry-run`.
 //
 // Commands that can change state are deliberately absent, among them `doctor
-// --fix`, `sync`, `session update`, `session into` with flags, `note`, `role`,
-// `describe` and `add`. `doctor` is allowed without `--fix`: besides reading
+// --fix`, `sync`, `session update`, `note`, `role`, `describe` and `add`. `doctor` is allowed without `--fix`: besides reading
 // it rebuilds the index, which is only a cache.
 var vmonoReadOnlyCommands = []readOnlyCommand{
 	{args: "show"},

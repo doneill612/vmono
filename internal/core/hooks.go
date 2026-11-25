@@ -39,6 +39,7 @@ func (c *Core) memberHookSteps(s *Session, mem manifest.Member, src, name string
 		}
 		env := SessionEnv(s)
 		env["VMONO_MEMBER"], env["VMONO_MEMBER_DIR"], env["VMONO_SOURCE"] = mem.Name, dir, src
+		env["VMONO_BRANCH"] = s.BranchFor(mem.Name)
 		for _, cmd := range cmds {
 			err := hooks.Run(hooks.Spec{Command: cmd, Dir: dir, Env: env}, out)
 			if errors.Is(err, hooks.ErrInterrupted) {

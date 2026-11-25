@@ -24,10 +24,8 @@ type sessionsMsg struct {
 
 // sessionActions lists everything the sessions view can do to one session,
 // in the order the menu shows it. Launching comes first because it is what a
-// session is for; deleting comes last. Landing branches sit beside Finish,
-// which lands the work on them, and Push is for a finished session: it
-// publishes what finishing landed. Each key is also the view's own
-// shortcut for the action.
+// session is for; deleting comes last. Each key is also the view's own shortcut
+// for the action.
 var sessionActions = []action{
 	{id: "launch", label: "Launch", key: "o"},
 	{id: "launch-with", label: "Launch with…", key: "l"},
@@ -35,10 +33,8 @@ var sessionActions = []action{
 	{id: "describe", label: "Describe", key: "d"},
 	{id: "sync", label: "Sync", key: "s"},
 	{id: "fetch", label: "Fetch", key: "f"},
-	{id: "update", label: "Update from landing branches", key: "u"},
+	{id: "update", label: "Update", key: "u"},
 	{id: "copy", label: "Copy path", key: "y"},
-	{id: "into", label: "Landing branches", key: "i"},
-	{id: "finish", label: "Finish", key: "F"},
 	{id: "push", label: "Push", key: "P"},
 	{id: "delete", label: "Delete", key: "ctrl+d", danger: true},
 }
@@ -57,6 +53,9 @@ type sessionsModel struct {
 	filter string
 	pv     previewPane
 	spin   spinner.Model
+	// deleting is the session a removal was asked for while its agent was
+	// working, waiting for the key again.
+	deleting string
 	// updating is the session an update was asked for while its agent was
 	// working; asking again goes ahead.
 	updating string
@@ -113,7 +112,7 @@ func (m *sessionsModel) Hints() []hint {
 	return []hint{
 		{"enter", "Actions"}, {"o", "Launch"}, {"l", "Launch with…"}, {"n", "New session"}, {"m", "Members"},
 		{"d", "Describe"}, {"y", "Copy path"}, {"e", "Edit package"}, {"s", "Sync"},
-		{"f", "Fetch"}, {"u", "Update"}, {"i", "Landing branches"}, {"F", "Finish"}, {"P", "Push"}, {"ctrl+d", "Delete"},
+		{"f", "Fetch"}, {"u", "Update"}, {"P", "Push"}, {"ctrl+d", "Delete"},
 		{"esc", "Back"},
 	}
 }
@@ -194,21 +193,12 @@ func (m *sessionsModel) selected() (core.SessionSummary, bool) {
 	return core.SessionSummary{}, false
 }
 
-// sessionRow builds one table row. A finished session is drawn dim, with
-// when it finished in place of its dirty marker, since a finished session is
-// clean by definition.
+// sessionRow builds one table row. A merged session is drawn dim, since it is
+// done with.
 func sessionRow(s core.SessionSummary) row {
-	state, stateKey := styled("clean", styleOK), "0"
+	state, stateKey := sessionState(s)
 	name := plain(s.Name)
-	if s.Dirty {
-		state, stateKey = styled("dirty", styleWarn), "1"
-	}
-	if s.State == core.SessionFinished {
-		label := "finished"
-		if t, err := time.Parse(time.RFC3339, s.FinishedAt); err == nil {
-			label += " " + ago(t)
-		}
-		state, stateKey = styled(label, styleDim), "2"
+	if s.State == core.SessionMerged {
 		name = styled(s.Name, styleDim)
 	}
 	state.key = stateKey
@@ -223,13 +213,29 @@ func sessionRow(s core.SessionSummary) row {
 	}
 }
 
-// inProgressFirst returns the sessions with finished ones moved below the
-// rest, each group keeping its order.
-func inProgressFirst(list []core.SessionSummary) []core.SessionSummary {
+// sessionState returns the state cell of a session and its sort key, the states
+// that want attention first.
+func sessionState(s core.SessionSummary) (c cell, key string) {
+	switch {
+	case s.Dirty:
+		return styled("dirty", styleWarn), "0"
+	case len(s.RemoteDeleted) > 0:
+		return styled("remote deleted", styleWarn), "1"
+	case s.State == core.SessionPushed:
+		return styled(s.Label(), styleOK), "3"
+	case s.State == core.SessionMerged:
+		return styled(s.Label(), styleDim), "4"
+	}
+	return styled("clean", styleOK), "2"
+}
+
+// mergedLast returns the sessions with merged ones moved below the rest, each
+// group keeping its order.
+func mergedLast(list []core.SessionSummary) []core.SessionSummary {
 	out := make([]core.SessionSummary, 0, len(list))
-	for _, finished := range []bool{false, true} {
+	for _, merged := range []bool{false, true} {
 		for _, s := range list {
-			if (s.State == core.SessionFinished) == finished {
+			if (s.State == core.SessionMerged) == merged {
 				out = append(out, s)
 			}
 		}
@@ -241,7 +247,7 @@ func inProgressFirst(list []core.SessionSummary) []core.SessionSummary {
 func (m *sessionsModel) fill() {
 	var rows []row
 	states := m.e.sessionStates(m.name)
-	for _, s := range inProgressFirst(m.list) {
+	for _, s := range mergedLast(m.list) {
 		r := sessionRow(s)
 		if m.e.agents != nil {
 			r.cells = append(r.cells, agentCell(states[s.Name]))
@@ -387,31 +393,16 @@ func (m *sessionsModel) act(id string, sel core.SessionSummary) (screen, tea.Cmd
 		}
 		return m, flash("copied " + paths.Contract(sel.Path))
 	case "delete":
-		return m, m.startDelete(sel.Name)
-	case "into":
-		ed, err := newIntoEditorFor(m.e, m.name, sel.Name)
-		if err != nil {
-			return m, flashErr(err.Error())
+		if m.e.sessionStates(m.name)[sel.Name] == herdr.Working && m.deleting != sel.Name {
+			m.deleting = sel.Name
+			return m, flashErr("an agent is working in " + sel.Name + " and deleting it closes its terminal; ctrl+d again to delete anyway")
 		}
-		return m, push(m, ed)
-	case "finish":
-		return m, m.startFinish(sel.Name)
+		m.deleting = ""
+		return m, m.startDelete(sel.Name)
 	case "push":
 		return m, startPush(m, m.e, m.name, sel.Name, nil)
 	}
 	return m, nil
-}
-
-// startFinish opens the finish confirmation for a session: what would land
-// on which branch, or why it cannot yet. Nothing changes until it is
-// confirmed.
-func (m *sessionsModel) startFinish(session string) tea.Cmd {
-	c := m.e.core
-	s, err := c.ResolveSession(m.name + "/" + session)
-	if err != nil {
-		return flashErr(err.Error())
-	}
-	return push(m, newFinishConfirm(m.e, m.name, session, c.PlanFinish(s, core.FinishOptions{})))
 }
 
 // syncSessionOp builds the sync operation for one session. Like create it
@@ -432,8 +423,8 @@ func syncSessionOp(c *core.Core, pkg, session string) operation {
 	}
 }
 
-// updateOp builds the operation that rebases one session's members onto the
-// latest of their landing branches. Nothing is asked first: a member that
+// updateOp builds the operation that brings one session's branches up to date
+// with what they are built on. Nothing is asked first: a member that
 // cannot be updated cleanly is left as it was. A failure offers to launch the
 // harness in the session, which is where a conflict gets resolved.
 func updateOp(c *core.Core, pkg, session string) operation {
@@ -472,7 +463,7 @@ func (m *sessionsModel) startDelete(session string) tea.Cmd {
 				reveal: true,
 			})
 		},
-		nil).about("session"))
+		nil).about("session").closes(m.name, session, s.Dir))
 }
 
 // View implements screen.

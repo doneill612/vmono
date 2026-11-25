@@ -55,6 +55,9 @@ func loadCore() (*core.Core, error) {
 	if err != nil {
 		return nil, err
 	}
+	for _, n := range cfg.Notices {
+		fprintf(os.Stderr, "vmono: %s\n", n)
+	}
 	cfg.NoHooks = cfg.NoHooks || noHooks
 	c, err := core.New(cfg)
 	if err != nil {
@@ -105,14 +108,65 @@ func printEvent(w io.Writer, ev apply.Event) {
 	}
 }
 
-// intoHelp describes the repeatable --into flag.
-const intoHelp = "landing branch: BRANCH for every member, or MEMBER=BRANCH for one (repeatable)"
+// sessionFlags are the flags that say which branches a new session works on,
+// shared by the commands that start one.
+type sessionFlags struct {
+	prefix              string
+	branch, track, from []string
+	reuse               bool
+}
 
-// trackHelp describes the repeatable --track flag.
-const trackHelp = "start from a branch on the members' remotes and land back on it: BRANCH for every member whose remote has it, or MEMBER=BRANCH for one (repeatable); fetches first"
+// add defines the flags on cmd, their help starting with intro.
+func (f *sessionFlags) add(cmd *cobra.Command, intro string) {
+	fs := cmd.Flags()
+	fs.StringVar(&f.prefix, "prefix", "", intro+"put this and a slash before the session's name in the default branch")
+	fs.StringArrayVar(&f.branch, "branch", nil, intro+"branch to work on: BRANCH for every member, or MEMBER=BRANCH for one (repeatable; default [PREFIX/]SESSION)")
+	fs.StringArrayVar(&f.track, "track", nil, intro+"work on a branch that is on the members' remotes: BRANCH for every member, with a new branch where the remote lacks it, or MEMBER=BRANCH for one (repeatable); fetches first")
+	fs.StringArrayVar(&f.from, "from", nil, intro+"build the new branch on this instead of the member's base: REF for every active member that has it, or MEMBER=REF for one (repeatable); for a reference member, what to check it out at; fetches first")
+	fs.BoolVar(&f.reuse, "reuse-branch", false, intro+"check out the branch if it already exists in a source repo")
+}
 
-// parseBranches splits the values of flag, --into or --track, into the branch for every member and the
-// branches for individual members. A value is MEMBER=BRANCH when it has an
+// given reports whether any of the flags was used.
+func (f *sessionFlags) given() bool {
+	return f.prefix != "" || len(f.branch) > 0 || len(f.track) > 0 || len(f.from) > 0 || f.reuse
+}
+
+// options turns the flags into what core takes.
+func (f *sessionFlags) options() (core.SessionOptions, error) {
+	opts := core.SessionOptions{Prefix: f.prefix, ReuseBranch: f.reuse}
+	var err error
+	if opts.Branch, opts.BranchByMember, err = parseBranches("--branch", f.branch); err != nil {
+		return opts, err
+	}
+	if opts.Track, opts.TrackByMember, err = parseBranches("--track", f.track); err != nil {
+		return opts, err
+	}
+	opts.From, opts.FromByMember, err = parseBranches("--from", f.from)
+	return opts, err
+}
+
+// printBranches writes what became of the branches of what was removed, one line
+// each, saying why.
+func printBranches(w io.Writer, res core.DeleteResult) {
+	for _, b := range res.BranchesDeleted {
+		fprintf(w, "deleted branch %s (%s): %s\n", b.Branch, b.Member, b.Reason)
+	}
+	for _, b := range res.BranchesKept {
+		fprintf(w, "kept branch %s (%s): %s\n", b.Branch, b.Member, b.Reason)
+	}
+}
+
+// branchesHelp explains what removing a worktree does with its branch.
+const branchesHelp = `Branches are kept, so committed work is never lost, except that a branch vmono made
+and nothing was committed to goes too. --delete-branches also deletes the branches
+whose work has been merged. A merge commit, a rebase merge and a squash merge all
+count, and each kept branch is listed with the reason. A squash merge that was edited
+on the way in, or that resolved a conflict, cannot be told from work that was never
+merged, so its branch is kept: check, then delete it with git branch -D in the source
+repo. What counts as merged is as of the last fetch.`
+
+// parseBranches splits the values of flag into the branch for every member and
+// the branches for individual members. A value is MEMBER=BRANCH when it has an
 // "=" with a member name before it, and otherwise a branch for every member.
 func parseBranches(flag string, vals []string) (all string, byMember map[string]string, err error) {
 	for _, v := range vals {

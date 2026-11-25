@@ -37,10 +37,6 @@ type operation struct {
 	// new screen for it instead would stack a second copy of that view above
 	// the first, nesting the breadcrumb once more every time.
 	reveal bool
-	// removes, when set with reveal, reports the screens beneath that show
-	// what the operation removed. Leaving the progress screen then closes
-	// those too, so none is revealed with nothing left to display.
-	removes func(screen) bool
 	// back builds the screen to return to when the operation fails. It is for
 	// an operation that replaced its origin; see reveal otherwise.
 	back func() screen
@@ -279,7 +275,7 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		switch k.String() {
 		case "enter", "esc", "q":
 			if m.op.reveal {
-				return m, m.revealCmd(true)
+				return m, pop(m)
 			}
 			if m.op.done != nil {
 				return m, goTo(m, m.op.done())
@@ -295,22 +291,12 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 // builds, or Home.
 func (m *progressModel) leave() (screen, tea.Cmd) {
 	if m.op.reveal {
-		return m, m.revealCmd(false)
+		return m, pop(m)
 	}
 	if m.op.back != nil {
 		return m, goTo(m, m.op.back())
 	}
 	return m, goHome("")
-}
-
-// revealCmd closes the progress screen onto the one beneath it. After a
-// success that is also where screens showing what was removed are closed; a
-// failure removed nothing.
-func (m *progressModel) revealCmd(succeeded bool) tea.Cmd {
-	if succeeded && m.op.removes != nil {
-		return popPast(m, m.op.removes)
-	}
-	return pop(m)
 }
 
 // View implements screen: a table of steps that follows the latest one,

@@ -54,15 +54,15 @@ vmono open project/token-refresh   # launches your default harness at the sessio
 vmono session new project spike    # more work on the same repos: a new session
 ```
 
-When the work is done, `vmono session finish` lands each member's commits on a branch in its source repo, and `vmono session push` publishes them. Nothing is pushed unless you ask.
+Every member works on a branch of its own repo. When the work is done, `vmono session push` publishes the branches for you to open pull requests from, and `vmono session rm` clears the session away once they merge. Nothing is pushed unless you ask.
 
 Add `eval "$(vmono shell-init zsh)"` (or `bash`, `fish`, `pwsh`) to your shell rc for a `vcd <pkg>[/session]` function.
 
 ## Key ideas
 
 - **Package**: the members (source repos), a purpose, context, notes and a role per member. Defined once, shared by every session.
-- **Session**: one piece of work: its own branch and a worktree of every member. A harness opens it.
-- **Active members** are checked out on the session branch and can be edited; **reference members** are detached at a fixed ref under `_ref/` and are read-only.
+- **Session**: one piece of work: a worktree of every member, each on a branch you push. A harness opens it.
+- **Active members** are checked out on a branch and can be edited; **reference members** are detached at a fixed ref under `_ref/` and are read-only.
 
 See [Concepts](docs/concepts.md) for the full vocabulary and what a package looks like on disk.
 
@@ -80,9 +80,9 @@ Install one with `vmono integration install <name>`. See [Integrations](docs/int
 | Topic | What's in it |
 | --- | --- |
 | [Installation](docs/installation.md) | Install script options, building from source, uninstalling |
-| [Concepts](docs/concepts.md) | Packages, sessions, members, landing branches, and the layout on disk |
+| [Concepts](docs/concepts.md) | Packages, sessions, members, branches, and the layout on disk |
 | [The TUI](docs/tui.md) | Views, the command palette, and every shortcut |
-| [Working with sessions](docs/sessions.md) | Updating, finishing and pushing a session; migrating older packages |
+| [Working with sessions](docs/sessions.md) | Starting, updating, pushing and removing a session; what to do after a squash merge |
 | [Initializing a package](docs/package-init.md) | Have an agent explore the members and record an overview |
 | [Setup, teardown and hooks](docs/setup-and-teardown.md) | Install dependencies per worktree; run commands around session events |
 | [The Claude Code plugin](docs/claude-code-plugin.md) | The skill, commands and live state each session gets |

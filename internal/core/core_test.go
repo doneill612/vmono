@@ -57,6 +57,16 @@ func newWork(t *testing.T, c *Core, m *manifest.Manifest) (*Package, *Session) {
 	return p, s
 }
 
+// sha resolves ref in repo, failing the test when it does not exist.
+func sha(t *testing.T, repo, ref string) string {
+	t.Helper()
+	out, err := gitx.ResolveRef(repo, ref)
+	if err != nil {
+		t.Fatalf("resolve %s in %s: %v", ref, repo, err)
+	}
+	return out
+}
+
 // mustPackage creates a package and fails the test if it cannot.
 func mustPackage(t *testing.T, c *Core, m *manifest.Manifest) *Package {
 	t.Helper()
@@ -135,17 +145,17 @@ func TestCreateSessionActiveAndReference(t *testing.T) {
 			t.Errorf("missing %s: %v", rel, err)
 		}
 	}
-	if s.S.Branch != "vmono/demo/token-refresh" {
+	if s.S.Branch != "token-refresh" {
 		t.Errorf("default session branch = %q", s.S.Branch)
 	}
-	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "vmono/demo/token-refresh" {
+	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "token-refresh" {
 		t.Errorf("alpha branch = %q", br)
 	}
 	if st, _ := gitx.StatusOf(filepath.Join(s.Dir, "_ref", "contracts")); !st.Detached {
 		t.Error("reference member must be detached")
 	}
 	agents, _ := os.ReadFile(filepath.Join(s.Dir, "AGENTS.md"))
-	for _, want := range []string{"test purpose", "role of alpha", "session token-refresh", "vmono/demo/token-refresh"} {
+	for _, want := range []string{"test purpose", "role of alpha", "session token-refresh", "token-refresh"} {
 		if !strings.Contains(string(agents), want) {
 			t.Errorf("AGENTS.md missing %q:\n%s", want, agents)
 		}
@@ -200,7 +210,7 @@ func TestTwoSessionsSideBySide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := gitx.CurrentBranch(filepath.Join(one.Dir, "alpha")); got != "vmono/duo/one" {
+	if got := gitx.CurrentBranch(filepath.Join(one.Dir, "alpha")); got != "one" {
 		t.Errorf("session one branch = %q", got)
 	}
 	if got := gitx.CurrentBranch(filepath.Join(two.Dir, "alpha")); got != "feat/PLAT-412" {
@@ -273,7 +283,7 @@ func TestCreateSessionRollbackOnFailure(t *testing.T) {
 		t.Error("a failed session must leave its package alone")
 	}
 	for _, src := range []string{a, b} {
-		if gitx.BranchExists(src, "vmono/rb/try") {
+		if gitx.BranchExists(src, "try") {
 			t.Errorf("branch must be deleted in %s", src)
 		}
 		list, _ := gitx.WorktreeList(src)
@@ -286,7 +296,7 @@ func TestCreateSessionRollbackOnFailure(t *testing.T) {
 func TestBranchExistsRequiresReuse(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")
-	testutil.Git(t, a, "branch", "vmono/again/s1")
+	testutil.Git(t, a, "branch", "s1")
 
 	p, err := c.CreatePackage(request("again", []string{a}, nil))
 	if err != nil {
@@ -301,7 +311,7 @@ func TestBranchExistsRequiresReuse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "vmono/again/s1" {
+	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "s1" {
 		t.Errorf("branch = %q", br)
 	}
 }
@@ -310,7 +320,7 @@ func TestFailedCreateKeepsPreExistingBranch(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")
 	b := env.NewSource(t, "beta")
-	testutil.Git(t, a, "branch", "vmono/keep/s")
+	testutil.Git(t, a, "branch", "s")
 	m := request("keep", []string{a, b}, nil)
 	m.Members[1].Copy = []string{"../escape"}
 	p, err := c.CreatePackage(m)
@@ -320,10 +330,10 @@ func TestFailedCreateKeepsPreExistingBranch(t *testing.T) {
 	if _, err := c.CreateSession(p, "s", SessionOptions{ReuseBranch: true}); err == nil {
 		t.Fatal("expected the copy failure")
 	}
-	if !gitx.BranchExists(a, "vmono/keep/s") {
+	if !gitx.BranchExists(a, "s") {
 		t.Error("a pre-existing branch must survive a failed create")
 	}
-	if gitx.BranchExists(b, "vmono/keep/s") {
+	if gitx.BranchExists(b, "s") {
 		t.Error("a branch created by the failed run must be removed")
 	}
 }
@@ -331,18 +341,16 @@ func TestFailedCreateKeepsPreExistingBranch(t *testing.T) {
 func TestSessionBranchRefConflictIsExplained(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")
-	// A migrated package's session keeps the legacy branch vmono/<pkg>, which
-	// stops git from also holding vmono/<pkg>/<session>.
-	testutil.Git(t, a, "branch", "vmono/clash")
+	testutil.Git(t, a, "branch", "feat")
 	p, err := c.CreatePackage(request("clash", []string{a}, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.CreateSession(p, "next", SessionOptions{})
-	if err == nil || !strings.Contains(err.Error(), "conflicts with existing branch \"vmono/clash\"") || !strings.Contains(err.Error(), "different branch name") {
+	_, err = c.CreateSession(p, "next", SessionOptions{Prefix: "feat"})
+	if err == nil || !strings.Contains(err.Error(), "conflicts with existing branch \"feat\"") || !strings.Contains(err.Error(), "different branch name") {
 		t.Fatalf("want a conflict explanation, got %v", err)
 	}
-	if _, err := c.CreateSession(p, "next", SessionOptions{Branch: "feat/next"}); err != nil {
+	if _, err := c.CreateSession(p, "next", SessionOptions{Branch: "fix/next"}); err != nil {
 		t.Errorf("an explicit branch should work around it: %v", err)
 	}
 }
@@ -360,7 +368,7 @@ func TestSessionOnRepoWithoutCommitsIsExplained(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "has no commits yet") || !strings.Contains(err.Error(), "initial commit") {
 		t.Fatalf("want a no-commits explanation, got %v", err)
 	}
-	if gitx.BranchExists(a, "vmono/fresh/work") {
+	if gitx.BranchExists(a, "work") {
 		t.Error("a failed preflight must not leave a branch behind")
 	}
 }
@@ -466,7 +474,8 @@ func TestDeleteRefusesLostWorkThenForce(t *testing.T) {
 	b := env.NewSource(t, "beta")
 	p, s := newWork(t, c, request("del", []string{a, b}, nil))
 
-	// alpha: untracked file. beta: unpushed commit.
+	// alpha: an untracked file, which would be lost. beta: a commit, which its
+	// branch keeps.
 	testutil.WriteFile(t, filepath.Join(s.Dir, "alpha", "scratch.txt"), "x")
 	testutil.WriteFile(t, filepath.Join(s.Dir, "beta", "feature.txt"), "x")
 	testutil.Git(t, filepath.Join(s.Dir, "beta"), "add", "-A")
@@ -474,10 +483,10 @@ func TestDeleteRefusesLostWorkThenForce(t *testing.T) {
 
 	_, err := c.Delete(p, DeleteOptions{})
 	var re *RefusedError
-	if !errors.Is(err, ErrRefused) || !errors.As(err, &re) || len(re.Unsafe) != 2 {
-		t.Fatalf("want RefusedError for both members, got %v", err)
+	if !errors.Is(err, ErrRefused) || !errors.As(err, &re) || len(re.Unsafe) != 1 {
+		t.Fatalf("want RefusedError for alpha, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "work/alpha") || !strings.Contains(err.Error(), "work/beta") {
+	if !strings.Contains(err.Error(), "work/alpha") {
 		t.Errorf("rows should name session/member: %v", err)
 	}
 	if _, err := os.Stat(p.Dir); err != nil {
@@ -491,10 +500,10 @@ func TestDeleteRefusesLostWorkThenForce(t *testing.T) {
 	if _, err := os.Stat(p.Dir); !os.IsNotExist(err) {
 		t.Error("package dir should be gone")
 	}
-	// alpha's branch has no new commits -> merged -> deleted. beta's has an
-	// unmerged commit -> kept even with force.
+	// alpha's branch has nothing on it, so it goes. beta's has a commit that is
+	// not merged, so it is kept even with force.
 	if gitx.BranchExists(a, "vmono/del") {
-		t.Error("merged branch should be deleted")
+		t.Error("an empty branch should be deleted")
 	}
 	if !gitx.BranchExists(b, "vmono/del") {
 		t.Error("unmerged branch must be kept")
@@ -540,21 +549,6 @@ func TestDeletePackageRefusedByAnySession(t *testing.T) {
 	}
 	if _, err := os.Stat(p.Dir); !os.IsNotExist(err) {
 		t.Error("package should be gone")
-	}
-}
-
-func TestDeleteCleanKeepsBranchesByDefault(t *testing.T) {
-	c, env := newCore(t)
-	a := env.NewSource(t, "alpha")
-	p, s := newWork(t, c, request("clean", []string{a}, nil))
-	if bad := unsafeOf(c.SafetyCheck(s)); len(bad) != 0 {
-		t.Fatalf("fresh session should be safe: %+v", bad)
-	}
-	if _, err := c.Delete(p, DeleteOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if !gitx.BranchExists(a, "vmono/clean") {
-		t.Error("branches are kept unless --delete-branches")
 	}
 }
 

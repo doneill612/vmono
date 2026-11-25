@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -181,6 +182,7 @@ func (c *Core) migratePackage(name string) error {
 			},
 			Undo: func() error { return os.WriteFile(manifest.Path(dir), origManifest, 0o644) },
 		},
+		apply.Step{Name: "drop upstreams", Run: func(func(string)) error { return dropBaseUpstreams(s) }},
 		apply.Step{Name: "commit package", Run: func(func(string)) error {
 			_, err := gitx.CommitAll(dir, fmt.Sprintf("vmono: migrate to sessions (%s)", c.Author), "")
 			return err
@@ -210,4 +212,71 @@ func repairWorktree(src, path string) error {
 		return nil
 	}
 	return gitx.WorktreeRepair(src, path)
+}
+
+// convertSession rewrites a session file from when a session's work landed on
+// other branches. Members keep their branches, which are what is pushed from now
+// on. Git made a branch cut from origin/main track it, which would be wrong for
+// a branch that is pushed, so those upstreams are dropped.
+func (c *Core) convertSession(s *Session) error {
+	if err := dropBaseUpstreams(s); err != nil {
+		return err
+	}
+	s.S.Schema, s.S.Finished, s.S.Into = manifest.SessionSchemaVersion, time.Time{}, nil
+	if err := manifest.SaveSession(s.Dir, s.S); err != nil {
+		return err
+	}
+	if !c.Cfg.AutoCommit {
+		return nil
+	}
+	_, err := gitx.CommitAll(s.Dir, fmt.Sprintf("vmono: convert session %s (%s)", s.Name, c.Author), "")
+	return err
+}
+
+// dropBaseUpstreams makes the branches of a session's active members that track
+// the branch their work merges into track nothing.
+func dropBaseUpstreams(s *Session) error {
+	for _, mem := range s.Pkg.M.Members {
+		src, err := paths.Abs(mem.Source)
+		if err != nil || mem.Mode != manifest.ModeActive || !isRepo(src) {
+			continue
+		}
+		branch := s.BranchFor(mem.Name)
+		tr, ok := gitx.UpstreamOf(src, branch)
+		if !ok || !slices.Contains(baseBranches(s, mem, src), tr.Branch) {
+			continue
+		}
+		if err := gitx.UnsetUpstream(src, branch); err != nil {
+			return fmt.Errorf("%s: %w", mem.Name, err)
+		}
+	}
+	return nil
+}
+
+// unpushedLandings lists, as member:branch, the branches a session landed on
+// that hold its work without having it on a remote. landed maps members to those
+// branches, and srcs each member whose source is usable to it.
+func unpushedLandings(s *Session, landed, srcs map[string]string) []string {
+	var out []string
+	for _, mem := range s.Pkg.M.Members {
+		src, ok := srcs[mem.Name]
+		if !ok || mem.Mode != manifest.ModeActive || landed[mem.Name] == "" {
+			continue
+		}
+		into := landed[mem.Name]
+		if !gitx.BranchExists(src, into) {
+			continue
+		}
+		branch := "refs/heads/" + s.BranchFor(mem.Name)
+		// The session's commits that are on the landing branch and on no remote.
+		all, err := gitx.RevCount(src, branch, "--not", "--remotes")
+		if err != nil {
+			continue
+		}
+		left, err := gitx.RevCount(src, branch, "--not", "--remotes", "refs/heads/"+into)
+		if err == nil && left < all {
+			out = append(out, mem.Name+":"+into)
+		}
+	}
+	return out
 }
