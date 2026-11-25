@@ -93,6 +93,3 @@ func memberNames(m *manifest.Manifest) []string {
 	}
 	return out
 }
-
-// exploredMembers returns the members a record covers.
-func (c *Core) exploredMembers(p *Package) []string { return memberNames(p.M) }
