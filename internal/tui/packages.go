@@ -43,6 +43,7 @@ var packageActions = []action{
 	{id: "describe", label: "Describe", key: "d"},
 	{id: "edit", label: "Edit", key: "e"},
 	{id: "init", label: "Initialize…", key: "i"},
+	{id: "review", label: "Review suggestions", key: "v"},
 	{id: "sync", label: "Sync all", key: "s"},
 	{id: "fetch", label: "Fetch", key: "f"},
 	{id: "copy", label: "Copy path", key: "y"},
@@ -129,7 +130,7 @@ func (m *packagesModel) Crumb() string {
 func (m *packagesModel) Hints() []hint {
 	return []hint{
 		{"enter", "Actions"}, {"→", "Sessions"}, {"o", "Open latest"}, {"l", "Launch…"}, {"d", "Describe"},
-		{"n", "New package"}, {"e", "Edit"}, {"i", "Initialize…"}, {"ctrl+d", "Delete"}, {"s", "Sync all"},
+		{"n", "New package"}, {"e", "Edit"}, {"i", "Initialize…"}, {"v", "Review suggestions"}, {"ctrl+d", "Delete"}, {"s", "Sync all"},
 		{"f", "Fetch"}, {"y", "Copy path"}, {"c", "Edit config"},
 	}
 }
@@ -386,6 +387,8 @@ func (m *packagesModel) act(id string, sel core.Summary) (screen, tea.Cmd) {
 		return m, push(m, newSessionPrompt(m.e, sel.Name))
 	case "init":
 		return m, push(m, newInitPicker(m.e, sel.Name))
+	case "review":
+		return m, push(m, newReview(m.e, sel.Name))
 	case "describe":
 		return m, push(m, newDescribe(m.e, sel.Name, "", ""))
 	case "copy":

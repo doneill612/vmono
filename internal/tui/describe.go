@@ -255,6 +255,9 @@ func describePackage(p *core.Package, sessions []core.SessionSummary, ins *core.
 	if drift := p.M.DriftText(); drift != "" {
 		b.WriteString("   " + styleWarn.Render("out of date: "+drift) + "\n")
 	}
+	if n := len(p.M.Pending()); n > 0 {
+		b.WriteString("   " + styleWarn.Render(fmt.Sprintf("%d suggested commands to review: v in the packages view", n)) + "\n")
+	}
 
 	b.WriteString("\n " + styleHeaderCol.Render("NOTES") + "\n")
 	notes := p.M.RecentNotes(10)

@@ -198,7 +198,13 @@ func (a *App) indexOf(s screen) int {
 }
 
 // Init implements tea.Model.
-func (a *App) Init() tea.Cmd { return tea.Batch(a.top().Init(), a.pollAgents()) }
+func (a *App) Init() tea.Cmd {
+	cmds := []tea.Cmd{a.pollAgents()}
+	for _, s := range a.stack {
+		cmds = append(cmds, s.Init())
+	}
+	return tea.Batch(cmds...)
+}
 
 // Update implements tea.Model. After handling a message it lets the list on
 // screen start loading the preview of whatever row the message left
@@ -630,6 +636,8 @@ func initialize(c *core.Core, req *LaunchRequest) (message string, again bool, e
 	})
 	var exit *harness.ExitError
 	switch {
+	case errors.Is(err, harness.ErrStopped):
+		return "", false, err
 	case err != nil && !errors.As(err, &exit):
 		if res.Summary != "" {
 			return err.Error() + "; " + res.Summary, true, nil
@@ -641,11 +649,23 @@ func initialize(c *core.Core, req *LaunchRequest) (message string, again bool, e
 	return "", res.Launched == launcher.HandedOff && c.Cfg.ReturnToTUI, nil
 }
 
+// openReview shows the review of a package over the packages view, when there
+// is anything to review.
+func (a *App) openReview(pkg string) {
+	if pkg == "" {
+		return
+	}
+	if p, err := a.env.core.Load(pkg); err == nil && len(p.M.Pending()) > 0 {
+		a.stack = append(a.stack, newReview(a.env, pkg))
+	}
+}
+
 // Run opens the TUI and, when the user picks a harness, hands the terminal
 // over to it (see handoff). It loops while return_to_tui is on, reopening
-// the packages view after each harness exits.
+// the packages view after each harness exits, with the review of what an
+// initialization suggested on top of it.
 func Run() error {
-	message := ""
+	message, review := "", ""
 	for {
 		cfg, err := config.Load()
 		if err != nil {
@@ -657,6 +677,7 @@ func Run() error {
 		}
 		c.FindTerminal = launcher.FindSession
 		app := NewApp(c, message)
+		app.openReview(review)
 		if launcher.HasLive(cfg) {
 			app.watchAgents(launcher.TakeLive)
 		}
@@ -672,6 +693,9 @@ func Run() error {
 		if !again {
 			return err
 		}
-		message = msg
+		message, review = msg, ""
+		if req.Init {
+			review = req.Package
+		}
 	}
 }

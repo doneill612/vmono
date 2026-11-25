@@ -262,6 +262,9 @@ func buildPackagePreview(p *core.Package, sessions []core.SessionSummary) func(w
 		b.WriteString(previewField("harness", h, w))
 		b.WriteString(previewField("path", paths.Contract(p.Dir), w))
 		b.WriteString(previewField("overview", initState(p.M), w))
+		if n := len(p.M.Pending()); n > 0 {
+			b.WriteString(previewField("suggested", fmt.Sprintf("%d to review; v", n), w))
+		}
 		b.WriteString(previewSection("SESSIONS"))
 		if len(sessions) == 0 {
 			b.WriteString(" " + styleDim.Render("none yet") + "\n")
