@@ -118,8 +118,9 @@ is done or asks to land or merge it back.
 
 1. Commit your work in every member, from inside the member's directory.
    ` + "`vmono session finish`" + ` refuses uncommitted changes and untracked files.
-2. Preview with ` + "`vmono session finish --dry-run --json`" + ` and read it as in step 3, then run
-   ` + "`vmono session finish --json`" + `. It asks the user for permission by design.
+2. Preview with ` + "`vmono session review --json`" + ` and read it as in step 3, then run
+   ` + "`vmono session finish --json`" + `. The review changes nothing and needs no permission;
+   finishing asks the user for permission by design.
 3. Read the result. Each member is one of:
    - ` + "`landed`" + `: its commits are now on the branch in ` + "`into`" + `.
    - ` + "`nothing`" + `: it had no commits of its own.
@@ -146,7 +147,7 @@ its ` + "`state`" + `). New commits reopen it, and finishing again lands only th
 - Never push, and never delete branches. Landing is local; pushing and pull
   requests are the user's.
 - Change a landing branch only if the user names one: ` + "`vmono session into --member NAME=BRANCH`" + `
-  (or ` + "`--into NAME=BRANCH`" + ` on finish). Never pick a different branch yourself.
+  (or ` + "`--into NAME=BRANCH`" + ` on finish or review). Never pick a different branch yourself.
 
 `
 
@@ -189,7 +190,8 @@ const skillRules = `## What you must not do
 
 - Never remove a member, delete a session, or delete the package. Point the
   user to the vmono TUI (run ` + "`vmono`" + ` with no arguments) for those. ` + "`vmono rm`" + `,
-  ` + "`vmono session rm`" + ` and ` + "`vmono delete`" + ` ask for permission by design; do not work
+  ` + "`vmono session rm`" + ` and ` + "`vmono delete`" + ` ask for permission by design, as do
+  ` + "`vmono session finish`" + `, ` + "`vmono session push`" + ` and ` + "`vmono edit`" + `; do not work
   around that.
 - Never edit anything under ` + "`_ref/`" + `. Reference members are read-only context.
 - Never touch another session's directory. Run git commands from inside a

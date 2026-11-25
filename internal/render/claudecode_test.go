@@ -132,7 +132,7 @@ func TestClaudeAdapterMergesMemberPermissions(t *testing.T) {
 			t.Errorf("deny missing %q: %v", want, f.Permissions.Deny)
 		}
 	}
-	for _, want := range []string{"Bash(vmono rm:*)", "Bash(vmono delete:*)", "Bash(vmono session rm:*)", "Bash(vmono session finish:*)", "Bash(npm test:*)"} {
+	for _, want := range []string{"Bash(vmono rm:*)", "Bash(vmono delete:*)", "Bash(vmono session rm:*)", "Bash(vmono session finish:*)", "Bash(vmono session push:*)", "Bash(vmono edit:*)", "Bash(npm test:*)"} {
 		if !contains(f.Permissions.Ask, want) {
 			t.Errorf("ask missing %q: %v", want, f.Permissions.Ask)
 		}
@@ -155,6 +155,50 @@ func TestClaudeAdapterMergesMemberPermissions(t *testing.T) {
 	}
 	if f.Hooks != nil {
 		t.Error("hooks must be off unless the member opts in")
+	}
+}
+
+// TestClaudeAdapterAllowsReadOnlyVmono checks that the commands which only
+// read are allowed, that none of the commands which change anything is, and
+// that a member's stricter rule still wins over an allow.
+func TestClaudeAdapterAllowsReadOnlyVmono(t *testing.T) {
+	dir, m := pkgWithMembers(t, false)
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+		t.Fatal(err)
+	}
+	f := readClaudeSettings(t, dir)
+	for _, want := range []string{
+		"Bash(vmono show:*)", "Bash(vmono status:*)", "Bash(vmono ls:*)", "Bash(vmono repos:*)",
+		"Bash(vmono path:*)", "Bash(vmono inspect:*)", "Bash(vmono session ls:*)", "Bash(vmono session review:*)",
+		"Bash(vmono integration ls:*)", "Bash(vmono integration print:*)",
+		"Bash(vmono doctor)", "Bash(vmono doctor --json)", "Bash(vmono --version)",
+	} {
+		if !contains(f.Permissions.Allow, want) {
+			t.Errorf("allow missing %q: %v", want, f.Permissions.Allow)
+		}
+	}
+	// Anything that can change state, or that asks, must not be allowed.
+	for _, rule := range f.Permissions.Allow {
+		for _, bad := range []string{"vmono session finish", "vmono session push", "vmono session rm", "vmono session update", "vmono session into", "vmono sync", "vmono doctor --fix", "vmono rm", "vmono delete", "vmono edit", "vmono note", "vmono add"} {
+			if strings.Contains(rule, bad) {
+				t.Errorf("allow rule %q covers %q, which can change state", rule, bad)
+			}
+		}
+	}
+
+	// sdk asks for vmono status: the stricter effect wins, so it leaves allow.
+	write := func(rel, content string) {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(rel)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("sdk/.claude/settings.json", `{"permissions": {"ask": ["Bash(vmono status:*)"]}}`)
+	if _, err := Render(dir, m, testSession(m), Options{Adapters: []string{AdapterClaudeCode}}); err != nil {
+		t.Fatal(err)
+	}
+	f = readClaudeSettings(t, dir)
+	if contains(f.Permissions.Allow, "Bash(vmono status:*)") || !contains(f.Permissions.Ask, "Bash(vmono status:*)") {
+		t.Errorf("a member's ask must override the allow: allow=%v ask=%v", f.Permissions.Allow, f.Permissions.Ask)
 	}
 }
 

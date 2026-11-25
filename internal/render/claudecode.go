@@ -15,8 +15,14 @@ const claudeSettingsPath = ".claude/settings.json"
 
 // vmonoClaudeRules are the rules the root settings always carry: reference
 // members are never edited, and the vmono commands that remove a session,
-// move branches in the source repos, or can add commands vmono runs (a member's
-// setup and teardown) ask first.
+// move branches in the source repos, publish them to a remote, or can add
+// commands vmono runs (a member's setup and teardown) ask first.
+//
+// The vmono commands that only read or display (vmonoReadOnlyCommands) are
+// allowed on top of these, added by renderClaudeCode. Claude Code evaluates
+// deny, then ask, then allow, whatever the specificity, so an allow can never
+// weaken an ask: that is why `session finish` has no dry-run exemption and
+// its read-only form is the separate `session review`.
 var vmonoClaudeRules = []struct {
 	rule   string
 	effect Effect
@@ -26,6 +32,7 @@ var vmonoClaudeRules = []struct {
 	{"Bash(vmono delete:*)", EffectAsk},
 	{"Bash(vmono session rm:*)", EffectAsk},
 	{"Bash(vmono session finish:*)", EffectAsk},
+	{"Bash(vmono session push:*)", EffectAsk},
 	{"Bash(vmono edit:*)", EffectAsk},
 }
 
@@ -55,6 +62,9 @@ func renderClaudeCode(w *writer, m *manifest.Manifest) error {
 	rules := newRuleSet()
 	for _, r := range vmonoClaudeRules {
 		rules.add(r.rule, r.effect)
+	}
+	for _, c := range vmonoReadOnlyCommands {
+		rules.add(c.claudeRule(), EffectAllow)
 	}
 	hooks := map[string][]map[string]any{}
 

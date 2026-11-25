@@ -808,6 +808,31 @@ func TestSessionFinish(t *testing.T) {
 		t.Fatal("a dry run must not move main")
 	}
 
+	// review is the read-only spelling of finish --dry-run: same output, and
+	// it moves nothing, records nothing and does not mark the session finished.
+	sessionToml := filepath.Join(env.PackageRoot, "demo", "work", ".vmono", "session.toml")
+	before, err := os.ReadFile(sessionToml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewText, _, err := run(t, "session", "review", "demo/work")
+	if err != nil || reviewText != text {
+		t.Errorf("review = %q, %v; want the output of finish --dry-run %q", reviewText, err, text)
+	}
+	if _, _, err := run(t, "session", "review", "demo/work", "--into", "somewhere-new"); err != nil {
+		t.Errorf("review --into: %v", err)
+	}
+	var preview core.FinishResult
+	if out, _, err := run(t, "session", "review", "demo/work", "--json"); err != nil || json.Unmarshal([]byte(out), &preview) != nil || preview.Finished || len(preview.Members) != 1 || preview.Members[0].Status != core.LandReady {
+		t.Errorf("review --json = %q, %v, %+v", out, err, preview)
+	}
+	if after, err := os.ReadFile(sessionToml); err != nil || string(after) != string(before) {
+		t.Errorf("review changed session.toml: %q, %v", after, err)
+	}
+	if got := testutil.Git(t, a, "rev-parse", "main"); got == testutil.Git(t, wt, "rev-parse", "HEAD") {
+		t.Fatal("review must not move main")
+	}
+
 	out, _, err = run(t, "session", "finish", "demo/work", "--json")
 	if err != nil {
 		t.Fatalf("finish: %v", err)

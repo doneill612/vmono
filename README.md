@@ -313,6 +313,8 @@ To start from a branch that is on the remote, such as a teammate's or an open pu
 
 Nothing moves unless every member can land. Uncommitted or untracked files, a landing branch checked out with uncommitted changes, or a rebase already in progress each refuse the finish (exit code `2`, with the reasons; `--json` lists them per member). If a rebase stops on conflicts, they stay in that member's worktree: resolve them, `git add`, `git rebase --continue`, and run `vmono session finish` again. Members already rebased are found up to date. If moving the branches fails partway, the ones already moved are put back.
 
+To see what a finish would do first, run `vmono session review [pkg/session] [--into [MEMBER=]B]... [--json]`. It prints the same plan as `finish --dry-run` (and exits `2` for a member that cannot land yet) and changes nothing: no branch moves, the session is not marked finished, and an `--into` is checked and previewed but not recorded. It is a command of its own so that a harness can allow it without ever allowing `finish` itself; see What your harness enforces.
+
 A finished session is not a removed one. It stays in the package's session list, dimmed and sorted below the others, with its worktrees and branch, until you remove it (`ctrl+d` in the TUI, `vmono session rm`, or `finish --close` to do both at once). Its state is derived rather than stored: any new commit or uncommitted edit makes it `in-progress` again, relaunching it changes nothing, and finishing again lands only the new commits. `vmono session ls`, `status` and `show --json` report the state, and `status` shows what is left to land in each member.
 
 ### Pushing a finished session
@@ -325,7 +327,7 @@ Nothing is forced. If the remote branch has commits the landing branch lacks, th
 
 Push before you remove the session: `finish --close` and `vmono session rm` take the session with them, after which the landing branches are plain branches in the source repos and you push them by hand.
 
-The vmono skill teaches the agent to do this when you say the work is done (in Claude Code, `/vmono:finish` says it for you): commit in every member, run `vmono session finish`, resolve a conflict if one stops it, and report what landed where. It also teaches updating a session, and to ask you before it merges a landing branch that has diverged. The adapters ask for permission first, and the agent never passes `--close` or pushes; pushing is yours, from the TUI or `vmono session push`.
+The vmono skill teaches the agent to do this when you say the work is done (in Claude Code, `/vmono:finish` says it for you): commit in every member, preview with `vmono session review`, run `vmono session finish`, resolve a conflict if one stops it, and report what landed where. It also teaches updating a session, and to ask you before it merges a landing branch that has diverged. The adapters allow the review without asking and ask for permission before the finish, and the agent never passes `--close` or pushes; pushing is yours, from the TUI or `vmono session push`.
 
 ### Packages from before sessions
 
@@ -341,7 +343,7 @@ For Claude Code, vmono writes a plugin into every session at `.claude/skills/vmo
 | SessionStart hook | Runs `vmono hook session-start` when a conversation starts, resumes, is cleared, forked or compacted, and adds the session's live state to the context: each member's branch, uncommitted files, and commits left to land |
 | `/vmono:status` | Summarizes that state on request, including anything that would block finishing |
 | `/vmono:note [text]` | Records a package note from your text; with none, proposes one from the conversation and asks first |
-| `/vmono:finish` | Lands the session: commit in every member, `vmono session finish`, resolve a conflict if one stops it, report what landed. Claude Code still asks for permission to run `vmono session finish` |
+| `/vmono:finish` | Lands the session: commit in every member, `vmono session finish`, resolve a conflict if one stops it, report what landed. It previews with `vmono session review`, which needs no permission; Claude Code still asks for permission to run `vmono session finish` |
 
 The hook runs the bare command `vmono`, so `vmono` must be on `PATH` for the harness, as the skill's own commands already assume. It prints nothing outside a session and never fails a start.
 
@@ -408,6 +410,7 @@ Every read command takes `--json`. Anything that could discard work refuses unle
 | `vmono session ls [pkg]` | List a package's sessions and whether each is finished |
 | `vmono session update [pkg/session] [--member NAME]... [--merge] [--no-fetch] [--dry-run]` | Fetch, then rebase the session's commits onto the latest of each member's landing branch. See Updating a session |
 | `vmono session finish [pkg/session] [--into [MEMBER=]B]... [--close] [--dry-run]` | Land the session's commits on each member's branch in its source repo. Nothing is pushed; see Finishing a session |
+| `vmono session review [pkg/session] [--into [MEMBER=]B]... [--json]` | Show what finishing would land, changing nothing (the read-only form of `session finish`) |
 | `vmono session push [pkg/session] [--member NAME]... [--dry-run] [--json]` | Push a finished session's landing branches to their remotes, never forced. See Pushing a finished session |
 | `vmono session rm <pkg>/<session> [--force] [--delete-branches]` | Remove a session; the package and its other sessions stay |
 | `vmono add [pkg] <repo> [--ref] [--role R]` | Add a member to the package, and so to every session (a known repo name or any path) |
@@ -480,7 +483,7 @@ Fetches and pushes never prompt. Starting a session, adding members, sync and th
 - Symlinks are never followed or created.
 - Committing from a worktree writes into the source repo's git directory, outside the package. `vmono inspect --json` lists each `git_common_dir` so sandboxing wrappers can allow it.
 
-vmono enforces nothing about what an agent may do; the harness's own permission system does. The `claude-code` and `opencode` adapters add `ask` rules for `vmono rm`, `vmono session rm`, `vmono session finish`, `vmono edit` and `vmono delete` and a deny rule for edits under `_ref/`.
+vmono enforces nothing about what an agent may do; the harness's own permission system does. The `claude-code` and `opencode` adapters add `ask` rules for `vmono rm`, `vmono session rm`, `vmono session finish`, `vmono session push`, `vmono edit` and `vmono delete` and a deny rule for edits under `_ref/`. They allow, without asking, the commands that only read or display: `vmono show`, `status`, `ls`, `repos`, `path`, `inspect`, `session ls`, `session review`, `integration ls` and `print`, `doctor` (without `--fix`) and `--version`. Claude Code evaluates `ask` before `allow` whatever the specificity, so a command that asks cannot be exempted for a flag such as `--dry-run`; that is why the read-only form of `session finish` is the separate `session review`. A rule in a member's own settings that asks about or denies one of the allowed commands still wins.
 
 ## Development
 
