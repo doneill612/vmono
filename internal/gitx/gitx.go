@@ -709,9 +709,10 @@ func StatusOf(path string) (Status, error) {
 
 // OnNoBranch counts the commits of the worktree's HEAD that no branch, tag or
 // remote branch holds. It is for a detached HEAD, as reference members are
-// checked out and a rebase leaves: removing the worktree loses only these.
-func OnNoBranch(path string) (int, error) {
-	return RevCount(path, "HEAD", "--not", "--branches", "--tags", "--remotes")
+// checked out and a rebase leaves: removing the worktree loses only these. Those
+// reachable from known are not counted either.
+func OnNoBranch(path string, known ...string) (int, error) {
+	return RevCount(path, append([]string{"HEAD", "--not", "--branches", "--tags", "--remotes"}, known...)...)
 }
 
 // Tracking is the remote branch a local branch is configured to track.

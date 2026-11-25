@@ -22,11 +22,14 @@ A session is one piece of work on a [package](concepts.md). Every active member 
 | Choose the name | `--branch fix/PLAT-412`, or `--branch MEMBER=B` for one member (repeatable) |
 | Work on a branch that is on the remote, such as a teammate's or an open pull request's | `--track BRANCH` or `--track MEMBER=BRANCH` |
 | Build on something other than the base | `--from REF` or `--from MEMBER=REF` |
+| Read a reference member at something other than the package's ref | `--from MEMBER=REF`, or its `ref` field in the TUI |
 | Take up a local branch that already exists | `--reuse-branch` |
 
 `--track` fetches, then checks out the branch itself, tracking the remote one. A local copy is brought up to it when it is only behind. A member whose remote lacks the branch gets a new one of that name, with a warning; naming the member makes that an error (exit `3`). A branch that is checked out elsewhere, your source repo included, cannot be in a session at the same time, so switch the source to another branch first.
 
 `--from` is for work stacked on a branch that has not merged. The session remembers it, measures your commits against it, and follows it on `update`.
+
+For a reference member, `--from MEMBER=REF` is what it is checked out at in this session: a branch (local or remote, whichever is further ahead), a tag or a commit. Use it when your work depends on changes there that have not merged. `--from REF`, for every member, leaves reference members at the package's ref. The session remembers the ref, and `vmono sync --refs` moves a clean reference member to its newest commit. If the branch's remote copy is deleted, `sync --refs` returns the member to the package's ref once that has the branch's work, and leaves it where it is until then.
 
 A name is refused if it is the branch the work merges into, if it already exists locally (without `--reuse-branch`), or if it is already on the member's remote, where a push would meet someone else's work. Two packages that share a repo cannot have a session branch of the same name checked out at once; a prefix keeps them apart.
 

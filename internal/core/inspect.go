@@ -96,7 +96,7 @@ func (c *Core) Inspect(s *Session) (InspectResult, error) {
 		if mem.Mode == manifest.ModeActive {
 			im.Branch, im.Base = s.BranchFor(mem.Name), mem.Base
 		} else {
-			im.Ref = mem.Ref
+			im.Ref = s.S.RefFor(mem)
 		}
 		if _, err := os.Stat(im.Path); err == nil {
 			im.Exists = true

@@ -57,7 +57,7 @@ func freshest(src, branch string) (ref string, diverged bool) {
 	return local, true
 }
 
-// MemberBranches is one active member's branches on its remote.
+// MemberBranches is one member's branches on its remote.
 type MemberBranches struct {
 	Member   string
 	Branches []gitx.RemoteBranch
@@ -69,14 +69,14 @@ type MemberBranches struct {
 }
 
 // RemoteBranches lists the remote branches a session of p could work on or build on,
-// for each active member: as of the last fetch, or after fetching when fetch
-// is true. A member that cannot be fetched or listed is reported rather than
-// failing the rest.
-func (c *Core) RemoteBranches(p *Package, fetch bool) []MemberBranches {
+// for each active member, or could check out, for the one member named: as of
+// the last fetch, or after fetching when fetch is true. A member that cannot be
+// fetched or listed is reported rather than failing the rest.
+func (c *Core) RemoteBranches(p *Package, member string, fetch bool) []MemberBranches {
 	var out []MemberBranches
 	var srcs []string
 	for _, mem := range p.M.Members {
-		if mem.Mode != manifest.ModeActive {
+		if (member == "" && mem.Mode != manifest.ModeActive) || (member != "" && mem.Name != member) {
 			continue
 		}
 		src, err := paths.Abs(mem.Source)

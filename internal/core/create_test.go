@@ -118,7 +118,7 @@ func TestCreateSessionRefusesBranchesItCannotWorkOn(t *testing.T) {
 		"git cannot hold":   {SessionOptions{Branch: "feat/x"}, "conflicts with existing branch"},
 		"exists locally":    {SessionOptions{Branch: "taken"}, "already exists"},
 		"exists on remote":  {SessionOptions{Branch: "theirs"}, "already on origin"},
-		"unknown member":    {SessionOptions{BranchByMember: map[string]string{"ghost": "x"}}, "not an active member"},
+		"unknown member":    {SessionOptions{BranchByMember: map[string]string{"ghost": "x"}}, "not a member"},
 		"branch and track":  {SessionOptions{Branch: "x", Track: "theirs"}, "--branch and --track"},
 		"prefix and branch": {SessionOptions{Prefix: "p", Branch: "x"}, "--prefix"},
 	} {

@@ -40,6 +40,12 @@ func seed(t *testing.T, env *testutil.Env, name string, sources ...string) {
 // seedPackage creates a package with no sessions.
 func seedPackage(t *testing.T, env *testutil.Env, name string, sources ...string) {
 	t.Helper()
+	seedWithRefs(t, env, name, sources, nil)
+}
+
+// seedWithRefs creates a package with reference members as well as active ones.
+func seedWithRefs(t *testing.T, env *testutil.Env, name string, sources, refs []string) {
+	t.Helper()
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +57,9 @@ func seedPackage(t *testing.T, env *testutil.Env, name string, sources ...string
 	m := &manifest.Manifest{Name: name, Purpose: "Purpose of " + name}
 	for _, s := range sources {
 		m.Members = append(m.Members, manifest.Member{Source: s, Mode: manifest.ModeActive, Role: "role"})
+	}
+	for _, s := range refs {
+		m.Members = append(m.Members, manifest.Member{Source: s, Mode: manifest.ModeReference})
 	}
 	if _, err := c.CreatePackage(m); err != nil {
 		t.Fatal(err)

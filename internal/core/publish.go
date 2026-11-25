@@ -50,6 +50,21 @@ func baseOf(refs gitx.Refs, s *Session, mem manifest.Member, src string, warn fu
 	return b, nil
 }
 
+// refOf returns the ref a reference member of the session is checked out at: the
+// one the session names for it, else the package's. lost is the one the session
+// names when it can no longer be found, in which case ref is the package's. warn
+// may be nil.
+func refOf(s *Session, mem manifest.Member, src string, warn func(string)) (ref, lost string, err error) {
+	own := s.S.Members[mem.Name].Ref
+	if own != "" {
+		if ref := resolveFrom(src, own); ref != "" {
+			return ref, "", nil
+		}
+	}
+	ref, err = resolveRef(src, mem.Ref, warn)
+	return ref, own, err
+}
+
 // displayRef names ref for people. origin/HEAD is spelled as the branch it stands
 // for.
 func displayRef(src, ref string) string {

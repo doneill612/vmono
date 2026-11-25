@@ -185,11 +185,19 @@ func (c *Core) ApplyEdit(p *Package, edited *manifest.Manifest, opts EditOptions
 	if err := recordCreated(ep.Sessions, adds, existing); err != nil {
 		return plan, err
 	}
+	// A member that comes back in the same mode keeps what the sessions record
+	// about it.
 	for _, mem := range removals {
-		if now, ok := ep.Next.Member(mem.Name); !ok || now.Mode != manifest.ModeActive {
-			if err := forgetMember(ep.Sessions, mem.Name); err != nil {
-				return plan, err
-			}
+		now, ok := ep.Next.Member(mem.Name)
+		forget := forgetMember
+		switch {
+		case ok && now.Mode == mem.Mode:
+			continue
+		case ok && now.Mode == manifest.ModeActive:
+			forget = forgetRef
+		}
+		if err := forget(ep.Sessions, mem.Name); err != nil {
+			return plan, err
 		}
 	}
 

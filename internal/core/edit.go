@@ -217,6 +217,23 @@ func recordCreated(sessions []*Session, added []manifest.Member, existing map[st
 	return nil
 }
 
+// forgetRef drops what each session checks a member out at, for one that is no
+// longer a reference member.
+func forgetRef(sessions []*Session, member string) error {
+	for _, s := range sessions {
+		rec := s.S.Members[member]
+		if rec.Ref == "" {
+			continue
+		}
+		rec.Ref, rec.BaseTip = "", ""
+		s.S.SetMember(member, rec)
+		if err := manifest.SaveSession(s.Dir, s.S); err != nil {
+			return fmt.Errorf("session %s: %w", s.Name, err)
+		}
+	}
+	return nil
+}
+
 // forgetMember drops what each session records about a member that has left
 // the package.
 func forgetMember(sessions []*Session, member string) error {

@@ -123,7 +123,13 @@ func (c *Core) Safety(s *Session, members []manifest.Member) []MemberSafety {
 		}
 		ms.Dirty, ms.Untracked = st.Dirty, st.Untracked
 		if st.Detached {
-			if n, err := gitx.OnNoBranch(dir); err != nil {
+			// What the session checked out is not work done here, though the
+			// branch it was on may be gone since.
+			var known []string
+			if rec := s.S.Members[mem.Name]; rec.Ref != "" && rec.BaseTip != "" && gitx.RefExists(dir, rec.BaseTip) {
+				known = append(known, rec.BaseTip)
+			}
+			if n, err := gitx.OnNoBranch(dir, known...); err != nil {
 				ms.Error = err.Error()
 			} else {
 				ms.Unpushed = n

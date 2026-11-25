@@ -22,7 +22,7 @@ Every read command takes `--json`. Anything that could discard work refuses unle
 | `vmono add [pkg] <repo> [--ref] [--role R]` | Add a member to the package, and so to every session (a known repo name or any path) |
 | `vmono rm [pkg] <member> [--force] [--delete-branch]` | Remove a member from every session |
 | `vmono edit [pkg]` | Edit the package manifest in `$EDITOR`; changes apply as a diff to every session |
-| `vmono sync [pkg[/session]] [--refs]` | Recreate missing worktrees and regenerate files, in one session or all of a package's; `--refs` moves reference members to their latest fetched ref |
+| `vmono sync [pkg[/session]] [--refs]` | Recreate missing worktrees and regenerate files, in one session or all of a package's; `--refs` moves reference members to the latest fetched commit of their ref, the session's own where it names one |
 | `vmono status [pkg[/session]]` | The session's state, and per member: branch or ref, uncommitted work, and how far it is from pushed and merged |
 | `vmono show [pkg[/session]]` | Purpose, context, notes, sessions and members; with a session, each member's live state |
 | `vmono describe [pkg] --purpose T \| --context T \| --overview T` | Replace the purpose, context or overview (`--purpose-file`, `--context-file`, `--overview-file` too) |

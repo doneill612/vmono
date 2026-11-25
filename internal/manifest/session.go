@@ -44,13 +44,14 @@ type Session struct {
 	// branch of each member's source repo it landed on.
 	Finished time.Time         `toml:"finished,omitempty"`
 	Into     map[string]string `toml:"into,omitempty"`
-	// Members maps an active member's name to what the session records about
-	// its branch. A member with no entry is on Branch, which it found already
-	// made, and is built on its base.
+	// Members maps a member's name to what the session records about it. An
+	// active member with no entry is on Branch, which it found already made, and
+	// is built on its base. A reference member with none is at the package's ref.
 	Members map[string]SessionMember `toml:"members,omitempty"`
 }
 
-// SessionMember is what a session records about one active member's branch.
+// SessionMember is what a session records about one member: an active one's
+// branch, or what a reference one is checked out at.
 type SessionMember struct {
 	// Branch is the branch the member has checked out, when it is not the
 	// session's.
@@ -61,8 +62,12 @@ type SessionMember struct {
 	// From is the branch or ref the member's branch is built on in place of
 	// the member's base, for work stacked on work that has not merged.
 	From string `toml:"from,omitempty"`
-	// BaseTip is the commit of From the branch was last built on. When From
-	// goes away it says where the member's own commits begin.
+	// Ref is the branch or ref a reference member is checked out at in place of
+	// the package's, for work that depends on work that has not merged.
+	Ref string `toml:"ref,omitempty"`
+	// BaseTip is the commit of From the branch was last built on, or of Ref that
+	// was last checked out. When From goes away it says where the member's own
+	// commits begin.
 	BaseTip string `toml:"base_tip,omitempty"`
 }
 
@@ -73,6 +78,14 @@ func (s *Session) BranchFor(member string) string {
 		return b
 	}
 	return s.Branch
+}
+
+// RefFor returns the ref the reference member is checked out at in the session.
+func (s *Session) RefFor(mem Member) string {
+	if r := s.Members[mem.Name].Ref; r != "" {
+		return r
+	}
+	return mem.Ref
 }
 
 // SetMember records m for the named member. A branch that is the session's own
@@ -167,8 +180,10 @@ func (s *Session) Validate() error {
 		if err := validateBranch(m.Branch); err != nil {
 			return fmt.Errorf("session %s: branch of %s: %w", s.Name, member, err)
 		}
-		if strings.HasPrefix(m.From, "-") || strings.ContainsAny(m.From, " \t\r\n") {
-			return fmt.Errorf("session %s: from of %s: %q is not a ref", s.Name, member, m.From)
+		for field, ref := range map[string]string{"from": m.From, "ref": m.Ref} {
+			if strings.HasPrefix(ref, "-") || strings.ContainsAny(ref, " \t\r\n") {
+				return fmt.Errorf("session %s: %s of %s: %q is not a ref", s.Name, field, member, ref)
+			}
 		}
 	}
 	return nil
@@ -225,6 +240,9 @@ func EncodeSession(s *Session) []byte {
 		}
 		if m.From != "" {
 			fmt.Fprintf(&b, "from = %s\n", quote(m.From))
+		}
+		if m.Ref != "" {
+			fmt.Fprintf(&b, "ref = %s\n", quote(m.Ref))
 		}
 		if m.BaseTip != "" {
 			fmt.Fprintf(&b, "base_tip = %s\n", quote(m.BaseTip))

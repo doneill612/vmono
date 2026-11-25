@@ -58,7 +58,7 @@ func AgentsBlock(m *manifest.Manifest, s *manifest.Session) string {
 		for _, mem := range m.Members {
 			where := s.BranchFor(mem.Name)
 			if mem.Mode == manifest.ModeReference {
-				where = mem.Ref
+				where = s.RefFor(mem)
 			}
 			fmt.Fprintf(&b, "| `%s/` | %s | `%s` | %s |\n",
 				path.Clean(strings.ReplaceAll(mem.Path, `\`, "/")), mem.Mode, where, cell(mem.Role))

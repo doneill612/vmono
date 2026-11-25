@@ -43,12 +43,15 @@ type SessionOptions struct {
 	// merged. A member without it is built on its base, and it fails when none
 	// has it. FromByMember names one for individual members, and fails for one
 	// without it. Both are ignored for a member that tracks a branch.
+	//
+	// FromByMember also names what a reference member is checked out at in place
+	// of the package's ref. From leaves reference members alone.
 	From         string
 	FromByMember map[string]string
 }
 
-// check rejects options that contradict each other or name a member that is not
-// an active one of p.
+// check rejects options that contradict each other or name a member p does not
+// have, or one a branch means nothing for.
 func (o SessionOptions) check(p *Package) error {
 	switch {
 	case o.Branch != "" && o.Track != "":
@@ -58,14 +61,14 @@ func (o SessionOptions) check(p *Package) error {
 	case o.Track != "" && o.From != "":
 		return errors.New("--track and --from cannot both be given for every member: a tracked branch starts where it is")
 	}
-	active := map[string]bool{}
-	for _, mem := range p.M.Members {
-		active[mem.Name] = mem.Mode == manifest.ModeActive
-	}
 	for flag, by := range map[string]map[string]string{"--branch": o.BranchByMember, "--track": o.TrackByMember, "--from": o.FromByMember} {
 		for member := range by {
-			if !active[member] {
-				return fmt.Errorf("%s names %q, which is not an active member of %s", flag, member, p.Name)
+			mem, ok := p.M.Member(member)
+			switch {
+			case !ok:
+				return fmt.Errorf("%s names %q, which is not a member of %s", flag, member, p.Name)
+			case mem.Mode != manifest.ModeActive && flag != "--from":
+				return fmt.Errorf("%s names %q, which is not an active member of %s; choose what a reference member is checked out at with --from %s=REF", flag, member, p.Name, member)
 			}
 		}
 	}
@@ -160,17 +163,19 @@ func resolveTrack(p *Package, opts SessionOptions, srcs map[string]string, warn 
 }
 
 // resolveFroms records in ms what each member is built on in place of its base,
-// as of the last fetch. Members in tracked are left out.
+// and what each reference member is checked out at in place of the package's
+// ref, as of the last fetch. Members in tracked are left out.
 func resolveFroms(p *Package, ms *manifest.Session, opts SessionOptions, srcs map[string]string, tracked map[string]bool, warn func(member, msg string)) error {
 	asked, found := false, false
 	var missing []string
 	for _, mem := range p.M.Members {
 		from, named := opts.fromFor(mem.Name)
-		if mem.Mode != manifest.ModeActive || from == "" || tracked[mem.Name] {
+		reference := mem.Mode == manifest.ModeReference
+		if from == "" || tracked[mem.Name] || (reference && !named) {
 			continue
 		}
 		asked = asked || !named
-		if from == ms.BranchFor(mem.Name) {
+		if !reference && from == ms.BranchFor(mem.Name) {
 			return fmt.Errorf("%s: %q cannot be built on itself", mem.Name, from)
 		}
 		src := srcs[mem.Name]
@@ -188,7 +193,12 @@ func resolveFroms(p *Package, ms *manifest.Session, opts SessionOptions, srcs ma
 			return fmt.Errorf("%s: %w", mem.Name, err)
 		}
 		rec := ms.Members[mem.Name]
-		rec.From, rec.BaseTip = from, tip
+		rec.BaseTip = tip
+		if reference {
+			rec.Ref = from
+		} else {
+			rec.From = from
+		}
 		ms.SetMember(mem.Name, rec)
 	}
 	if asked && !found {
@@ -744,9 +754,12 @@ func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, plan 
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				return err
 			}
-			ref, err := resolveRef(src, mem.Ref, warn)
+			ref, lost, err := refOf(s, mem, src, warn)
 			if err != nil {
 				return err
+			}
+			if lost != "" {
+				warn(fmt.Sprintf("%s, which the session checks it out at, is gone; using %s", lost, displayRef(src, ref)))
 			}
 			return gitx.WorktreeAddDetached(src, dst, ref)
 		}, Undo: func() error {

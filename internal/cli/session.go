@@ -53,7 +53,9 @@ that is already on the member's remote is refused.
 
 --track works on a branch that is already there, such as a teammate's or an open pull
 request's. --from builds the new branch on something other than the base, for work
-stacked on a branch that has not merged.`,
+stacked on a branch that has not merged. Naming a reference member with it
+(--from MEMBER=REF) checks that member out at REF in place of the package's ref, for
+work that depends on changes there that have not merged.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg, rest := splitPkgArgs(args, 2)

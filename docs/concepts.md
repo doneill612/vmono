@@ -8,7 +8,7 @@
 | Session | One piece of work on a package: a directory with its own git repo and a worktree of every member, each active one on a branch. It is what a harness opens. A package has any number of them side by side. |
 | Member | A source repo included in a package. Every session has a worktree of every member. |
 | Active member | Checked out on a branch, named after the session unless you say otherwise. The agent may edit it and commit to it, and you push it. |
-| Reference member | Checked out detached at a fixed ref under `_ref/`. Read-only context. |
+| Reference member | Checked out detached under `_ref/`, at the package's `ref` or what a session names with `--from MEMBER=REF`. Read-only context. |
 | Base | What a member's branch is built on and merges into: the `base` in the package manifest (default `origin/HEAD`), or what a session names with `--from`. |
 | Overview | What an agent learned by exploring the members, recorded by `vmono package init`. Kept apart from the text you write. |
 | Purpose / Context / Notes / Role | Free text that belongs to the package: what the work is, what to know, a dated log, and what each member contributes. Sessions share it; they have none of their own. |

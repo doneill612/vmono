@@ -231,7 +231,7 @@ func worktreeStatus(s *Session, mem manifest.Member) MemberStatus {
 	ms.Branch, ms.Head, ms.Upstream = st.Branch, st.Head, st.Upstream
 	ms.Dirty, ms.Untracked, ms.Ahead, ms.Behind = st.Dirty, st.Untracked, st.Ahead, st.Behind
 	if st.Detached {
-		ms.Ref = mem.Ref
+		ms.Ref = s.S.RefFor(mem)
 		if ms.Ref == "" {
 			ms.Ref = st.Head
 		}

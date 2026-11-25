@@ -185,6 +185,7 @@ func TestSessionMembersRoundTrip(t *testing.T) {
 	s.SetMember("sdk", SessionMember{Branch: s.Branch, Created: true})
 	s.SetMember("api", SessionMember{Branch: "feat/x", From: "feat/parent", BaseTip: "abc123"})
 	s.SetMember("web", SessionMember{Branch: s.Branch})
+	s.SetMember("lib", SessionMember{Ref: "feat/z", BaseTip: "def456"})
 	body := string(EncodeSession(s))
 	if strings.Index(body, "[members.api]") > strings.Index(body, "[members.sdk]") {
 		t.Errorf("members should be written in a stable order:\n%s", body)
@@ -193,7 +194,7 @@ func TestSessionMembersRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v\n%s", err, body)
 	}
-	if got.Schema != SessionSchemaVersion || len(got.Members) != 2 {
+	if got.Schema != SessionSchemaVersion || len(got.Members) != 3 {
 		t.Errorf("schema = %d, members = %+v", got.Schema, got.Members)
 	}
 	if got.Members["api"] != (SessionMember{Branch: "feat/x", From: "feat/parent", BaseTip: "abc123"}) || got.Members["sdk"] != (SessionMember{Created: true}) {
@@ -201,6 +202,11 @@ func TestSessionMembersRoundTrip(t *testing.T) {
 	}
 	if got.BranchFor("api") != "feat/x" || got.BranchFor("sdk") != s.Branch || got.BranchFor("unlisted") != s.Branch {
 		t.Errorf("branches = %q %q %q", got.BranchFor("api"), got.BranchFor("sdk"), got.BranchFor("unlisted"))
+	}
+	for name, want := range map[string]string{"lib": "feat/z", "docs": "origin/HEAD"} {
+		if ref := got.RefFor(Member{Name: name, Ref: "origin/HEAD"}); ref != want {
+			t.Errorf("%s is at %q, want %q", name, ref, want)
+		}
 	}
 	got.SetMember("sdk", SessionMember{})
 	if _, ok := got.Members["sdk"]; ok {
@@ -213,6 +219,7 @@ func TestSessionValidateMembers(t *testing.T) {
 		"branch":      {"api": {Branch: "a b"}},
 		"option":      {"api": {Branch: "-x"}},
 		"from":        {"api": {From: "-x"}},
+		"ref":         {"api": {Ref: "a b"}},
 		"member name": {"Bad Member": {Created: true}},
 	} {
 		s := sampleSession()

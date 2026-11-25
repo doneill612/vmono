@@ -19,6 +19,9 @@ import (
 // remote branches. Tracking works on the branch itself, in each member whose
 // remote has it; the others get a new branch of that name. From builds new
 // branches on the one picked, in each member that has it, in place of its base.
+// A reference member's field holds what it is checked out at in place of the
+// package's ref, typed, or picked from its remote branches with space, which no
+// ref can hold.
 // Enter runs the create on the progress screen, which ends at the harness
 // picker, so creating a package and starting its first session still ends at a
 // running harness.
@@ -29,11 +32,12 @@ type sessionPrompt struct {
 	prefix  textinput.Model
 	branch  textinput.Model
 	members branchFields
+	refs    branchFields
 	// track and from are the remote branches picked, and the members whose
 	// remote has each.
 	track, from pickedBranch
 	// focus is the field with the keyboard, in the order of the constants below
-	// and then one per member.
+	// and then one per active member and one per reference member.
 	focus int
 	msg   string
 }
@@ -55,7 +59,18 @@ const (
 )
 
 // promptFields is the number of fields in the prompt.
-func (m *sessionPrompt) promptFields() int { return firstMember + m.members.count() }
+func (m *sessionPrompt) promptFields() int { return m.firstRef() + m.refs.count() }
+
+// firstRef is the first of the reference members' fields.
+func (m *sessionPrompt) firstRef() int { return firstMember + m.members.count() }
+
+// focusedRef is the reference member whose field has the keyboard, or "".
+func (m *sessionPrompt) focusedRef() string {
+	if i := m.focus - m.firstRef(); i >= 0 && i < m.refs.count() {
+		return m.refs.members[i]
+	}
+	return ""
+}
 
 // newSessionPrompt builds the prompt for a new session of pkg.
 func newSessionPrompt(e *env, pkg string) *sessionPrompt {
@@ -68,11 +83,17 @@ func newSessionPrompt(e *env, pkg string) *sessionPrompt {
 		in.Width = 48
 		return in
 	}
-	var members []string
+	var members, refs []string
+	at := map[string]string{}
+	width := 0
 	if p, err := e.core.Load(pkg); err == nil {
 		for _, mem := range p.M.Members {
+			width = max(width, len(mem.Name))
 			if mem.Mode == manifest.ModeActive {
 				members = append(members, mem.Name)
+			} else {
+				refs = append(refs, mem.Name)
+				at[mem.Name] = mem.Ref
 			}
 		}
 	}
@@ -81,7 +102,11 @@ func newSessionPrompt(e *env, pkg string) *sessionPrompt {
 		name:    input("session: ", "token-refresh", 64),
 		prefix:  input("prefix:  ", "none", 64),
 		branch:  input("branch:  ", "", 200),
-		members: newBranchFields(members),
+		members: newBranchFields("branch", width, members),
+		refs:    newBranchFields("ref", width, refs),
+	}
+	for name, ref := range at {
+		m.refs.placeholder(name, ref)
 	}
 	m.sync()
 	return m
@@ -145,7 +170,7 @@ func (m *sessionPrompt) setFocus(i int) tea.Cmd {
 	for _, in := range []*textinput.Model{&m.name, &m.prefix, &m.branch} {
 		in.Blur()
 	}
-	cmd := m.members.focus(m.focus - firstMember)
+	cmd := tea.Batch(m.members.focus(m.focus-firstMember), m.refs.focus(m.focus-m.firstRef()))
 	switch m.focus {
 	case nameField:
 		return m.name.Focus()
@@ -162,9 +187,12 @@ func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
 	if t, ok := msg.(remotePickedMsg); ok {
 		if t.owner == m {
 			picked := pickedBranch{name: t.branch, members: t.members}
-			if t.from {
+			switch {
+			case t.ref != "":
+				m.refs.set(t.ref, t.branch)
+			case t.from:
 				m.from = picked
-			} else {
+			default:
 				m.track = picked
 			}
 			m.sync()
@@ -177,13 +205,18 @@ func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
 	}
 	key := k.String()
 	onPicker := (m.focus == trackField || m.focus == fromField) && (key == "enter" || key == " ")
-	if key == "ctrl+t" || onPicker {
+	onRef := m.focusedRef() != "" && key == " "
+	if key == "ctrl+t" || onPicker || onRef {
 		p, err := m.e.core.Load(m.pkg)
 		if err != nil {
 			m.msg = err.Error()
 			return m, nil
 		}
-		return m, push(m, newRemotePicker(m, m.e.core, p, onPicker && m.focus == fromField))
+		picker := newRemotePicker(m, m.e.core, p, onPicker && m.focus == fromField)
+		if onRef {
+			picker.ref = m.focusedRef()
+		}
+		return m, push(m, picker)
 	}
 	switch key {
 	case "esc":
@@ -206,7 +239,7 @@ func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
 		m.branch, cmd = m.branch.Update(msg)
 	case trackField, fromField:
 	default:
-		cmd = m.members.update(m.focus-firstMember, msg)
+		cmd = tea.Batch(m.members.update(m.focus-firstMember, msg), m.refs.update(m.focus-m.firstRef(), msg))
 	}
 	m.sync()
 	return m, cmd
@@ -230,7 +263,7 @@ func (m *sessionPrompt) options() core.SessionOptions {
 		Branch:         strings.TrimSpace(m.branch.Value()),
 		BranchByMember: m.members.values(),
 		TrackByMember:  map[string]string{},
-		FromByMember:   map[string]string{},
+		FromByMember:   m.refs.values(),
 	}
 	if opts.Branch == "" {
 		opts.Branch = m.track.name
@@ -293,8 +326,19 @@ func (m *sessionPrompt) View(w, h int) string {
 	b.WriteString(" " + m.pickView(trackField, "track:   ", "none, start a new branch", m.track) + "\n")
 	b.WriteString(" " + m.pickView(fromField, "from:    ", "each member's base", m.from) + "\n")
 	b.WriteString(m.members.view())
-	b.WriteString("\n " + styleDim.Render("Each member gets a worktree on its branch, which is what you push. Track") + "\n")
-	b.WriteString(" " + styleDim.Render("works on a remote branch; from builds the new one on it.") + "\n")
+	b.WriteString(m.refs.view())
+	help := []string{
+		"Each member gets a worktree on its branch, which is what you push. Track",
+		"works on a remote branch; from builds the new one on it.",
+	}
+	if m.focusedRef() != "" {
+		help = []string{
+			"What the read-only member is checked out at in this session. Type a",
+			"branch, tag or commit, or press space to pick a remote branch.",
+		}
+	}
+	b.WriteString("\n " + styleDim.Render(help[0]) + "\n")
+	b.WriteString(" " + styleDim.Render(help[1]) + "\n")
 	if m.msg != "" {
 		b.WriteString(" " + styleErr.Render(m.msg) + "\n")
 	}

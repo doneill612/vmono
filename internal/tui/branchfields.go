@@ -8,24 +8,22 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// branchFields is a column of text inputs, one per active member, holding the
-// branch each member works on when that is not the session's. Repos need not
-// share a branch name. The new-session prompt embeds one.
+// branchFields is a column of text inputs, one per member, holding the branch
+// each active member works on when that is not the session's, or the ref each
+// reference member is checked out at when that is not the package's. Repos need
+// not share a branch name. The new-session prompt embeds one of each.
 type branchFields struct {
 	members []string
 	inputs  []textinput.Model
 }
 
-// newBranchFields builds an empty field for each member.
-func newBranchFields(members []string) branchFields {
+// newBranchFields builds an empty field for each member, labeled with label and
+// the member's name in a column of the given width.
+func newBranchFields(label string, width int, members []string) branchFields {
 	f := branchFields{members: members}
-	width := 0
-	for _, name := range members {
-		width = max(width, len(name))
-	}
 	for _, name := range members {
 		in := newTextInput()
-		in.Prompt = fmt.Sprintf("branch %-*s  ", width, name)
+		in.Prompt = fmt.Sprintf("%-6s %-*s  ", label, width, name)
 		in.CharLimit = 200
 		// A text input with no width truncates its placeholder to one character.
 		in.Width = 36
@@ -70,8 +68,18 @@ func (f *branchFields) update(i int, msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// values returns the branch typed for each member, leaving out empty fields,
-// which stand for the session's branch.
+// set fills in the named member's field.
+func (f *branchFields) set(member, text string) {
+	for i, name := range f.members {
+		if name == member {
+			f.inputs[i].SetValue(text)
+			f.inputs[i].CursorEnd()
+		}
+	}
+}
+
+// values returns what was typed for each member, leaving out empty fields, which
+// stand for the session's branch or the package's ref.
 func (f *branchFields) values() map[string]string {
 	out := map[string]string{}
 	for i, name := range f.members {

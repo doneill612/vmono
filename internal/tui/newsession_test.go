@@ -66,3 +66,45 @@ func TestSessionPromptBuildsOnAPickedBranch(t *testing.T) {
 		t.Errorf("starts at %s, want %s", got, tip)
 	}
 }
+
+func TestSessionPromptPicksWhatAReferenceIsCheckedOutAt(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	a, lib, api := env.NewSource(t, "alpha"), env.NewSource(t, "lib"), env.NewSource(t, "contracts")
+	seedWithRefs(t, env, "pay", []string{a}, []string{lib, api})
+	tip := testutil.Git(t, lib, "commit-tree", "-m", "wip", "-p", "main", "main^{tree}")
+	testutil.Git(t, lib, "push", "--quiet", "origin", tip+":refs/heads/feat/api")
+	testutil.Git(t, lib, "update-ref", "-d", "refs/remotes/origin/feat/api") // only a fetch reveals it
+	testutil.Git(t, a, "push", "--quiet", "origin", "main:feat/other")
+	old := testutil.Git(t, api, "rev-parse", "main")
+	testutil.Git(t, api, "tag", "v1")
+	testutil.Git(t, api, "commit", "--quiet", "--allow-empty", "-m", "later")
+	testutil.Git(t, api, "push", "--quiet")
+	d := newDriver(t, env, "")
+
+	d.key("right", "n")
+	d.has("branch alpha", "ref    lib        origin/HEAD", "ref    contracts  origin/HEAD")
+	d.typeText("work")
+	d.key("tab", "tab", "tab", "tab", "tab", "tab") // prefix, branch, track, from, alpha, lib
+	d.has("press space to pick")
+	d.key(" ")
+	d.eventually(func() bool { return containsView(d, "feat/api") }, "the fetched branch")
+	d.has("remote branch for lib", "none: the package's ref")
+	d.lacks("feat/other")
+	d.typeText("feat")
+	d.key("enter")
+	d.has("new session", "ref    lib        feat/api")
+	d.key("tab")
+	d.typeText("v1")
+	d.key("enter")
+	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+	dir := filepath.Join(env.PackageRoot, "pay", "work")
+	for member, want := range map[string]string{"lib": tip, "contracts": old} {
+		if got := testutil.Git(t, filepath.Join(dir, "_ref", member), "rev-parse", "HEAD"); got != want {
+			t.Errorf("%s is at %s, want %s", member, got, want)
+		}
+	}
+	if got := sessionBranches(t, env, "work", "alpha"); got[0] != "work" {
+		t.Errorf("branches = %v", got)
+	}
+}
