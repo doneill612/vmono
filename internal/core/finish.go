@@ -300,63 +300,6 @@ func (c *Core) planMember(s *Session, mem manifest.Member, into string, l *landi
 	}
 }
 
-// worktreeProblem is why a member's worktree cannot be rebased as it stands.
-type worktreeProblem struct {
-	reason string
-	// conflicts lists the files a rebase already under way is stopped on.
-	conflicts []string
-	// uncommitted is true when uncommitted work is all that is in the way.
-	uncommitted bool
-}
-
-// checkWorktree returns what keeps the member worktree at wt from being
-// rebased, or nil when it is clean and on its branch in the session. then is the
-// command the reason tells the user to run again.
-func checkWorktree(s *Session, mem manifest.Member, wt, then string) *worktreeProblem {
-	if gitx.RebaseInProgress(wt) {
-		if files, _ := gitx.ConflictedFiles(wt); len(files) > 0 {
-			return &worktreeProblem{conflicts: files, reason: "a rebase is stopped on conflicts; resolve them, `git add`, `git rebase --continue`, then " + then + " again"}
-		}
-		return &worktreeProblem{reason: fmt.Sprintf("a rebase is in progress; run `git rebase --continue` in %s, then %s again", wt, then)}
-	}
-	st, err := gitx.StatusOf(wt)
-	switch {
-	case err != nil:
-		return &worktreeProblem{reason: fmt.Sprintf("cannot read its state: %v", err)}
-	case st.Detached || st.Branch != s.BranchFor(mem.Name):
-		return &worktreeProblem{reason: fmt.Sprintf("its worktree is on %s, not the session branch %s", firstNonEmpty(st.Branch, "a detached HEAD"), s.BranchFor(mem.Name))}
-	case st.Dirty > 0 || st.Untracked > 0:
-		return &worktreeProblem{uncommitted: true, reason: fmt.Sprintf("uncommitted changes (%d modified, %d untracked); commit them first", st.Dirty, st.Untracked)}
-	}
-	return nil
-}
-
-// firstNonEmpty returns the first argument that is not empty.
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-// forkPoint returns the commit after which a session's own commits begin: the
-// later of its merge-base with the member's base and with the landing target.
-// Replaying from the base's merge-base keeps commits that already sit on the
-// base, which the session was built on, from being replayed as new ones.
-func forkPoint(wt, base, target string) (string, error) {
-	onTarget, err := gitx.MergeBase(wt, "HEAD", target)
-	if err != nil {
-		return "", fmt.Errorf("the session has no common history with %s", target)
-	}
-	onBase, err := gitx.MergeBase(wt, "HEAD", base)
-	if err == nil && gitx.IsMerged(wt, onTarget, onBase) {
-		return onBase, nil
-	}
-	return onTarget, nil
-}
-
 // membersOf returns the public view of the planned members.
 func membersOf(plan []*landing) []MemberLanding {
 	out := make([]MemberLanding, len(plan))

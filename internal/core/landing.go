@@ -152,3 +152,13 @@ func (c *Core) RemoteBranches(p *Package, fetch bool) []MemberBranches {
 	}
 	return out
 }
+
+// firstNonEmpty returns the first argument that is not empty.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
