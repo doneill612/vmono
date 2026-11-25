@@ -478,7 +478,7 @@ func (m *packagesModel) startDelete(name string) tea.Cmd {
 	if err != nil {
 		return flashErr(err.Error())
 	}
-	return push(m, newConfirm(m.e, "Delete package", name, rows, true,
+	confirm := newConfirm(m.e, "Delete package", name, rows, true,
 		func(force, deleteBranches bool) screen {
 			return newProgress(m.e, operation{
 				title:   "Delete " + name,
@@ -489,7 +489,13 @@ func (m *packagesModel) startDelete(name string) tea.Cmd {
 				},
 			})
 		},
-		nil))
+		nil)
+	if sessions, err := c.LoadSessions(p); err == nil {
+		for _, s := range sessions {
+			confirm.closes(name, s.Name, s.Dir)
+		}
+	}
+	return push(m, confirm)
 }
 
 // fetchAll fetches every member's source of a package concurrently, once

@@ -130,31 +130,42 @@ func (t Tmux) Launch(l *harness.Launch, opts Opts) (Result, error) {
 // Find implements Closer. The tmux session must carry the tag and have been
 // started at dir, so one that belongs to a package of the same name under
 // another package root is left alone.
-func (Tmux) Find(tag, dir string) (string, func() error, error) {
+func (Tmux) Find(tag, dir string) (*Place, error) {
 	out, err := tmuxRun("list-sessions", "-F", "#{session_id}\t#{"+TagOption+"}\t#{session_path}")
 	if err != nil {
-		return "", nil, nil // no server, so nothing is running
+		return nil, nil // no server, so nothing is running
 	}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.SplitN(strings.TrimRight(line, "\r"), "\t", 3)
 		if len(f) != 3 || f[1] != tag || !samePath(f[2], dir) {
 			continue
 		}
+		inside := false
 		if os.Getenv("TMUX") != "" {
 			here, err := tmuxRun("display-message", "-p", "#{session_id}")
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
-			if strings.TrimSpace(here) == f[0] {
-				return "", nil, errInside
-			}
+			inside = strings.TrimSpace(here) == f[0]
 		}
-		return fmt.Sprintf("tmux session %q", TmuxSessionName(tag)), func() error {
+		return &Place{Name: fmt.Sprintf("tmux session %q", TmuxSessionName(tag)), Inside: inside, Close: func() error {
+			if inside {
+				leaveTmuxSession()
+			}
 			_, err := tmuxRun("kill-session", "-t", f[0])
 			return err
-		}, nil
+		}}, nil
 	}
-	return "", nil, nil
+	return nil, nil
+}
+
+// leaveTmuxSession switches the client vmono runs in to the tmux session it was
+// in before, or else to the next one, since tmux detaches a client whose session
+// is killed. With no other session there is nowhere to go.
+func leaveTmuxSession() {
+	if _, err := tmuxRun("switch-client", "-l"); err != nil {
+		_, _ = tmuxRun("switch-client", "-n")
+	}
 }
 
 // notifyTmux tells the user which tmux session the harness runs in when

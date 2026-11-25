@@ -26,8 +26,8 @@ import (
 	"time"
 )
 
-// Token is the metadata token vmono sets on the workspaces it creates, holding
-// the session they belong to as "pkg/session".
+// Token is the metadata token vmono sets on the workspaces it creates, saying
+// which session they belong to.
 const Token = "vmono_session"
 
 // Agent states, as herdr reports them.
@@ -167,9 +167,9 @@ func CreateWorkspace(cwd, label string) (id, pane string, err error) {
 	return r.Workspace.ID, r.RootPane.ID, nil
 }
 
-// Tag marks a workspace as belonging to the session "pkg/session".
-func Tag(id, session string) error {
-	_, err := Run("workspace", "report-metadata", id, "--source", "vmono", "--token", Token+"="+session)
+// Tag sets the token of a workspace.
+func Tag(id, value string) error {
+	_, err := Run("workspace", "report-metadata", id, "--source", "vmono", "--token", Token+"="+value)
 	return err
 }
 

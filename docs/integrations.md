@@ -11,7 +11,7 @@ vmono integration install tmux
 tmux source-file ~/.tmux.conf     # or wherever the install says it wired
 ```
 
-Every session gets a tmux session of its own, named `package/session`, with the harness as its only process. Opening a session creates it, or switches to it when it already exists, and never starts a second harness. Inside tmux the current client is switched; outside tmux vmono attaches. When the harness exits, tmux closes the session, as a direct launch returns you to your shell. Removing the vmono session (`session rm`, `delete`) closes its tmux session too, unless vmono itself is running in it, in which case it says so and leaves it open.
+Every session gets a tmux session of its own, named `package/session`, with the harness as its only process. Opening a session creates it, or switches to it when it already exists, and never starts a second harness. Inside tmux the current client is switched; outside tmux vmono attaches. When the harness exits, tmux closes the session, as a direct launch returns you to your shell. Removing the vmono session (`session rm`, `delete`) closes its tmux session too, with everything running in it. When that is the tmux session you are in, or the popup is open over it, your client is first switched to the one you were in before (or the next one; with no other, it detaches). It is left open only when the agent in it is the one removing the session.
 
 The install also adds `prefix + V`, which opens the vmono TUI in a popup. Launching a session from it switches the client to that session's tmux session and closes the popup, so the TUI works as a control panel for every running agent.
 
@@ -34,11 +34,11 @@ vmono integration install herdr
 herdr server reload-config
 ```
 
-[herdr](https://herdr.dev) is a terminal workspace manager for coding agents. Every session gets a herdr workspace of its own, labeled `package/session` and rooted at the session. Opening a session creates it, or goes to it when it already exists, and never starts a second harness. When the harness exits, its shell stays, and opening the session again starts the harness there. Removing the vmono session closes its workspace, unless vmono is running in it.
+[herdr](https://herdr.dev) is a terminal workspace manager for coding agents. Every session gets a herdr workspace of its own, labeled `package/session` and rooted at the session. Opening a session creates it, or goes to it when it already exists, and never starts a second harness. When the harness exits, its shell stays, and opening the session again starts the harness there. Removing the vmono session closes its workspace, with everything running in it, wherever you remove it from, a shell in the workspace included. It is left open only when the agent in it is the one removing the session.
 
 The install also binds `prefix + shift + v`, which opens the vmono TUI in a popup, by adding one marked block to herdr's config (`$HERDR_CONFIG_PATH`, else `~/.config/herdr/config.toml`). It refuses a key that config already uses; `--key` picks another. It sets `launcher = "auto"` as the tmux install does. `vmono integration uninstall herdr` removes the block. Keep your own settings above it: a key written after the block would belong to its table.
 
-A launch from inside an agent does not move you; it prints the command that shows the workspace. Set `herdr_focus = false` (or `VMONO_HERDR_FOCUS=false` for one command) for the same on every launch. Sessions are found by a token vmono sets on the workspace, so renaming it does not lose it. After a herdr restart, which drops tokens, they are found by label and directory instead. Checked against herdr 0.9.5; not supported on Windows.
+A launch from inside an agent does not move you; it prints the command that shows the workspace. Set `herdr_focus = false` (or `VMONO_HERDR_FOCUS=false` for one command) for the same on every launch. Sessions are found by a token vmono sets on the workspace, so neither renaming it nor leaving its directory loses it. After a herdr restart, which drops tokens, they are found by label and directory instead. Checked against herdr 0.9.5; not supported on Windows.
 
 ## Launchers
 

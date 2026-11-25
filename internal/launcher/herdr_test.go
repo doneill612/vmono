@@ -75,6 +75,14 @@ func herdrLaunch(dir string) *harness.Launch {
 		Harness: config.Harness{Args: []string{"--own"}}, Args: []string{"--own", "it's"}}
 }
 
+// wandered is a snapshot whose workspace w1 is the session's, and whose shells
+// have all left its directory.
+func wandered(dir string) herdr.Snapshot {
+	snap := tagged("/home")
+	snap.Workspaces[0].Tokens[herdr.Token] = herdrToken("pay/work", dir)
+	return snap
+}
+
 // tagged is a snapshot whose workspace w1 is the session's.
 func tagged(dir string) herdr.Snapshot {
 	return herdr.Snapshot{
@@ -95,7 +103,7 @@ func TestHerdrCreatesAWorkspace(t *testing.T) {
 	want := []string{
 		"api snapshot",
 		"workspace create --cwd " + dir + " --label pay/work --no-focus",
-		"workspace report-metadata w9 --source vmono --token vmono_session=pay/work",
+		"workspace report-metadata w9 --source vmono --token vmono_session=" + herdrToken("pay/work", dir),
 		`pane run w9:p1 env VMONO_LAUNCHER=direct 'VMONO_CONFIG_DIR=/my cfg' /bin/vmono open pay/work --harness claude -- 'it'\''s'`,
 		"workspace focus w9",
 	}
@@ -123,6 +131,7 @@ func TestHerdrReusesTheWorkspace(t *testing.T) {
 		{name: "busy with something else", snap: tagged(dir), busy: []string{"w1:p1"}},
 		{name: "after a herdr restart", snap: restarted, runs: true},
 		{name: "same label elsewhere", snap: lookalike, create: true, runs: true},
+		{name: "same tag elsewhere", snap: tagged("/elsewhere"), create: true, runs: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeHerdr{snap: tc.snap, busy: tc.busy}
@@ -168,21 +177,26 @@ func TestHerdrErrors(t *testing.T) {
 func TestCloseSessionClosesItsHerdrWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct {
-		name  string
-		snap  herdr.Snapshot
-		here  string
-		fail  error
-		tries bool
-		note  string
+		name   string
+		snap   herdr.Snapshot
+		here   string
+		author string
+		fail   error
+		tries  bool
+		note   string
 	}{
 		{name: "tagged", snap: tagged(dir), tries: true, note: "closed herdr workspace"},
 		{name: "another package root", snap: tagged("/elsewhere")},
-		{name: "from inside", snap: tagged(dir), here: "w1", note: "running inside it"},
+		{name: "from inside", snap: tagged(dir), here: "w1", tries: true, note: "closed herdr workspace"},
+		{name: "by the agent inside", snap: tagged(dir), here: "w1", author: "agent:claude", note: "running inside it"},
+		{name: "its shells elsewhere", snap: wandered(dir), tries: true, note: "closed herdr workspace"},
+		{name: "another root, with its directory", snap: wandered("/elsewhere")},
 		{name: "grouped", snap: tagged(dir), fail: errors.New("group"), tries: true, note: "left its herdr workspace \"pay/work\" open: group"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeHerdr{snap: tc.snap, fail: map[string]error{"workspace close": tc.fail}}
 			f.install(t)
+			t.Setenv("VMONO_AUTHOR", tc.author)
 			if tc.here != "" {
 				t.Setenv("HERDR_ENV", "1")
 				t.Setenv("HERDR_WORKSPACE_ID", tc.here)

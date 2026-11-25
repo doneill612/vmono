@@ -278,15 +278,15 @@ func (c *Core) sessionSteps(s *Session, opts DeleteOptions, res *DeleteResult, p
 // terminals finds the terminals the sessions' harnesses run in, and returns
 // the function that closes them. It must be called before the sessions are
 // removed, and the function after everything else has been done and saved:
-// vmono may be running in one of them, for instance in a popup over it, and
-// closing it then ends vmono.
+// vmono may be running in one of them, or in a popup over it, and closing it
+// then ends vmono. One it is known to run in is closed after the others.
 func (c *Core) terminals(sessions ...*Session) func() {
-	var steps []apply.Step
+	var steps, last []apply.Step
 	for _, s := range sessions {
 		if c.FindTerminal == nil {
 			break
 		}
-		closeIt := c.FindTerminal(s.Pkg.Name, s.Name, s.Dir)
+		closeIt, inside := c.FindTerminal(s.Pkg.Name, s.Name, s.Dir)
 		if closeIt == nil {
 			continue
 		}
@@ -299,8 +299,13 @@ func (c *Core) terminals(sessions ...*Session) func() {
 		if len(sessions) > 1 {
 			step.Member = s.Name
 		}
-		steps = append(steps, step)
+		if inside {
+			last = append(last, step)
+		} else {
+			steps = append(steps, step)
+		}
 	}
+	steps = append(steps, last...)
 	return func() { _ = (&apply.Runner{Events: c.Events}).Run(steps) }
 }
 

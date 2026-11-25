@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/doneill612/vmono/internal/core"
+	"github.com/doneill612/vmono/internal/launcher"
 )
 
 // confirmModel is the delete confirmation: one row per member, labeled with
@@ -28,6 +29,8 @@ type confirmModel struct {
 	// deleteBranches is toggled with b and offered to the confirm callback.
 	deleteBranches bool
 	showBranches   bool
+	// closing names the terminals vmono runs in that confirming closes.
+	closing []string
 	// onConfirm builds the next screen; force is true when work is lost.
 	onConfirm func(force, deleteBranches bool) screen
 	onCancel  func() screen
@@ -52,6 +55,19 @@ func newConfirm(e *env, title, name string, rows []core.MemberSafety, showBranch
 // other than a package.
 func (m *confirmModel) about(noun string) *confirmModel {
 	m.noun = noun
+	return m
+}
+
+// insideOf finds the terminal vmono shares with a session. It is a variable so
+// tests need no tmux or herdr.
+var insideOf = launcher.InsideOf
+
+// closes adds the place a session at dir runs in when vmono runs there too, since
+// confirming then closes it around the user.
+func (m *confirmModel) closes(pkg, session, dir string) *confirmModel {
+	if place := insideOf(pkg, session, dir); place != "" {
+		m.closing = append(m.closing, place)
+	}
 	return m
 }
 
@@ -180,6 +196,9 @@ func (m *confirmModel) View(w, h int) string {
 			box = "[x]"
 		}
 		b.WriteString(" " + box + " also delete the branches whose work has been merged\n\n")
+	}
+	if len(m.closing) > 0 {
+		b.WriteString(" " + styleWarn.Render("This closes the "+strings.Join(m.closing, ", ")+", which you are in.") + "\n")
 	}
 	if m.allClean() {
 		b.WriteString(" Nothing would be lost.\n " + keyHelp("y", "confirm", "n/esc", "cancel", "b", "toggle branch deletion"))

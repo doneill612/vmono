@@ -46,9 +46,10 @@ type Core struct {
 	Events chan<- apply.Event
 	// FindTerminal finds where a session's harness runs, such as a tmux
 	// session, and returns a function that closes it and returns lines to
-	// report, or nil when there is nothing to close. The front ends set it,
-	// since launchers are built on core. May be nil.
-	FindTerminal func(pkg, session, dir string) (closeIt func() []string)
+	// report, or nil when there is nothing to close. inside is true when vmono
+	// runs there itself. The front ends set it, since launchers are built on
+	// core. May be nil.
+	FindTerminal func(pkg, session, dir string) (closeIt func() []string, inside bool)
 }
 
 // New builds a Core from a loaded config, reading the index cache.

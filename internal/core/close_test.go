@@ -26,7 +26,7 @@ func TestRemovingASessionClosesItsTerminalLast(t *testing.T) {
 	}
 	_ = c.Idx.Save()
 	var found, closed []string
-	c.FindTerminal = func(pkg, session, dir string) func() []string {
+	c.FindTerminal = func(pkg, session, dir string) (func() []string, bool) {
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("%s must be found before it goes", session)
 		}
@@ -41,7 +41,7 @@ func TestRemovingASessionClosesItsTerminalLast(t *testing.T) {
 			}
 			closed = append(closed, session)
 			return []string{"closed it"}
-		}
+		}, session == "work" // the one vmono runs in
 	}
 
 	testutil.WriteFile(t, s.Dir+"/alpha/wip.txt", "x")
@@ -54,7 +54,7 @@ func TestRemovingASessionClosesItsTerminalLast(t *testing.T) {
 	if _, err := c.Delete(p, DeleteOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(closed, " ") != "two work "+InitName {
+	if strings.Join(closed, " ") != "two "+InitName+" work" {
 		t.Errorf("closed = %v", closed)
 	}
 }

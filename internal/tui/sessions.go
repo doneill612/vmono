@@ -463,7 +463,7 @@ func (m *sessionsModel) startDelete(session string) tea.Cmd {
 				reveal: true,
 			})
 		},
-		nil).about("session"))
+		nil).about("session").closes(m.name, session, s.Dir))
 }
 
 // View implements screen.

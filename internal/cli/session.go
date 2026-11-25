@@ -367,9 +367,12 @@ func newSessionRmCmd() *cobra.Command {
 		Use:   "rm <pkg>/<session> [--force] [--delete-branches]",
 		Short: "Remove a session and its worktrees; the package and other sessions stay",
 		Long: `Remove a session: its worktrees, its directory, and the tmux session or herdr
-workspace it runs in. It is refused while a member has uncommitted work, or commits
-that are on no branch, unless forced. To work on its branches again, start a session
-with --track, or with --reuse-branch for one that was never pushed.
+workspace it runs in, along with everything else running there and even when that is
+where you are. It is left open only when an agent running there removes the session.
+
+It is refused while a member has uncommitted work, or commits that are on no branch,
+unless forced. To work on its branches again, start a session with --track, or with
+--reuse-branch for one that was never pushed.
 
 ` + branchesHelp,
 		Args: cobra.ExactArgs(1),
