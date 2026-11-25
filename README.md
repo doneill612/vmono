@@ -90,4 +90,5 @@ Install one with `vmono integration install <name>`. See [Integrations](docs/int
 | [Command reference](docs/commands.md) | Every command, and exit codes |
 | [Configuration](docs/configuration.md) | `config.toml`, harnesses and adapters, git authentication |
 | [Safety](docs/safety.md) | What vmono never does, and what your harness enforces |
-| [Development](docs/development.md) | Building, testing and releasing |
+| [Development](docs/development.md) | Building, testing, contributing and releasing |
+| [Security policy](SECURITY.md) | Supported versions and reporting a vulnerability |

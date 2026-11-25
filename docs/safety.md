@@ -2,6 +2,8 @@
 
 [← vmono](../README.md)
 
+To report a vulnerability, see the [security policy](../SECURITY.md).
+
 ## What vmono guarantees
 
 - A source repo's working tree and checked-out branch are never touched, with one exception: `vmono session finish` fast-forwards a landing branch that is checked out in a clean worktree, and refuses when that worktree has uncommitted changes.
