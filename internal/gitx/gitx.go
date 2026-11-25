@@ -806,14 +806,30 @@ func UnsetUpstream(repo, branch string) error {
 	return err
 }
 
-// Reflog returns the commits ref has pointed at, the most recent first. It is
-// nil for a ref with no reflog.
-func Reflog(repo, ref string) []string {
-	out, err := run(repo, "reflog", "show", "--format=%H", ref, "--")
+// RefMove is one entry of a ref's reflog.
+type RefMove struct {
+	// Commit is where the ref pointed afterwards.
+	Commit string
+	// Reason is what moved it, in git's words, such as "update by push".
+	Reason string
+}
+
+// Pushed reports whether the move was a push from this repo.
+func (m RefMove) Pushed() bool { return m.Reason == "update by push" }
+
+// Reflog returns where ref has pointed, the most recent first. It is nil for a
+// ref with no reflog.
+func Reflog(repo, ref string) []RefMove {
+	out, err := run(repo, "reflog", "show", "--format=%H %gs", ref, "--")
 	if err != nil || out == "" {
 		return nil
 	}
-	return strings.Fields(out)
+	var moves []RefMove
+	for _, line := range strings.Split(out, "\n") {
+		commit, reason, _ := strings.Cut(strings.TrimRight(line, "\r"), " ")
+		moves = append(moves, RefMove{Commit: commit, Reason: reason})
+	}
+	return moves
 }
 
 // Remotes returns the names of the repo's remotes, in git's order.

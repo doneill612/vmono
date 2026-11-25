@@ -569,8 +569,14 @@ func TestReflog(t *testing.T) {
 	tip, _ := ResolveRef(wt, "HEAD")
 	first, _ := ResolveRef(wt, "HEAD~1")
 	log := Reflog(src, "refs/heads/feat")
-	if len(log) != 3 || log[0] != tip || log[1] != first {
+	if len(log) != 3 || log[0].Commit != tip || log[1].Commit != first || log[0].Pushed() {
 		t.Errorf("reflog = %v, want %s then %s then where it was cut", log, tip, first)
+	}
+	if err := Push(src, "origin", "feat", "feat", true); err != nil {
+		t.Fatal(err)
+	}
+	if log := Reflog(src, "refs/remotes/origin/feat"); len(log) != 1 || log[0].Commit != tip || !log[0].Pushed() {
+		t.Errorf("reflog of the pushed branch = %v", log)
 	}
 	if got := Reflog(src, "refs/heads/nope"); got != nil {
 		t.Errorf("a missing ref has no reflog: %v", got)
