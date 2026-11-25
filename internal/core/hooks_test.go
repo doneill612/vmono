@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -124,6 +125,44 @@ func TestGlobalHooks(t *testing.T) {
 	c.Cfg.NoHooks = true
 	if _, err := c.DeleteSession(s, DeleteOptions{}); err != nil {
 		t.Errorf("NoHooks must skip the veto: %v", err)
+	}
+}
+
+func TestPostPushHook(t *testing.T) {
+	c, env := newCore(t)
+	s, _ := workSession(t, c, env, "alpha", "beta")
+	ref := "$VMONO_PUSHED"
+	if runtime.GOOS == "windows" {
+		ref = "%VMONO_PUSHED%"
+	}
+	heard := func(want string) bool {
+		t.Helper()
+		events, err := record(c, func() error { _, err := c.Push(s, PushOptions{Members: []string{"alpha"}}); return err })
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range events {
+			if ev.Status == apply.StatusOutput && strings.HasPrefix(ev.Message, "pushed=") {
+				if got := strings.TrimSpace(ev.Message); got != want {
+					t.Errorf("hook said %q, want %q", got, want)
+				}
+				return true
+			}
+		}
+		return false
+	}
+	c.Cfg.Hooks = map[string]config.Hook{config.HookPostPush: {Command: "echo pushed=" + ref}}
+	if !heard("pushed=alpha:" + s.S.Branch) {
+		t.Error("post_push should run after a push")
+	}
+	if heard("") {
+		t.Error("post_push must not run when nothing was pushed")
+	}
+
+	c.Cfg.Hooks = map[string]config.Hook{config.HookPostPush: {Command: "exit 1", OnFailure: config.OnFailureAbort}}
+	res, err := c.Push(s, PushOptions{})
+	if err == nil || pushRow(t, res, "beta").Status != PushPushed {
+		t.Errorf("a failing post_push is an error, and undoes nothing: %+v, %v", res, err)
 	}
 }
 

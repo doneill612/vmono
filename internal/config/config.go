@@ -81,13 +81,15 @@ const (
 	HookPostCreate = "post_create"
 	// HookPreRemove runs before a session is removed.
 	HookPreRemove = "pre_remove"
+	// HookPostPush runs once a session's branches have been pushed.
+	HookPostPush = "post_push"
 	// hookPostFinish ran once a session's work had landed on other branches,
 	// which no longer happens. A config that still has it loads without it.
 	hookPostFinish = "post_finish"
 )
 
 // HookNames lists every global hook.
-func HookNames() []string { return []string{HookPostCreate, HookPreRemove} }
+func HookNames() []string { return []string{HookPostCreate, HookPreRemove, HookPostPush} }
 
 // What happens when a hook's command fails.
 const (
@@ -305,7 +307,7 @@ func overlay(dst *Config, src Config, present map[string]bool) {
 		dst.Hooks = src.Hooks
 		if _, ok := dst.Hooks[hookPostFinish]; ok {
 			delete(dst.Hooks, hookPostFinish)
-			dst.Notices = append(dst.Notices, "config: the "+hookPostFinish+" hook is ignored, since sessions are no longer finished; remove it")
+			dst.Notices = append(dst.Notices, "config: the "+hookPostFinish+" hook is ignored, since sessions are no longer finished; remove it, or rename it "+HookPostPush)
 		}
 	}
 	if present["harness"] && len(src.Harness) > 0 {

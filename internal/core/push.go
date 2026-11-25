@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/doneill612/vmono/internal/apply"
+	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/gitx"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
@@ -334,7 +335,8 @@ func (c *Core) PlanPush(s *Session, opts PushOptions) (PushResult, error) {
 // stop the others, and none is undone when another fails. The error joins what
 // went wrong: one error per member git refused, wrapped in an *apply.StepError,
 // and a *PushBlockedError for the members that could not be tried. Result says
-// which is which in both cases.
+// which is which in both cases. The post_push hook runs when any member was
+// pushed; nothing is undone when it fails.
 func (c *Core) Push(s *Session, opts PushOptions) (PushResult, error) {
 	res := PushResult{Package: s.Pkg.Name, Session: s.Name}
 	plan, err := c.checkPush(s, opts)
@@ -364,6 +366,18 @@ func (c *Core) Push(s *Session, opts PushOptions) (PushResult, error) {
 	res.Members = pushMembers(plan)
 	if err := pushBlocked(plan, res); err != nil {
 		errs = append(errs, err)
+	}
+	var pushed []string
+	for _, p := range plan {
+		if p.Status == PushPushed {
+			pushed = append(pushed, p.Name+":"+p.Dest)
+		}
+	}
+	if len(pushed) > 0 {
+		post := c.hookSteps(config.HookPostPush, s, map[string]string{"VMONO_PUSHED": strings.Join(pushed, " ")})
+		if err := (&apply.Runner{Events: c.Events}).Run(post); err != nil {
+			errs = append(errs, fmt.Errorf("pushed, but %w", err))
+		}
 	}
 	return res, errors.Join(errs...)
 }
