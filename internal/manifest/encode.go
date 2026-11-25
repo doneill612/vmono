@@ -92,6 +92,21 @@ func writeInit(b *strings.Builder, i *Init) {
 			fmt.Fprintf(b, "%s = %s\n", name, quote(i.Roles[name]))
 		}
 	}
+	writeSuggestions(b, "suggestion", i.Suggestions)
+	writeSuggestions(b, "settled", i.Settled)
+}
+
+// writeSuggestions emits suggestions as an array of tables of [init].
+func writeSuggestions(b *strings.Builder, key string, list []Suggestion) {
+	for _, s := range list {
+		fmt.Fprintf(b, "\n[[init.%s]]\n", key)
+		fmt.Fprintf(b, "member  = %s\n", quote(s.Member))
+		fmt.Fprintf(b, "kind    = %s\n", quote(s.Kind))
+		fmt.Fprintf(b, "command = %s\n", quote(s.Command))
+		if s.Reason != "" {
+			fmt.Fprintf(b, "reason  = %s\n", quote(s.Reason))
+		}
+	}
 }
 
 // quoteList renders a TOML array of strings.

@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -23,12 +24,23 @@ type Init struct {
 	// edited it since and init may replace it; otherwise it is the user's.
 	Purpose string            `toml:"purpose,omitempty"`
 	Roles   map[string]string `toml:"roles,omitempty"`
+	// Suggestions are commands the agent proposed; see Manifest.Pending.
+	// Settled are ones a person accepted or dismissed, which are not offered
+	// again.
+	Suggestions []Suggestion `toml:"suggestion"`
+	Settled     []Suggestion `toml:"settled"`
 }
 
-// validate checks that a recorded init says something.
+// validate checks that a recorded init says something and that what it
+// suggests is fit to be reviewed.
 func (i *Init) validate() error {
 	if strings.TrimSpace(i.Overview) == "" {
 		return errors.New("init: overview is empty")
+	}
+	for _, s := range append(append([]Suggestion(nil), i.Suggestions...), i.Settled...) {
+		if err := s.Validate(); err != nil {
+			return fmt.Errorf("init: %w", err)
+		}
 	}
 	return nil
 }
