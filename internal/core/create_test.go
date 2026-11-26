@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/doneill612/vmono/internal/gitx"
 	"github.com/doneill612/vmono/internal/manifest"
@@ -251,5 +252,88 @@ func TestReferenceOnALocalBranchIsSafeToDelete(t *testing.T) {
 	testutil.Git(t, wt, "reset", "--quiet", "--hard", "HEAD~1")
 	if _, err := c.DeleteSession(s, DeleteOptions{}); err != nil {
 		t.Errorf("remove: %v", err)
+	}
+}
+
+func TestClonePackageCopiesEverythingButModes(t *testing.T) {
+	c, env := newCore(t)
+	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
+	req := request("docs", []string{a}, []string{b})
+	req.Harness, req.Context = "claude", "ticket 7"
+	req.Members[1].Ref = "main"
+	req.Members[1].Setup = manifest.Commands{"make deps"}
+	req.Notes = []manifest.Note{{At: time.Date(2026, 11, 14, 10, 5, 0, 0, time.UTC), By: "user", Text: "frozen"}}
+	req.Init = &manifest.Init{
+		At: time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC), By: "agent:claude",
+		Members: []string{"alpha", "beta"}, Overview: "how they fit",
+		Suggestions: []manifest.Suggestion{{Member: "beta", Kind: "teardown", Command: "make down"}},
+	}
+	src := mustPackage(t, c, req)
+	before := string(manifest.Encode(src.M))
+
+	m, err := CloneManifest(src, "work", map[string]string{"beta": manifest.ModeActive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := c.ClonePackage(src, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := manifest.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, _ := got.Member("beta")
+	if beta.Mode != manifest.ModeActive || beta.Path != "beta" || beta.Base != "origin/HEAD" || beta.Ref != "" {
+		t.Errorf("beta did not become active: %+v", beta)
+	}
+	if len(beta.Setup) != 1 {
+		t.Errorf("setup was lost: %+v", beta)
+	}
+	if alpha, _ := got.Member("alpha"); alpha.Mode != manifest.ModeActive || alpha.Role != "role of alpha" {
+		t.Errorf("alpha changed: %+v", alpha)
+	}
+	if got.Name != "work" || got.Harness != "claude" || strings.TrimSpace(got.Context) != "ticket 7" || strings.TrimSpace(got.Purpose) != "test purpose" {
+		t.Errorf("package text was not copied: %+v", got)
+	}
+	if len(got.Notes) != 1 || got.Overview() != "how they fit" || len(got.Pending()) != 1 {
+		t.Errorf("notes or init were not copied: %+v", got)
+	}
+	if drift := got.DriftText(); drift != "" {
+		t.Errorf("a clone must not report drift, got %q", drift)
+	}
+	if log := testutil.Git(t, p.Dir, "log", "--format=%s"); !strings.Contains(log, "vmono: clone docs as work") {
+		t.Errorf("commit message: %q", log)
+	}
+	if after := string(manifest.Encode(src.M)); after != before {
+		t.Errorf("cloning changed the source:\n%s", after)
+	}
+}
+
+func TestClonePackageRefusals(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	req := request("twice", nil, []string{a, a})
+	req.Members[1].Name = "alpha-old"
+	src := mustPackage(t, c, req)
+
+	if _, err := CloneManifest(src, "other", map[string]string{"nope": manifest.ModeActive}); err == nil || !strings.Contains(err.Error(), `no member "nope"`) {
+		t.Errorf("unknown member: %v", err)
+	}
+	if _, err := CloneManifest(src, "other", map[string]string{"alpha": "writable"}); err == nil || !strings.Contains(err.Error(), "mode must be") {
+		t.Errorf("unknown mode: %v", err)
+	}
+	m, err := CloneManifest(src, "other", map[string]string{"alpha": manifest.ModeActive, "alpha-old": manifest.ModeActive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ClonePackage(src, m); err == nil || !strings.Contains(err.Error(), "same repo") {
+		t.Errorf("two active members of one repo: %v", err)
+	}
+	if m, err = CloneManifest(src, "twice", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ClonePackage(src, m); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("taken name: %v", err)
 	}
 }

@@ -271,13 +271,10 @@ func (m *editorModel) keyMembers(k tea.KeyMsg) (screen, tea.Cmd) {
 		if m.cursor < len(m.members) {
 			mem := &m.members[m.cursor]
 			if mem.Mode == manifest.ModeActive {
-				mem.Mode = manifest.ModeReference
+				mem.SetMode(manifest.ModeReference)
 			} else {
-				mem.Mode = manifest.ModeActive
+				mem.SetMode(manifest.ModeActive)
 			}
-			// Path, base and ref follow the mode; blank them so defaults
-			// for the new mode apply.
-			mem.Path, mem.Base, mem.Ref = "", "", ""
 		}
 	case "r":
 		if m.cursor < len(m.members) {
@@ -342,10 +339,7 @@ func (m *editorModel) applySelection(sel []pickSel) {
 			if !samePath(src, s.Repo.Path) {
 				continue
 			}
-			if mem.Mode != s.Mode {
-				mem.Mode = s.Mode
-				mem.Path, mem.Base, mem.Ref = "", "", ""
-			}
+			mem.SetMode(s.Mode)
 			next = append(next, mem)
 			used[s.Repo.Path] = true
 			break

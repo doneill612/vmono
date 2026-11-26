@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -442,6 +443,46 @@ func baseBranchOf(src string, mem manifest.Member) string {
 // else is defaulted. The package repo always gets an initial commit, even
 // with auto_commit off.
 func (c *Core) CreatePackage(m *manifest.Manifest) (*Package, error) {
+	return c.createPackage(m, "vmono: create "+m.Name)
+}
+
+// CloneManifest returns a copy of src's manifest under a new name, with
+// everything else src records, init and notes included. modes sets the mode of
+// the members it names; see manifest.Member.SetMode. It fails for a name that is
+// not a member of src or a mode that does not exist. src is left unchanged, and
+// the name is checked when the package is created.
+func CloneManifest(src *Package, name string, modes map[string]string) (*manifest.Manifest, error) {
+	m, err := manifest.Parse(manifest.Encode(src.M))
+	if err != nil {
+		return nil, err
+	}
+	m.Name = name
+	m.Created = time.Time{}
+	for _, member := range slices.Sorted(maps.Keys(modes)) {
+		mem, ok := m.Member(member)
+		if !ok {
+			return nil, NotFound("%s has no member %q", src.Name, member)
+		}
+		mode := modes[member]
+		if mode != manifest.ModeActive && mode != manifest.ModeReference {
+			return nil, fmt.Errorf("%s: mode must be %q or %q", member, manifest.ModeActive, manifest.ModeReference)
+		}
+		mem.SetMode(mode)
+	}
+	m.ApplyDefaults()
+	return m, nil
+}
+
+// ClonePackage defines a new package from m, a manifest made from src's with
+// CloneManifest and possibly edited since. It does what CreatePackage does, and
+// records in the new package's history where it came from. Sessions are not
+// copied.
+func (c *Core) ClonePackage(src *Package, m *manifest.Manifest) (*Package, error) {
+	return c.createPackage(m, "vmono: clone "+src.Name+" as "+m.Name)
+}
+
+// createPackage is CreatePackage with the message of the first commit.
+func (c *Core) createPackage(m *manifest.Manifest, message string) (*Package, error) {
 	if err := gitx.CheckVersion(); err != nil {
 		return nil, err
 	}
@@ -492,7 +533,7 @@ func (c *Core) CreatePackage(m *manifest.Manifest) (*Package, error) {
 			return err
 		}},
 		{Name: "commit", Run: func(func(string)) error {
-			_, err := gitx.CommitAll(dir, "vmono: create "+m.Name, "")
+			_, err := gitx.CommitAll(dir, message, "")
 			return err
 		}},
 	}

@@ -283,3 +283,20 @@ func TestMemberCommandsTakeAStringOrAList(t *testing.T) {
 		}
 	}
 }
+
+func TestSetModeResetsWhatFollowsTheMode(t *testing.T) {
+	m := sample()
+	mem := m.Members[1]
+	mem.Ref = "v3"
+	mem.SetMode(ModeReference)
+	if mem.Ref != "v3" || mem.Path != "_ref/contracts" {
+		t.Errorf("keeping the mode changed the member: %+v", mem)
+	}
+	mem.SetMode(ModeActive)
+	if mem.Mode != ModeActive || mem.Path != "" || mem.Base != "" || mem.Ref != "" {
+		t.Errorf("changing the mode kept path, base or ref: %+v", mem)
+	}
+	if mem.Role != "Specs." || mem.Source != "/src/contracts" {
+		t.Errorf("changing the mode lost the rest: %+v", mem)
+	}
+}
