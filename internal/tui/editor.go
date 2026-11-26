@@ -58,12 +58,18 @@ type editorModel struct {
 	role     textinput.Model
 
 	focus int
+
+	// left holds each member, by name, as it was before its last change of
+	// mode, so that changing back restores what it had.
+	left map[string]manifest.Member
+	// note is shown when the editor next comes up.
+	note string
 }
 
 // newEditor builds the editor for a new package (pkg nil) or an existing
 // one.
 func newEditor(e *env, pkg *core.Package) *editorModel {
-	m := &editorModel{e: e, pkg: pkg}
+	m := &editorModel{e: e, pkg: pkg, left: map[string]manifest.Member{}}
 	m.name = newTextInput()
 	m.name.Prompt = ""
 	m.name.Placeholder = "lowercase-with-hyphens"
@@ -126,7 +132,14 @@ func newArea(placeholder string) textarea.Model {
 }
 
 // Init implements screen.
-func (m *editorModel) Init() tea.Cmd { return textinput.Blink }
+func (m *editorModel) Init() tea.Cmd {
+	note := m.note
+	m.note = ""
+	if note != "" {
+		return tea.Batch(textinput.Blink, flash(note))
+	}
+	return textinput.Blink
+}
 
 // capturing implements capturing: true while a text field has focus.
 func (m *editorModel) capturing() bool {
@@ -300,10 +313,12 @@ func (m *editorModel) keyMembers(k tea.KeyMsg) (screen, tea.Cmd) {
 	case "m":
 		if m.cursor < len(m.members) {
 			mem := &m.members[m.cursor]
-			if mem.Mode == manifest.ModeActive {
-				mem.SetMode(manifest.ModeReference)
-			} else {
-				mem.SetMode(manifest.ModeActive)
+			mode := manifest.ModeActive
+			if mem.Mode == mode {
+				mode = manifest.ModeReference
+			}
+			if note := m.setMode(mem, mode); note != "" {
+				return m, flash(note)
 			}
 		}
 	case "r":
@@ -320,6 +335,22 @@ func (m *editorModel) keyMembers(k tea.KeyMsg) (screen, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// setMode changes a member's mode. Changing it back gives the member the path,
+// base and ref it had before, and otherwise core.SetMode decides what carries
+// over; its note is returned.
+func (m *editorModel) setMode(mem *manifest.Member, mode string) (note string) {
+	if mem.Mode == mode {
+		return ""
+	}
+	was, ok := m.left[mem.Name]
+	m.left[mem.Name] = *mem
+	if ok && was.Mode == mode && was.Source == mem.Source {
+		mem.Mode, mem.Path, mem.Base, mem.Ref = mode, was.Path, was.Base, was.Ref
+		return ""
+	}
+	return core.SetMode(mem, mode)
 }
 
 // keyRole handles keys while editing a member's role.
@@ -362,6 +393,7 @@ func (m *editorModel) openPicker() tea.Cmd {
 // unselected ones are dropped, and new ones are appended.
 func (m *editorModel) applySelection(sel []pickSel) {
 	var next []manifest.Member
+	var notes []string
 	used := map[string]bool{}
 	for _, mem := range m.members {
 		src, _ := paths.Abs(mem.Source)
@@ -369,7 +401,9 @@ func (m *editorModel) applySelection(sel []pickSel) {
 			if !samePath(src, s.Repo.Path) {
 				continue
 			}
-			mem.SetMode(s.Mode)
+			if note := m.setMode(&mem, s.Mode); note != "" {
+				notes = append(notes, note)
+			}
 			next = append(next, mem)
 			used[s.Repo.Path] = true
 			break
@@ -394,6 +428,7 @@ func (m *editorModel) applySelection(sel []pickSel) {
 		next = append(next, manifest.Member{Name: name, Source: s.Repo.Path, Remote: s.Repo.Remote, Mode: s.Mode})
 	}
 	m.members = next
+	m.note = strings.Join(notes, "; ")
 	if m.cursor >= len(m.members) {
 		m.cursor = 0
 	}
@@ -490,7 +525,7 @@ func (m *editorModel) saveCreate() (screen, tea.Cmd) {
 	nm := &manifest.Manifest{Name: name}
 	if src != nil {
 		var err error
-		if nm, err = core.CloneManifest(src, name, nil); err != nil {
+		if nm, _, err = core.CloneManifest(src, name, nil); err != nil {
 			return m, flashErr(err.Error())
 		}
 	}

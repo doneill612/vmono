@@ -27,7 +27,7 @@ A clone reuses what an initialization learned, for instance to work on repos tha
 vmono package clone docs work --all-active --ref artifacts
 ```
 
-The new package has the members of `docs` with the same roles, copied files and setup and teardown commands, plus its purpose, context, notes, default harness, overview and suggested commands, reviewed or not. Only the modes differ. A member whose mode changes goes back to the default path, base and ref of its new mode. Sessions are not copied.
+The new package has the members of `docs` with the same roles, copied files and setup and teardown commands, plus its purpose, context, notes, default harness, overview and suggested commands, reviewed or not. Only the modes differ. A member whose mode changes moves to the default path of its new mode and keeps what it comes from: an active member's base becomes its ref, and a ref becomes its base. A ref that is not a branch, such as a tag or a commit, cannot be merged into, so that member gets the default base and vmono says so. Sessions are not copied.
 
 In the TUI, `C` on a package opens the new-package form filled in from it. Everything there can be changed, including the members; adding or removing one marks the overview out of date.
 

@@ -54,7 +54,7 @@ func newPackageCloneCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m, err := core.CloneManifest(src, args[1], modes)
+			m, notes, err := core.CloneManifest(src, args[1], modes)
 			if err != nil {
 				return err
 			}
@@ -66,6 +66,9 @@ func newPackageCloneCmd() *cobra.Command {
 			})
 			if err != nil {
 				return err
+			}
+			for _, note := range notes {
+				fprintf(cmd.ErrOrStderr(), "vmono: %s\n", note)
 			}
 			fprintf(cmd.OutOrStdout(), "%s\n", p.Dir)
 			return nil

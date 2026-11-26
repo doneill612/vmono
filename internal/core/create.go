@@ -446,31 +446,64 @@ func (c *Core) CreatePackage(m *manifest.Manifest) (*Package, error) {
 	return c.createPackage(m, "vmono: create "+m.Name)
 }
 
+// SetMode changes mem's mode as manifest.Member.SetMode does, and drops a ref
+// that would become the base of an active member without naming a branch, such
+// as a tag or a commit, leaving the default base. The returned note says so, and
+// is "" when everything carried over.
+func SetMode(mem *manifest.Member, mode string) (note string) {
+	was := mem.Mode
+	mem.SetMode(mode)
+	if was == mode || mode != manifest.ModeActive || namesBranch(mem.Source, mem.Base) {
+		return ""
+	}
+	note = fmt.Sprintf("%s: %s is not a branch, so its base is origin/HEAD", mem.Name, mem.Base)
+	mem.Base = ""
+	return note
+}
+
+// namesBranch reports whether work in the repo at source can merge into what ref
+// names: the default branch, which "", HEAD and origin/HEAD stand for, a local
+// branch or a remote-tracking one.
+func namesBranch(source, ref string) bool {
+	switch ref {
+	case "", "HEAD", "origin/HEAD":
+		return true
+	}
+	src, err := paths.Abs(source)
+	if err != nil {
+		return false
+	}
+	return gitx.BranchExists(src, ref) ||
+		gitx.ValidBranchName(src, ref) && gitx.RefExists(src, "refs/remotes/"+ref)
+}
+
 // CloneManifest returns a copy of src's manifest under a new name, with
 // everything else src records, init and notes included. modes sets the mode of
-// the members it names; see manifest.Member.SetMode. It fails for a name that is
-// not a member of src or a mode that does not exist. src is left unchanged, and
-// the name is checked when the package is created.
-func CloneManifest(src *Package, name string, modes map[string]string) (*manifest.Manifest, error) {
-	m, err := manifest.Parse(manifest.Encode(src.M))
+// the members it names, and notes are what SetMode had to say about them. It
+// fails for a name that is not a member of src or a mode that does not exist. src
+// is left unchanged, and the name is checked when the package is created.
+func CloneManifest(src *Package, name string, modes map[string]string) (m *manifest.Manifest, notes []string, err error) {
+	m, err = manifest.Parse(manifest.Encode(src.M))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	m.Name = name
 	m.Created = time.Time{}
 	for _, member := range slices.Sorted(maps.Keys(modes)) {
 		mem, ok := m.Member(member)
 		if !ok {
-			return nil, NotFound("%s has no member %q", src.Name, member)
+			return nil, nil, NotFound("%s has no member %q", src.Name, member)
 		}
 		mode := modes[member]
 		if mode != manifest.ModeActive && mode != manifest.ModeReference {
-			return nil, fmt.Errorf("%s: mode must be %q or %q", member, manifest.ModeActive, manifest.ModeReference)
+			return nil, nil, fmt.Errorf("%s: mode must be %q or %q", member, manifest.ModeActive, manifest.ModeReference)
 		}
-		mem.SetMode(mode)
+		if note := SetMode(mem, mode); note != "" {
+			notes = append(notes, note)
+		}
 	}
 	m.ApplyDefaults()
-	return m, nil
+	return m, notes, nil
 }
 
 // ClonePackage defines a new package from m, a manifest made from src's with

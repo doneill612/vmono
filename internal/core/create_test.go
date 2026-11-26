@@ -271,9 +271,9 @@ func TestClonePackageCopiesEverythingButModes(t *testing.T) {
 	src := mustPackage(t, c, req)
 	before := string(manifest.Encode(src.M))
 
-	m, err := CloneManifest(src, "work", map[string]string{"beta": manifest.ModeActive})
-	if err != nil {
-		t.Fatal(err)
+	m, notes, err := CloneManifest(src, "work", map[string]string{"beta": manifest.ModeActive})
+	if err != nil || len(notes) != 0 {
+		t.Fatal(notes, err)
 	}
 	p, err := c.ClonePackage(src, m)
 	if err != nil {
@@ -284,7 +284,7 @@ func TestClonePackageCopiesEverythingButModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	beta, _ := got.Member("beta")
-	if beta.Mode != manifest.ModeActive || beta.Path != "beta" || beta.Base != "origin/HEAD" || beta.Ref != "" {
+	if beta.Mode != manifest.ModeActive || beta.Path != "beta" || beta.Base != "main" || beta.Ref != "" {
 		t.Errorf("beta did not become active: %+v", beta)
 	}
 	if len(beta.Setup) != 1 {
@@ -317,23 +317,48 @@ func TestClonePackageRefusals(t *testing.T) {
 	req.Members[1].Name = "alpha-old"
 	src := mustPackage(t, c, req)
 
-	if _, err := CloneManifest(src, "other", map[string]string{"nope": manifest.ModeActive}); err == nil || !strings.Contains(err.Error(), `no member "nope"`) {
+	if _, _, err := CloneManifest(src, "other", map[string]string{"nope": manifest.ModeActive}); err == nil || !strings.Contains(err.Error(), `no member "nope"`) {
 		t.Errorf("unknown member: %v", err)
 	}
-	if _, err := CloneManifest(src, "other", map[string]string{"alpha": "writable"}); err == nil || !strings.Contains(err.Error(), "mode must be") {
+	if _, _, err := CloneManifest(src, "other", map[string]string{"alpha": "writable"}); err == nil || !strings.Contains(err.Error(), "mode must be") {
 		t.Errorf("unknown mode: %v", err)
 	}
-	m, err := CloneManifest(src, "other", map[string]string{"alpha": manifest.ModeActive, "alpha-old": manifest.ModeActive})
+	m, _, err := CloneManifest(src, "other", map[string]string{"alpha": manifest.ModeActive, "alpha-old": manifest.ModeActive})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.ClonePackage(src, m); err == nil || !strings.Contains(err.Error(), "same repo") {
 		t.Errorf("two active members of one repo: %v", err)
 	}
-	if m, err = CloneManifest(src, "twice", nil); err != nil {
+	if m, _, err = CloneManifest(src, "twice", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.ClonePackage(src, m); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("taken name: %v", err)
+	}
+}
+
+func TestSetModeDropsARefNothingCanMergeInto(t *testing.T) {
+	c, env := newCore(t)
+	a := env.NewSource(t, "alpha")
+	featureBranch(t, a, "develop")
+	testutil.Git(t, a, "tag", "v3")
+	for from, want := range map[string]string{
+		"origin/HEAD": "origin/HEAD", "HEAD": "HEAD", "develop": "develop", "origin/main": "origin/main",
+		"v3": "", "main~0": "", "origin/main~0": "", sha(t, a, "main"): "",
+	} {
+		mem := manifest.Member{Name: "alpha", Source: a, Mode: manifest.ModeReference, Ref: from}
+		note := SetMode(&mem, manifest.ModeActive)
+		if mem.Base != want || (note == "") != (want != "") {
+			t.Errorf("ref %q: base %q, note %q", from, mem.Base, note)
+		}
+	}
+
+	req := request("pinned", []string{a}, nil)
+	req.Members[0].Base = "develop"
+	src := mustPackage(t, c, req)
+	m, notes, err := CloneManifest(src, "reading", map[string]string{"alpha": manifest.ModeReference})
+	if err != nil || len(notes) != 0 || m.Members[0].Ref != "develop" {
+		t.Errorf("base did not become the ref: %+v %v %v", m, notes, err)
 	}
 }

@@ -62,15 +62,26 @@ type Member struct {
 	Teardown Commands `toml:"teardown,omitempty"`
 }
 
-// SetMode changes how the member takes part in the package. Path, base and ref
-// follow the mode, so a change blanks them for Manifest.ApplyDefaults to fill
-// in for the new one. Setting the mode the member already has changes nothing.
+// SetMode changes how the member takes part in the package. What it comes from
+// goes with it, an active member's base becoming a reference member's ref and the
+// other way round. The path follows the mode, so a change blanks it for
+// Manifest.ApplyDefaults to fill in for the new one. A ref need not be something
+// work can merge into, so whoever makes a member active has to check the base it
+// ends up with. Setting the mode the member already has changes nothing.
 func (m *Member) SetMode(mode string) {
 	if m.Mode == mode {
 		return
 	}
-	m.Mode = mode
-	m.Path, m.Base, m.Ref = "", "", ""
+	from := m.Ref
+	if m.Mode == ModeActive {
+		from = m.Base
+	}
+	m.Mode, m.Path, m.Base, m.Ref = mode, "", "", ""
+	if mode == ModeActive {
+		m.Base = from
+	} else {
+		m.Ref = from
+	}
 }
 
 // Commands is one or more shell commands, run in order. The manifest may hold

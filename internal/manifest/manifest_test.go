@@ -284,17 +284,21 @@ func TestMemberCommandsTakeAStringOrAList(t *testing.T) {
 	}
 }
 
-func TestSetModeResetsWhatFollowsTheMode(t *testing.T) {
+func TestSetModeCarriesWhatTheMemberComesFrom(t *testing.T) {
 	m := sample()
 	mem := m.Members[1]
-	mem.Ref = "v3"
+	mem.Ref = "origin/develop"
 	mem.SetMode(ModeReference)
-	if mem.Ref != "v3" || mem.Path != "_ref/contracts" {
+	if mem.Ref != "origin/develop" || mem.Path != "_ref/contracts" {
 		t.Errorf("keeping the mode changed the member: %+v", mem)
 	}
 	mem.SetMode(ModeActive)
-	if mem.Mode != ModeActive || mem.Path != "" || mem.Base != "" || mem.Ref != "" {
-		t.Errorf("changing the mode kept path, base or ref: %+v", mem)
+	if mem.Mode != ModeActive || mem.Base != "origin/develop" || mem.Ref != "" || mem.Path != "" {
+		t.Errorf("ref did not become the base: %+v", mem)
+	}
+	mem.SetMode(ModeReference)
+	if mem.Ref != "origin/develop" || mem.Base != "" {
+		t.Errorf("base did not become the ref: %+v", mem)
 	}
 	if mem.Role != "Specs." || mem.Source != "/src/contracts" {
 		t.Errorf("changing the mode lost the rest: %+v", mem)

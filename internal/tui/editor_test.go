@@ -168,6 +168,38 @@ func TestCloneFlowStartsFromTheSource(t *testing.T) {
 	}
 }
 
+func TestTogglingAModeBackRestoresTheMember(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useSourceRoot(t, env)
+	a := env.NewSource(t, "alpha")
+	testutil.Git(t, a, "tag", "v3")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := core.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreatePackage(&manifest.Manifest{
+		Name: "pinned", Members: []manifest.Member{{Source: a, Mode: manifest.ModeReference, Ref: "v3"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d := newDriver(t, env, "")
+
+	d.key("C")
+	d.key("tab", "tab", "tab", "tab") // members
+	d.key("m")
+	d.has("v3 is not a branch")
+	d.key("m", "ctrl+s")
+	d.eventually(func() bool { return containsView(d, "pinned-copy") && !containsView(d, "Clone · pinned") }, "packages screen")
+
+	if mem := loadPkg(t, "pinned-copy").M.Members[0]; mem.Mode != manifest.ModeReference || mem.Ref != "v3" {
+		t.Errorf("alpha = %+v", mem)
+	}
+}
+
 func TestCreateAsksBeforeReusingExistingBranch(t *testing.T) {
 	env := testutil.NewEnv(t)
 	useSourceRoot(t, env)
