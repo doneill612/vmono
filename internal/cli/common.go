@@ -119,10 +119,10 @@ type sessionFlags struct {
 // add defines the flags on cmd, their help starting with intro.
 func (f *sessionFlags) add(cmd *cobra.Command, intro string) {
 	fs := cmd.Flags()
-	fs.StringVar(&f.prefix, "prefix", "", intro+"put this and a slash before the session's name in the default branch")
-	fs.StringArrayVar(&f.branch, "branch", nil, intro+"branch to work on: BRANCH for every member, or MEMBER=BRANCH for one (repeatable; default [PREFIX/]SESSION)")
-	fs.StringArrayVar(&f.track, "track", nil, intro+"work on a branch that is on the members' remotes: BRANCH for every member, with a new branch where the remote lacks it, or MEMBER=BRANCH for one (repeatable); fetches first")
-	fs.StringArrayVar(&f.from, "from", nil, intro+"build the new branch on this instead of the member's base: REF for every active member that has it, or MEMBER=REF for one (repeatable); for a reference member, what to check it out at; fetches first")
+	fs.StringVar(&f.prefix, "prefix", "", intro+"put PREFIX/ before the session's name in its branch: feat gives feat/SESSION")
+	fs.StringArrayVar(&f.branch, "branch", nil, intro+"name the branch to work on: BRANCH for every active member, or MEMBER=BRANCH for one (repeatable; default [PREFIX/]SESSION)")
+	fs.StringArrayVar(&f.track, "track", nil, intro+"work on a branch already on the remote: BRANCH for every member, starting it where a remote lacks it, or MEMBER=BRANCH for one (repeatable); fetches first")
+	fs.StringArrayVar(&f.from, "from", nil, intro+"build on this instead of the member's base: REF for every active member that has it, or MEMBER=REF for one; for a read-only member, what to check out (repeatable); fetches first")
 	fs.BoolVar(&f.reuse, "reuse-branch", false, intro+"check out the branch if it already exists in a source repo")
 }
 

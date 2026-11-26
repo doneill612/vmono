@@ -46,16 +46,31 @@ func newSessionNewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "new [pkg] <name> [--prefix P] [--branch [MEMBER=]B]... [--track [MEMBER=]B]... [--from [MEMBER=]REF]... [--reuse-branch]",
 		Short: "Start a session: a worktree of every member, each on a branch of its own",
-		Long: `Start a session. Every active member gets a worktree on a branch, which is the
-branch you push and open a pull request from. It is named after the session unless
-you say otherwise, starts from the member's base, and belongs to the session: a name
-that is already on the member's remote is refused.
+		Long: `Start a session. Every member gets a worktree in it.
 
---track works on a branch that is already there, such as a teammate's or an open pull
-request's. --from builds the new branch on something other than the base, for work
-stacked on a branch that has not merged. Naming a reference member with it
-(--from MEMBER=REF) checks that member out at REF in place of the package's ref, for
-work that depends on changes there that have not merged.`,
+An active member gets a branch of the session's own, which is what you push and open
+a pull request from. By default it is named after the session and starts from the
+member's base, the branch it will merge into. A name that is already on the member's
+remote is refused.
+
+To change that:
+
+  --prefix, --branch  name the new branch differently
+  --track             work on a branch already on the remote, such as a
+                      teammate's or an open pull request's
+  --from              build the new branch on something other than the base, for
+                      work stacked on a branch that has not merged
+
+A read-only (reference) member gets no branch. It is checked out at the package's
+ref, or at what --from MEMBER=REF names, for work that depends on changes there that
+have not merged.
+
+See ` + "`vmono help concepts`" + ` for the terms.`,
+		Example: `  vmono session new payments token-refresh
+  vmono session new payments retry --prefix feat
+  vmono session new payments review --track fix/timeout
+  vmono session new payments retry-ui --from feat/retry
+  vmono session new payments try-v2 --from contracts=v2`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg, rest := splitPkgArgs(args, 2)

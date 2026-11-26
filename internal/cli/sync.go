@@ -71,7 +71,7 @@ func newSyncCmd() *cobra.Command {
 			return serr
 		},
 	}
-	cmd.Flags().BoolVar(&refs, "refs", false, "also move clean reference members to their latest fetched ref")
+	cmd.Flags().BoolVar(&refs, "refs", false, "also move clean read-only members to the latest fetched commit of their ref")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON: one entry per session synced")
 	return cmd
 }
