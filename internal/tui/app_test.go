@@ -102,6 +102,12 @@ func TestHelpIsAModalOverTheScreen(t *testing.T) {
 	d := newDriver(t, env, "")
 	d.key("?")
 	d.has("help", "GLOBAL", "payments") // the table stays visible underneath
+	d.has("what vmono's terms mean")
+	d.key("t")
+	d.has("TERMS", "read-only", "build on", "work on")
+	d.lacks("GLOBAL")
+	d.key("t")
+	d.has("GLOBAL")
 	d.key("esc")
 	d.lacks("GLOBAL")
 }
@@ -129,6 +135,8 @@ func TestEveryScreenFitsTheTerminal(t *testing.T) {
 		check("packages")
 		d.key("?")
 		check("help")
+		d.key("t")
+		check("terms")
 		d.key("esc")
 		d.key("n")
 		check("editor")
