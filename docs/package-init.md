@@ -19,6 +19,20 @@ If files were changed, or the agent committed, the checkout is kept and reported
 
 In tmux or herdr the initialization gets a place of its own named `package/.init` (`package/_init` in tmux), and starting another goes to it. An agent cannot start one.
 
+## Cloning a package
+
+A clone reuses what an initialization learned, for instance to work on repos that so far were only references:
+
+```sh
+vmono package clone docs work --all-active --ref artifacts
+```
+
+The new package has the members of `docs` with the same roles, copied files and setup and teardown commands, plus its purpose, context, notes, default harness, overview and suggested commands, reviewed or not. Only the modes differ. A member whose mode changes goes back to the default path, base and ref of its new mode. Sessions are not copied.
+
+In the TUI, `C` on a package opens the new-package form filled in from it. Everything there can be changed, including the members; adding or removing one marks the overview out of date.
+
+The two packages are independent afterward: initializing or editing one leaves the other as it was. So that an overview holds in either, initialization records members by name and leaves out which of them can be edited and where they are checked out. One recorded before vmono asked for that may still say; `vmono describe --overview` edits it, and `vmono package init` replaces it.
+
 ## Suggested commands
 
 The agent may also suggest [`setup` and `teardown` commands](setup-and-teardown.md#setup-and-teardown) for members, such as `pnpm install` where there is a `pnpm-lock.yaml`. Suggesting runs nothing. When the harness exits, vmono goes straight into a review that shows each command, when it would run, and the file it came from: `a` accepts, `e` edits first, `x` dismisses, `A` accepts all when they all show, and `q` leaves the rest for later.
