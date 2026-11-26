@@ -22,7 +22,7 @@ A session is one piece of work on a [package](concepts.md). Every active member 
 | Choose the name | `--branch fix/PLAT-412`, or `--branch MEMBER=B` for one member (repeatable) |
 | Work on a branch that is on the remote, such as a teammate's or an open pull request's | `--track BRANCH` or `--track MEMBER=BRANCH` |
 | Build on something other than the base | `--from REF` or `--from MEMBER=REF` |
-| Read a reference member at something other than the package's ref | `--from MEMBER=REF`, or its `ref` field in the TUI |
+| Read a reference member at something other than the package's ref | `--from MEMBER=REF`, or its `read-only` field in the TUI |
 | Take up a local branch that already exists | `--reuse-branch` |
 
 `--track` fetches, then checks out the branch itself, tracking the remote one. A local copy is brought up to it when it is only behind. A member whose remote lacks the branch gets a new one of that name, with a warning; naming the member makes that an error (exit `3`). A branch that is checked out elsewhere, your source repo included, cannot be in a session at the same time, so switch the source to another branch first.

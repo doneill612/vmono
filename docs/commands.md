@@ -7,6 +7,7 @@ Every read command takes `--json`. Anything that could discard work refuses unle
 | Command | Does |
 | --- | --- |
 | `vmono` | Open the [TUI](tui.md) |
+| `vmono help concepts` | What package, session, member and the other [terms](concepts.md) mean |
 | `vmono init [--source-root P]... [--package-root P]` | Write the global config without prompts |
 | `vmono ls` / `vmono repos` | List packages / known repos |
 | `vmono new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--prefix P] [--branch [MEMBER=]B]... [--track [MEMBER=]B]... [--from [MEMBER=]REF]... [--reuse-branch]]` | Define a package, and optionally start its first session |

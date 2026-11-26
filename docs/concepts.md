@@ -8,10 +8,16 @@
 | Session | One piece of work on a package: a directory with its own git repo and a worktree of every member, each active one on a branch. It is what a harness opens. A package has any number of them side by side. |
 | Member | A source repo included in a package. Every session has a worktree of every member. |
 | Active member | Checked out on a branch, named after the session unless you say otherwise. The agent may edit it and commit to it, and you push it. |
-| Reference member | Checked out detached under `_ref/`, at the package's `ref` or what a session names with `--from MEMBER=REF`. Read-only context. |
-| Base | What a member's branch is built on and merges into: the `base` in the package manifest (default `origin/HEAD`), or what a session names with `--from`. |
+| Reference member | Checked out detached under `_ref/`, at the package's `ref` or what a session names with `--from MEMBER=REF`. Read-only context, and shown as `read-only` in the TUI. |
+| Base | What a member's branch is built on and merges into: the `base` in the package manifest (default `origin/HEAD`), or what a session names with `--from`. Shown as `built on` in the TUI. |
+| Build on | Start a session's new branches on something other than the base: `--from`, or `build on` in the TUI. |
+| Work on | Continue a branch that is already on the remote: `--track`, or `work on` in the TUI. |
+| Prefix | What goes before the session's name, with a slash, in its branch: `--prefix`. |
+| Published | How far an active member's branch has got: no commits yet, commits to push, pushed, behind, diverged or merged. |
 | Overview | What an agent learned by exploring the members, recorded by `vmono package init`. Kept apart from the text you write. |
 | Purpose / Context / Notes / Role | Free text that belongs to the package: what the work is, what to know, a dated log, and what each member contributes. Sessions share it; they have none of their own. |
+
+`vmono help concepts` explains these in a terminal, and `?` then `t` in the [TUI](tui.md).
 
 ## Layout on disk
 

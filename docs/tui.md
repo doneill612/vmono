@@ -4,15 +4,15 @@
 
 `vmono` with no arguments opens a full-screen console. A one-line bar at the top shows where you are (`packages › payments › work`) and how many packages there are; a one-line footer shows the few keys worth knowing and any notice. Between them is the list, and on a terminal 100 columns or wider a preview of the highlighted row sits beside it: a package's purpose, sessions and members, a session's branch and the live state of each member.
 
-You rarely need a key. **`enter` opens a menu of everything you can do to the highlighted row**, with the most common action first: `Sessions` for a package, `Launch` for a session. Each entry shows its shortcut, and pressing that key from the list (or inside the menu) does the same thing, so the menu is also how you learn them. `?` lists every shortcut for the view you are on.
+You rarely need a key. **`enter` opens a menu of everything you can do to the highlighted row**, with the most common action first: `Sessions` for a package, `Launch` for a session. Each entry shows its shortcut, and pressing that key from the list (or inside the menu) does the same thing, so the menu is also how you learn them. `?` lists every shortcut for the view you are on, and `t` there says what vmono's [terms](concepts.md) mean.
 
 ## Views
 
 | View | Opened by | Shows |
 | --- | --- | --- |
-| packages | start | Every package: members (`2A 1R` = two active, one reference), session count, harness, clean or dirty (any session), last opened. A package from before sessions shows `migrate` |
+| packages | start | Every package: members (`2 active, 1 read-only`; a read-only member is a reference member), session count, harness, clean or dirty (any session), last opened. A package from before sessions shows `migrate` |
 | sessions | `→` on a package | Per session: branch, its state (clean, dirty, pushed, remote deleted, or merged and how), last opened. Merged sessions are dimmed and sorted below the rest |
-| members | `m` on a session | Per member in that session: mode, branch or ref, HEAD, how far it is published, dirty and untracked counts, role |
+| members | `m` on a session | Per member in that session: mode (`active` or `read-only`), what is checked out (a branch or ref), counts of changed and new (untracked) files, how far it is published, HEAD, role |
 | describe | `d` | Purpose, context, notes, sessions and members for a package; add a session's branch and live state when opened from one; location and git state for a member |
 | repos | palette | Every known repo and how many packages use it; `→` lists those packages |
 | harnesses | palette | Configured harnesses, whether each is on `PATH`, and the default |
@@ -45,7 +45,7 @@ None of which you have to use.
 | `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, update, copy path, push, delete |
 | `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
-| `n` | Start a new session: a name, and optionally a prefix, a branch, a remote branch to work on (`track`, or `ctrl+t`) or to build on (`from`), a branch per active member, and a ref per reference member (typed, or `space` to pick a remote branch). Empty fields show the branch or ref they will use |
+| `n` | Start a new session: a name, and optionally a prefix, a branch, a remote branch to work on (`work on`, which is `--track`, also `ctrl+t`) or to build on (`build on`, which is `--from`), a branch per active member, and a ref per read-only member (typed, or `space` to pick a remote branch). Empty fields show the branch or ref they will use, and the dialog explains the field you are in |
 | `P` | [Push](sessions.md#pushing) the session: shows where each member's branch goes, what is uncommitted and left out, or what blocks it, then `y` pushes. Never forced |
 | `m` / `d` | Members of the session / describe it |
 | `u` | [Update](sessions.md#updating) the session: rebase branches that are not pushed, and merge what is new into those that are |
