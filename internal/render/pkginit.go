@@ -71,6 +71,13 @@ members connect, how each is built and tested, conventions that span them, and
 gotchas. Use headings below ` + "`##`" + `, starting at ` + "`###`" + `. Leave out what the Context
 already says, and anything easily seen from a file listing.
 
+Which members can be edited, and where each one is checked out, differs between
+sessions and packages, and every session lists that itself. The ` + "`_ref/`" + ` paths
+and the read-only rule describe this exploration only. So in the purpose, the
+overview and the roles, call members by name, give paths from the member's own
+root (in ` + "`api`" + `, ` + "`src/routes/`" + `), and never write ` + "`_ref/`" + ` or say that a member
+is read-only, a reference or active.
+
 `
 
 // InitBlock renders the vmono-owned block of AGENTS.md for an init workspace:
