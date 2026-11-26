@@ -32,6 +32,7 @@ None of which you have to use.
 | `o` / `l` | Open the most recently opened session with the default harness / pick a harness. A package with no sessions asks you to start one |
 | `d` | Describe |
 | `n` / `e` | New package / edit the selected one (applies to every session) |
+| `C` | [Clone the package](package-init.md#cloning-a-package): the new-package form filled in from it, with everything editable |
 | `i` | [Initialize the package](package-init.md): pick a harness to explore it and record an overview |
 | `v` | Review the commands an initialization suggested |
 | `s` / `f` | Sync every session / fetch every member's source |

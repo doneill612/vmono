@@ -37,13 +37,14 @@ type editedTextMsg struct {
 	err   error
 }
 
-// editorModel is the package editor, used for both create and edit. Fields:
+// editorModel is the package editor, used to create, clone and edit. Fields:
 // name (read-only on edit), purpose and context (multi-line; ctrl+e opens
 // $EDITOR), default harness, and the member list with each member's mode
 // and role.
 type editorModel struct {
 	e       *env
 	pkg     *core.Package // nil when creating
+	src     *core.Package // the package being cloned, else nil
 	name    textinput.Model
 	purpose textarea.Model
 	context textarea.Model
@@ -57,12 +58,18 @@ type editorModel struct {
 	role     textinput.Model
 
 	focus int
+
+	// left holds each member, by name, as it was before its last change of
+	// mode, so that changing back restores what it had.
+	left map[string]manifest.Member
+	// note is shown when the editor next comes up.
+	note string
 }
 
 // newEditor builds the editor for a new package (pkg nil) or an existing
 // one.
 func newEditor(e *env, pkg *core.Package) *editorModel {
-	m := &editorModel{e: e, pkg: pkg}
+	m := &editorModel{e: e, pkg: pkg, left: map[string]manifest.Member{}}
 	m.name = newTextInput()
 	m.name.Prompt = ""
 	m.name.Placeholder = "lowercase-with-hyphens"
@@ -76,18 +83,41 @@ func newEditor(e *env, pkg *core.Package) *editorModel {
 	m.harnesses = append([]string{""}, e.core.Cfg.HarnessNames()...)
 	if pkg != nil {
 		m.name.SetValue(pkg.Name)
-		m.purpose.SetValue(strings.TrimSpace(pkg.M.Purpose))
-		m.context.SetValue(strings.TrimSpace(pkg.M.Context))
-		m.members = append([]manifest.Member(nil), pkg.M.Members...)
-		for i, h := range m.harnesses {
-			if h == pkg.M.Harness {
-				m.hIdx = i
-			}
-		}
+		m.fill(pkg.M)
 		m.focus = fieldPurpose
 	}
 	m.applyFocus()
 	return m
+}
+
+// newCloneEditor builds the new-package editor filled in from src, to define a
+// copy of it. Everything on the form can be changed before saving.
+func newCloneEditor(e *env, src *core.Package) *editorModel {
+	m := newEditor(e, nil)
+	m.src = src
+	m.name.SetValue(src.Name + "-copy")
+	m.fill(src.M)
+	return m
+}
+
+// fill puts everything the form shows of from into it, the name aside.
+func (m *editorModel) fill(from *manifest.Manifest) {
+	m.purpose.SetValue(strings.TrimSpace(from.Purpose))
+	m.context.SetValue(strings.TrimSpace(from.Context))
+	m.members = append([]manifest.Member(nil), from.Members...)
+	for i, h := range m.harnesses {
+		if h == from.Harness {
+			m.hIdx = i
+		}
+	}
+}
+
+// formInto overwrites everything the form shows in to, the name aside.
+func (m *editorModel) formInto(to *manifest.Manifest) {
+	to.Harness = m.harnessName()
+	to.Purpose = strings.TrimSpace(m.purpose.Value())
+	to.Context = strings.TrimSpace(m.context.Value())
+	to.Members = append([]manifest.Member(nil), m.members...)
 }
 
 // newArea builds a multi-line input.
@@ -102,7 +132,14 @@ func newArea(placeholder string) textarea.Model {
 }
 
 // Init implements screen.
-func (m *editorModel) Init() tea.Cmd { return textinput.Blink }
+func (m *editorModel) Init() tea.Cmd {
+	note := m.note
+	m.note = ""
+	if note != "" {
+		return tea.Batch(textinput.Blink, flash(note))
+	}
+	return textinput.Blink
+}
 
 // capturing implements capturing: true while a text field has focus.
 func (m *editorModel) capturing() bool {
@@ -120,16 +157,22 @@ func (m *editorModel) capturing() bool {
 
 // Title implements screen.
 func (m *editorModel) Title() string {
-	if m.pkg != nil {
+	switch {
+	case m.pkg != nil:
 		return "Edit · " + m.pkg.Name
+	case m.src != nil:
+		return "Clone · " + m.src.Name
 	}
 	return "New package"
 }
 
 // Crumb implements screen.
 func (m *editorModel) Crumb() string {
-	if m.pkg != nil {
+	switch {
+	case m.pkg != nil:
 		return "edit"
+	case m.src != nil:
+		return "clone"
 	}
 	return "new"
 }
@@ -270,14 +313,13 @@ func (m *editorModel) keyMembers(k tea.KeyMsg) (screen, tea.Cmd) {
 	case "m":
 		if m.cursor < len(m.members) {
 			mem := &m.members[m.cursor]
-			if mem.Mode == manifest.ModeActive {
-				mem.Mode = manifest.ModeReference
-			} else {
-				mem.Mode = manifest.ModeActive
+			mode := manifest.ModeActive
+			if mem.Mode == mode {
+				mode = manifest.ModeReference
 			}
-			// Path, base and ref follow the mode; blank them so defaults
-			// for the new mode apply.
-			mem.Path, mem.Base, mem.Ref = "", "", ""
+			if note := m.setMode(mem, mode); note != "" {
+				return m, flash(note)
+			}
 		}
 	case "r":
 		if m.cursor < len(m.members) {
@@ -293,6 +335,22 @@ func (m *editorModel) keyMembers(k tea.KeyMsg) (screen, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// setMode changes a member's mode. Changing it back gives the member the path,
+// base and ref it had before, and otherwise core.SetMode decides what carries
+// over; its note is returned.
+func (m *editorModel) setMode(mem *manifest.Member, mode string) (note string) {
+	if mem.Mode == mode {
+		return ""
+	}
+	was, ok := m.left[mem.Name]
+	m.left[mem.Name] = *mem
+	if ok && was.Mode == mode && was.Source == mem.Source {
+		mem.Mode, mem.Path, mem.Base, mem.Ref = mode, was.Path, was.Base, was.Ref
+		return ""
+	}
+	return core.SetMode(mem, mode)
 }
 
 // keyRole handles keys while editing a member's role.
@@ -335,6 +393,7 @@ func (m *editorModel) openPicker() tea.Cmd {
 // unselected ones are dropped, and new ones are appended.
 func (m *editorModel) applySelection(sel []pickSel) {
 	var next []manifest.Member
+	var notes []string
 	used := map[string]bool{}
 	for _, mem := range m.members {
 		src, _ := paths.Abs(mem.Source)
@@ -342,9 +401,8 @@ func (m *editorModel) applySelection(sel []pickSel) {
 			if !samePath(src, s.Repo.Path) {
 				continue
 			}
-			if mem.Mode != s.Mode {
-				mem.Mode = s.Mode
-				mem.Path, mem.Base, mem.Ref = "", "", ""
+			if note := m.setMode(&mem, s.Mode); note != "" {
+				notes = append(notes, note)
 			}
 			next = append(next, mem)
 			used[s.Repo.Path] = true
@@ -370,6 +428,7 @@ func (m *editorModel) applySelection(sel []pickSel) {
 		next = append(next, manifest.Member{Name: name, Source: s.Repo.Path, Remote: s.Repo.Remote, Mode: s.Mode})
 	}
 	m.members = next
+	m.note = strings.Join(notes, "; ")
 	if m.cursor >= len(m.members) {
 		m.cursor = 0
 	}
@@ -457,25 +516,46 @@ func (m *editorModel) save() (screen, tea.Cmd) {
 }
 
 // saveCreate defines the package through the progress screen, then returns
-// to the packages screen. Starting a session is left to the user.
+// to the packages screen. A clone also gets what the form does not show of its
+// source, the notes and what init recorded. Starting a session is left to the
+// user.
 func (m *editorModel) saveCreate() (screen, tea.Cmd) {
-	c := m.e.core
+	c, src := m.e.core, m.src
 	name := strings.TrimSpace(m.name.Value())
-	nm := &manifest.Manifest{
-		Name: name, Harness: m.harnessName(),
-		Purpose: strings.TrimSpace(m.purpose.Value()), Context: strings.TrimSpace(m.context.Value()),
-		Members: append([]manifest.Member(nil), m.members...),
+	nm := &manifest.Manifest{Name: name}
+	if src != nil {
+		var err error
+		if nm, _, err = core.CloneManifest(src, name, nil); err != nil {
+			return m, flashErr(err.Error())
+		}
 	}
+	m.formInto(nm)
 	return m, goTo(m, newProgress(m.e, operation{
 		title: "Create " + name,
 		run: func(force, reuse bool) error {
-			_, err := c.CreatePackage(nm)
+			var err error
+			if src != nil {
+				_, err = c.ClonePackage(src, nm)
+			} else {
+				_, err = c.CreatePackage(nm)
+			}
 			return err
 		},
 		home: true,
-		hint: func() string { return "i initializes it" },
+		hint: func() string { return initHint(nm) },
 		back: func() screen { return m },
 	}))
+}
+
+// initHint says what initializing would do for a package just created from m.
+func initHint(m *manifest.Manifest) string {
+	if m.Init == nil {
+		return "i initializes it"
+	}
+	if drift := m.DriftText(); drift != "" {
+		return "overview out of date (" + drift + "), i updates it"
+	}
+	return "i re-initializes it"
 }
 
 // saveEdit applies the edited form as a diff. Removals that would discard
@@ -486,10 +566,7 @@ func (m *editorModel) saveEdit() (screen, tea.Cmd) {
 	if err != nil {
 		return m, flashErr(err.Error())
 	}
-	edited.Harness = m.harnessName()
-	edited.Purpose = strings.TrimSpace(m.purpose.Value())
-	edited.Context = strings.TrimSpace(m.context.Value())
-	edited.Members = append([]manifest.Member(nil), m.members...)
+	m.formInto(edited)
 
 	ep, err := c.PlanEdit(m.pkg, edited)
 	if err != nil {

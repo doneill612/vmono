@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/core"
@@ -108,6 +109,94 @@ func TestCreateFlowEditorPickerProgressLaunch(t *testing.T) {
 	d.key("enter")
 	if d.app.Launch() == nil || d.app.Launch().Package != "shiny" || d.app.Launch().Session != "task" || d.app.Launch().Harness != "fake" {
 		t.Fatalf("launch = %+v", d.app.Launch())
+	}
+}
+
+func TestCloneFlowStartsFromTheSource(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useSourceRoot(t, env)
+	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "contracts")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := core.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreatePackage(&manifest.Manifest{
+		Name: "docs", Purpose: "Explain it.", Context: "ticket 7", Harness: "fake",
+		Members: []manifest.Member{
+			{Source: a, Mode: manifest.ModeReference, Role: "the gateway"},
+			{Source: b, Mode: manifest.ModeReference},
+		},
+		Notes: []manifest.Note{{At: time.Date(2026, 11, 14, 10, 5, 0, 0, time.UTC), By: "user", Text: "frozen"}},
+		Init: &manifest.Init{
+			At: time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC), By: "agent:claude",
+			Members: []string{"alpha", "contracts"}, Overview: "how they fit",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d := newDriver(t, env, "")
+
+	d.key("C")
+	d.has("Clone · docs", "docs-copy", "Explain it.", "ticket 7", "fake", "alpha", "the gateway", "contracts")
+	for range "-copy" {
+		d.key("backspace")
+	}
+	d.typeText("-work")
+	d.key("tab", "tab", "tab", "tab") // members
+	d.key("m")                        // alpha becomes active
+	d.key("ctrl+s")
+	d.eventually(func() bool { return containsView(d, "docs-work") && !containsView(d, "Clone · docs") }, "packages screen")
+	d.has("i re-initializes it")
+
+	p := loadPkg(t, "docs-work")
+	alpha, _ := p.M.Member("alpha")
+	if alpha.Mode != manifest.ModeActive || alpha.Path != "alpha" || alpha.Role != "the gateway" {
+		t.Errorf("alpha = %+v", alpha)
+	}
+	if other, _ := p.M.Member("contracts"); other.Mode != manifest.ModeReference {
+		t.Errorf("contracts = %+v", other)
+	}
+	if p.M.Harness != "fake" || len(p.M.Notes) != 1 || p.M.Overview() != "how they fit" || p.M.DriftText() != "" {
+		t.Errorf("clone lost something: %+v", p.M)
+	}
+	if src := loadPkg(t, "docs"); src.M.Members[0].Mode != manifest.ModeReference {
+		t.Errorf("the source changed: %+v", src.M.Members[0])
+	}
+}
+
+func TestTogglingAModeBackRestoresTheMember(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useSourceRoot(t, env)
+	a := env.NewSource(t, "alpha")
+	testutil.Git(t, a, "tag", "v3")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := core.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreatePackage(&manifest.Manifest{
+		Name: "pinned", Members: []manifest.Member{{Source: a, Mode: manifest.ModeReference, Ref: "v3"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d := newDriver(t, env, "")
+
+	d.key("C")
+	d.key("tab", "tab", "tab", "tab") // members
+	d.key("m")
+	d.has("v3 is not a branch")
+	d.key("m", "ctrl+s")
+	d.eventually(func() bool { return containsView(d, "pinned-copy") && !containsView(d, "Clone · pinned") }, "packages screen")
+
+	if mem := loadPkg(t, "pinned-copy").M.Members[0]; mem.Mode != manifest.ModeReference || mem.Ref != "v3" {
+		t.Errorf("alpha = %+v", mem)
 	}
 }
 
