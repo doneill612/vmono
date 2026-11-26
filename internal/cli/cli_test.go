@@ -12,6 +12,7 @@ import (
 	"github.com/doneill612/vmono/internal/config"
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/harness"
+	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
@@ -599,6 +600,51 @@ func TestNewWithoutSessionMakesOnlyThePackage(t *testing.T) {
 	}
 	if _, _, err := run(t, "open", "p"); ExitCode(err) != ExitNotFound {
 		t.Errorf("opening a package with no sessions: exit %d (%v)", ExitCode(err), err)
+	}
+}
+
+func TestPackageCloneChangesOnlyModes(t *testing.T) {
+	env := testutil.NewEnv(t)
+	a := env.NewSource(t, "alpha")
+	b := env.NewSource(t, "beta")
+	if _, _, err := run(t, "new", "docs", "--ref", a+","+b); err != nil {
+		t.Fatal(err)
+	}
+	modes := func(pkg string) string {
+		t.Helper()
+		out, _, err := run(t, "package", "clone", "docs", pkg, "--all-active", "--ref", "beta")
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := manifest.Load(strings.TrimSpace(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, mem := range m.Members {
+			got = append(got, mem.Name+":"+mem.Mode)
+		}
+		return strings.Join(got, " ")
+	}
+	if got := modes("work"); got != "alpha:active beta:reference" {
+		t.Errorf("--all-active --ref beta gave %q", got)
+	}
+
+	for what, args := range map[string][]string{
+		"both all flags":   {"--all-active", "--all-ref"},
+		"both mode lists":  {"--active", "alpha", "--ref", "alpha"},
+		"unknown member":   {"--active", "gamma"},
+		"a repo not in it": {"--ref", a},
+	} {
+		if _, _, err := run(t, append([]string{"package", "clone", "docs", "no"}, args...)...); err == nil {
+			t.Errorf("%s must be refused", what)
+		}
+	}
+	if _, _, err := run(t, "package", "clone", "docs", "no", "--active", "gamma"); ExitCode(err) != ExitNotFound {
+		t.Errorf("unknown member: exit %d (%v)", ExitCode(err), err)
+	}
+	if _, _, err := run(t, "show", "no"); ExitCode(err) != ExitNotFound {
+		t.Errorf("a refused clone must leave no package: %v", err)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/term"
@@ -24,14 +25,84 @@ import (
 var runInitHarness = harness.RunAndReturn
 
 // newPackageCmd builds `vmono package`, which holds what is done to a package
-// as a whole with an agent's help.
+// as a whole.
 func newPackageCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "package",
-		Short: "Initialize a package's overview with a harness",
+		Short: "Clone a package, or initialize its overview with a harness",
 	}
-	cmd.AddCommand(newPackageInitCmd(), newPackageRecordCmd(), newPackageSuggestionsCmd())
+	cmd.AddCommand(newPackageCloneCmd(), newPackageInitCmd(), newPackageRecordCmd(), newPackageSuggestionsCmd())
 	return cmd
+}
+
+// newPackageCloneCmd builds `vmono package clone`, which defines a new package
+// as a copy of another, with the same members and everything recorded about
+// them. Only members' modes can differ. It starts no session.
+func newPackageCloneCmd() *cobra.Command {
+	var active, refs []string
+	var allActive, allRef bool
+	cmd := &cobra.Command{
+		Use:   "clone <src> <new> [--all-active | --all-ref] [--active a,b] [--ref c]",
+		Short: "Copy a package under a new name, changing which members are active",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, src, err := resolve(args[0])
+			if err != nil {
+				return err
+			}
+			modes, err := cloneModes(src.M, active, refs, allActive, allRef)
+			if err != nil {
+				return err
+			}
+			m, err := core.CloneManifest(src, args[1], modes)
+			if err != nil {
+				return err
+			}
+			var p *core.Package
+			err = withEvents(cmd.ErrOrStderr(), c, func() error {
+				var cerr error
+				p, cerr = c.ClonePackage(src, m)
+				return cerr
+			})
+			if err != nil {
+				return err
+			}
+			fprintf(cmd.OutOrStdout(), "%s\n", p.Dir)
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringSliceVar(&active, "active", nil, "members of the source to make active (names, comma-separated)")
+	f.StringSliceVar(&refs, "ref", nil, "members of the source to make read-only references")
+	f.BoolVar(&allActive, "all-active", false, "make every member active, except those named by --ref")
+	f.BoolVar(&allRef, "all-ref", false, "make every member a reference, except those named by --active")
+	cmd.MarkFlagsMutuallyExclusive("all-active", "all-ref")
+	return cmd
+}
+
+// cloneModes returns the mode each member of m is to have in a clone, for the
+// members the flags say something about. A member named by active or refs gets
+// that mode whatever allActive and allRef say.
+func cloneModes(m *manifest.Manifest, active, refs []string, allActive, allRef bool) (map[string]string, error) {
+	modes := map[string]string{}
+	for _, mem := range m.Members {
+		switch {
+		case allActive:
+			modes[mem.Name] = manifest.ModeActive
+		case allRef:
+			modes[mem.Name] = manifest.ModeReference
+		}
+	}
+	for _, name := range refs {
+		if slices.Contains(active, name) {
+			return nil, fmt.Errorf("%s is named by both --active and --ref", name)
+		}
+		modes[name] = manifest.ModeReference
+	}
+	for _, name := range active {
+		modes[name] = manifest.ModeActive
+	}
+	return modes, nil
 }
 
 // newPackageInitCmd builds `vmono package init`, which opens a harness on a
