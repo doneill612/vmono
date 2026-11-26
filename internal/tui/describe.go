@@ -11,6 +11,7 @@ import (
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
+	"github.com/doneill612/vmono/internal/terms"
 )
 
 // describeMsg delivers what a describe view shows. build renders it for a
@@ -279,10 +280,7 @@ func describePackage(p *core.Package, sessions []core.SessionSummary, ins *core.
 
 	b.WriteString("\n " + styleHeaderCol.Render("MEMBERS") + "\n")
 	for i, mem := range p.M.Members {
-		mode := "active"
-		if mem.Mode == manifest.ModeReference {
-			mode = "reference"
-		}
+		mode := terms.ModeLabel(mem.Mode, true)
 		line := "   " + styleLabel.Render(mem.Name) + styleDim.Render("  "+mode)
 		if st != nil {
 			ms := st.Members[i]
@@ -290,7 +288,7 @@ func describePackage(p *core.Package, sessions []core.SessionSummary, ins *core.
 			if where == "" {
 				where = ms.Ref
 			}
-			line = "   " + styleLabel.Render(mem.Name) + styleDim.Render("  "+mode+"  "+where) + "  " + memberState(ms)
+			line = "   " + styleLabel.Render(mem.Name) + styleDim.Render("  "+mode+"  "+where) + "  " + memberStateLong(ms)
 		}
 		b.WriteString(line + "\n")
 		if mem.Role != "" {
@@ -308,10 +306,7 @@ func describePackage(p *core.Package, sessions []core.SessionSummary, ins *core.
 // describeMember renders one member's detail view in a session.
 func describeMember(p *core.Package, sess *core.Session, im core.InspectMember, ms core.MemberStatus, w int) string {
 	var b strings.Builder
-	mode := "active"
-	if im.Mode == manifest.ModeReference {
-		mode = "reference (read-only, detached)"
-	}
+	mode := terms.ModeLabel(im.Mode, true)
 	b.WriteString("\n")
 	for _, f := range [][2]string{
 		{"Package", p.Name},
@@ -336,7 +331,7 @@ func describeMember(p *core.Package, sess *core.Session, im core.InspectMember, 
 	if where == "" {
 		where = im.Ref
 	}
-	rows := [][2]string{{"Branch/ref", where}, {"Base", base}}
+	rows := [][2]string{{"Checked out", where}, {"Built on", base}}
 	switch {
 	case ms.Missing:
 		rows = append(rows, [2]string{"Worktree", "missing (run sync to recreate it)"})
@@ -353,6 +348,15 @@ func describeMember(p *core.Package, sess *core.Session, im core.InspectMember, 
 		b.WriteString(field(f[0], f[1], w) + "\n")
 	}
 	return b.String()
+}
+
+// memberStateLong is memberState with the counts of uncommitted work spelled
+// out, for views with the width for it.
+func memberStateLong(ms core.MemberStatus) string {
+	if !ms.Missing && ms.Error == "" && (ms.Dirty > 0 || ms.Untracked > 0) {
+		return styleWarn.Render(fmt.Sprintf("%d modified, %d untracked", ms.Dirty, ms.Untracked))
+	}
+	return memberState(ms)
 }
 
 // memberState is a short coloured summary of a member's working tree.

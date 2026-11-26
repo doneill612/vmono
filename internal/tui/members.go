@@ -10,6 +10,7 @@ import (
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
+	"github.com/doneill612/vmono/internal/terms"
 )
 
 // membersMsg delivers one session's members with live git status.
@@ -55,11 +56,11 @@ func newMembers(e *env, name, session string) *membersModel {
 	m := &membersModel{e: e, name: name, session: session, spin: newSpinner(), tb: newTable([]column{
 		{title: "name", max: 24},
 		{title: "mode"},
-		{title: "branch/ref", max: 32},
-		{title: "head"},
+		{title: "checked out", max: 32},
+		{title: "changed", right: true},
+		{title: "new", right: true},
 		{title: "published", max: 36},
-		{title: "dirty", right: true},
-		{title: "untr", right: true},
+		{title: "head"},
 		{title: "role", flex: true},
 	})}
 	m.fill()
@@ -178,9 +179,9 @@ func publishCell(ms core.MemberStatus) cell {
 
 // memberRow builds one table row from a member's status.
 func memberRow(ms core.MemberStatus) row {
-	mode := plain("active")
+	mode := plain(terms.ModeLabel(ms.Mode, false))
 	if ms.Mode == manifest.ModeReference {
-		mode = styled("ref", styleDim)
+		mode.style = styleDim
 	}
 	where := plain(ms.Branch)
 	if ms.Branch == "" {
@@ -200,8 +201,9 @@ func memberRow(ms core.MemberStatus) row {
 		id:     ms.Name,
 		search: ms.Name + " " + ms.Branch + " " + ms.Role,
 		cells: []cell{
-			plain(ms.Name), mode, where, styled(head, styleDim), publishCell(ms),
+			plain(ms.Name), mode, where,
 			count(ms.Dirty, !ms.Missing), count(ms.Untracked, !ms.Missing),
+			publishCell(ms), styled(head, styleDim),
 			styled(ms.Role, styleDim),
 		},
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/doneill612/vmono/internal/discover"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
+	"github.com/doneill612/vmono/internal/terms"
 )
 
 // Editor field focus order.
@@ -188,7 +189,7 @@ func (m *editorModel) Hints() []hint {
 	case m.focus == fieldHarness:
 		hs = append(hs, hint{"←/→", "Choose harness"})
 	case m.focus == fieldMembers:
-		hs = append(hs, hint{"a", "Add/change repos"}, hint{"x", "Remove"}, hint{"m", "Active/ref"}, hint{"r", "Role"}, hint{"c", "Setup/teardown"})
+		hs = append(hs, hint{"a", "Add/change repos"}, hint{"x", "Remove"}, hint{"m", "Active/read-only"}, hint{"r", "Role"}, hint{"c", "Setup/teardown"})
 	}
 	return hs
 }
@@ -689,15 +690,12 @@ func (m *editorModel) View(w, h int) string {
 		if m.focus == fieldMembers && i == m.cursor {
 			cursor = " " + styleSelected.Render("▸ ")
 		}
-		mode := "active"
-		if mem.Mode == manifest.ModeReference {
-			mode = "ref   "
-		}
+		mode := fit(terms.ModeLabel(mem.Mode, false), 9, false)
 		role := mem.Role
 		if role == "" {
 			role = styleDim.Render("(no role)")
 		}
-		b.WriteString(fmt.Sprintf("%s%-16s %s  %s\n", cursor, truncate(mem.Name, 16), styleDim.Render(mode), truncate(role, max(boxW-30-lipgloss.Width(commandsTag(mem)), 8))+commandsTag(mem)))
+		b.WriteString(fmt.Sprintf("%s%-16s %s  %s\n", cursor, truncate(mem.Name, 16), styleDim.Render(mode), truncate(role, max(boxW-33-lipgloss.Width(commandsTag(mem)), 8))+commandsTag(mem)))
 	}
 	if m.roleEdit {
 		b.WriteString(" " + m.role.View() + "\n")

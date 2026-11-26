@@ -11,6 +11,7 @@ import (
 	"github.com/doneill612/vmono/internal/core"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
+	"github.com/doneill612/vmono/internal/terms"
 )
 
 // previewMinW is the terminal width from which a list view shows a preview of
@@ -265,10 +266,7 @@ func buildPackagePreview(p *core.Package, sessions []core.SessionSummary) func(w
 		}
 		b.WriteString(previewSection("MEMBERS"))
 		for _, mem := range p.M.Members {
-			mode := "active"
-			if mem.Mode == manifest.ModeReference {
-				mode = "ref"
-			}
+			mode := terms.ModeLabel(mem.Mode, false)
 			b.WriteString(" " + fit(mem.Name, 18, false) + " " + styleDim.Render(mode) + "\n")
 			if mem.Role != "" {
 				b.WriteString("   " + styleDim.Render(truncate(mem.Role, w-5)) + "\n")
@@ -329,15 +327,12 @@ func unpushedSummary(members []core.MemberStatus) string {
 // memberPreviewLine is one member of a session: name, mode, where it is
 // checked out and its working tree state.
 func memberPreviewLine(ms core.MemberStatus, w int) string {
-	mode := "active"
-	if ms.Mode == manifest.ModeReference {
-		mode = "ref"
-	}
+	mode := terms.ModeLabel(ms.Mode, false)
 	where := ms.Branch
 	if where == "" {
 		where = ms.Ref
 	}
-	line := " " + fit(ms.Name, 14, false) + " " + styleDim.Render(fit(mode, 6, false)) + " " + memberState(ms)
+	line := " " + fit(ms.Name, 14, false) + " " + styleDim.Render(fit(mode, 9, false)) + " " + memberState(ms)
 	if where != "" {
 		line += "\n   " + styleDim.Render(truncate(where, w-5))
 	}
@@ -352,16 +347,13 @@ func memberPreviewLine(ms core.MemberStatus, w int) string {
 func buildMemberPreview(ms core.MemberStatus, w int) string {
 	var b strings.Builder
 	b.WriteString("\n")
-	mode := "active"
-	if ms.Mode == manifest.ModeReference {
-		mode = "reference (read-only)"
-	}
+	mode := terms.ModeLabel(ms.Mode, true)
 	where := ms.Branch
 	if where == "" {
 		where = ms.Ref
 	}
 	b.WriteString(previewField("mode", mode, w))
-	b.WriteString(previewField("branch/ref", where, w))
+	b.WriteString(previewField("checked out", where, w))
 	b.WriteString(previewField("head", ms.Head, w))
 	if ms.Missing {
 		b.WriteString(" " + styleErr.Render("worktree missing; sync recreates it") + "\n")
