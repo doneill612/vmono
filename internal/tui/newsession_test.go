@@ -24,11 +24,12 @@ func TestSessionPromptPrefixAndMemberBranches(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("right", "n")
-	d.has("prefix:", "none", "branch alpha", "branch beta", "each member's base")
+	d.has("prefix:", "none", "branch    alpha", "branch    beta", "each member's base branch",
+		"work on:", "nothing: start a new branch", "build on:", "Names this piece of work")
 	d.typeText("retry")
 	d.key("tab")
 	d.typeText("feat")
-	d.has("branch:  feat/retry", "branch alpha  feat/retry")
+	d.has("branch:   feat/retry", "branch    alpha  feat/retry")
 	d.key("tab", "tab", "tab", "tab", "tab") // branch, track, from, alpha, beta
 	d.typeText("other")
 	d.key("tab", "shift+tab") // away and back: the text stays
@@ -56,7 +57,7 @@ func TestSessionPromptBuildsOnAPickedBranch(t *testing.T) {
 	d.eventually(func() bool { return containsView(d, "parent") }, "the fetched branch")
 	d.typeText("parent")
 	d.key("enter")
-	d.has("new session", "from:    parent  (alpha)", "branch:  child")
+	d.has("new session", "build on: parent  (alpha)", "branch:   child")
 	d.key("tab", "enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 	if got := sessionBranches(t, env, "child", "alpha"); got[0] != "child" {
@@ -83,7 +84,7 @@ func TestSessionPromptPicksWhatAReferenceIsCheckedOutAt(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("right", "n")
-	d.has("branch alpha", "ref    lib        origin/HEAD", "ref    contracts  origin/HEAD")
+	d.has("branch    alpha", "read-only lib        origin/HEAD", "read-only contracts  origin/HEAD")
 	d.typeText("work")
 	d.key("tab", "tab", "tab", "tab", "tab", "tab") // prefix, branch, track, from, alpha, lib
 	d.has("press space to pick")
@@ -93,7 +94,7 @@ func TestSessionPromptPicksWhatAReferenceIsCheckedOutAt(t *testing.T) {
 	d.lacks("feat/other")
 	d.typeText("feat")
 	d.key("enter")
-	d.has("new session", "ref    lib        feat/api")
+	d.has("new session", "read-only lib        feat/api")
 	d.key("tab")
 	d.typeText("v1")
 	d.key("enter")
@@ -106,5 +107,30 @@ func TestSessionPromptPicksWhatAReferenceIsCheckedOutAt(t *testing.T) {
 	}
 	if got := sessionBranches(t, env, "work", "alpha"); got[0] != "work" {
 		t.Errorf("branches = %v", got)
+	}
+}
+
+func TestSessionPromptExplainsTheFocusedField(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	seedWithRefs(t, env, "pay", []string{env.NewSource(t, "alpha")}, []string{env.NewSource(t, "lib")})
+	d := newDriver(t, env, "")
+
+	d.key("right", "n")
+	// In the order tab visits them: name, prefix, branch, work on, build on,
+	// the active member, the read-only member.
+	for i, want := range []string{
+		"Names this piece of work", "(--prefix)", "(--branch)", "(--track)", "(--from)",
+		"(--branch MEMBER=BRANCH)", "(--from MEMBER=REF)",
+	} {
+		if i > 0 {
+			d.key("tab")
+		}
+		d.has(want)
+		for _, line := range d.app.top().(*sessionPrompt).fieldHelp() {
+			if len(line) > 68 {
+				t.Errorf("help is cut off at 80 columns: %q", line)
+			}
+		}
 	}
 }

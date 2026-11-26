@@ -23,7 +23,7 @@ func newBranchFields(label string, width int, members []string) branchFields {
 	f := branchFields{members: members}
 	for _, name := range members {
 		in := newTextInput()
-		in.Prompt = fmt.Sprintf("%-6s %-*s  ", label, width, name)
+		in.Prompt = fmt.Sprintf("%-9s %-*s  ", label, width, name)
 		in.CharLimit = 200
 		// A text input with no width truncates its placeholder to one character.
 		in.Width = 36

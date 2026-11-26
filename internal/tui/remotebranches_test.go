@@ -61,7 +61,7 @@ func TestRemotePickerWorksOffline(t *testing.T) {
 	// Picking none restores the default.
 	d.key("ctrl+t")
 	d.key("enter")
-	d.has("none, start a new branch")
+	d.has("nothing: start a new branch")
 	d.lacks("feat/x")
 	d.key("tab", "tab", "enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")

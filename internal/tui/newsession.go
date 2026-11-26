@@ -99,11 +99,11 @@ func newSessionPrompt(e *env, pkg string) *sessionPrompt {
 	}
 	m := &sessionPrompt{
 		e: e, pkg: pkg,
-		name:    input("session: ", "token-refresh", 64),
-		prefix:  input("prefix:  ", "none", 64),
-		branch:  input("branch:  ", "", 200),
+		name:    input("session:  ", "token-refresh", 64),
+		prefix:  input("prefix:   ", "none", 64),
+		branch:  input("branch:   ", "", 200),
 		members: newBranchFields("branch", width, members),
-		refs:    newBranchFields("ref", width, refs),
+		refs:    newBranchFields("read-only", width, refs),
 	}
 	for name, ref := range at {
 		m.refs.placeholder(name, ref)
@@ -323,20 +323,11 @@ func (m *sessionPrompt) View(w, h int) string {
 	b.WriteString(" " + m.name.View() + "\n")
 	b.WriteString(" " + m.prefix.View() + "\n")
 	b.WriteString(" " + m.branch.View() + "\n")
-	b.WriteString(" " + m.pickView(trackField, "track:   ", "none, start a new branch", m.track) + "\n")
-	b.WriteString(" " + m.pickView(fromField, "from:    ", "each member's base", m.from) + "\n")
+	b.WriteString(" " + m.pickView(trackField, "work on:  ", "nothing: start a new branch", m.track) + "\n")
+	b.WriteString(" " + m.pickView(fromField, "build on: ", "each member's base branch", m.from) + "\n")
 	b.WriteString(m.members.view())
 	b.WriteString(m.refs.view())
-	help := []string{
-		"Each member gets a worktree on its branch, which is what you push. Track",
-		"works on a remote branch; from builds the new one on it.",
-	}
-	if m.focusedRef() != "" {
-		help = []string{
-			"What the read-only member is checked out at in this session. Type a",
-			"branch, tag or commit, or press space to pick a remote branch.",
-		}
-	}
+	help := m.fieldHelp()
 	b.WriteString("\n " + styleDim.Render(help[0]) + "\n")
 	b.WriteString(" " + styleDim.Render(help[1]) + "\n")
 	if m.msg != "" {
@@ -348,6 +339,49 @@ func (m *sessionPrompt) View(w, h int) string {
 		width = 76
 	}
 	return dialog("new session", b.String(), width)
+}
+
+// fieldHelp is two lines saying what the focused field is for, and the flag of
+// `vmono session new` that does the same. A line longer than 68 columns is cut
+// off on a terminal 80 wide.
+func (m *sessionPrompt) fieldHelp() [2]string {
+	switch m.focus {
+	case nameField:
+		return [2]string{
+			"Names this piece of work. Active members get a branch of this name",
+			"unless a field below says otherwise.",
+		}
+	case prefixField:
+		return [2]string{
+			"Optional (--prefix). Goes before the session name in the branch:",
+			"feat gives feat/<session>. Unused if you name or work on a branch.",
+		}
+	case branchField:
+		return [2]string{
+			"Optional (--branch). The branch the active members work on, which",
+			"is what you push. Leave empty to use the one shown.",
+		}
+	case trackField:
+		return [2]string{
+			"Optional (--track). Continue a branch already on the remote, such",
+			"as a teammate's. Members whose remote lacks it start a new one.",
+		}
+	case fromField:
+		return [2]string{
+			"Optional (--from). Start the new branch here instead of on each",
+			"member's base, for work stacked on a branch that has not merged.",
+		}
+	}
+	if m.focusedRef() != "" {
+		return [2]string{
+			"What this read-only member is checked out at (--from MEMBER=REF).",
+			"Type a branch, tag or commit, or press space to pick a branch.",
+		}
+	}
+	return [2]string{
+		"Optional (--branch MEMBER=BRANCH). A different branch for this",
+		"member only. Leave empty to use the one shown.",
+	}
 }
 
 // contains reports whether list has s.

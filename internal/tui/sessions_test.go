@@ -74,7 +74,7 @@ func TestSessionPromptValidatesAndOverridesBranch(t *testing.T) {
 		d.key("backspace")
 	}
 	d.typeText("hotfix")
-	d.has("branch:  hotfix") // the placeholder follows the name
+	d.has("branch:   hotfix") // the placeholder follows the name
 	d.key("tab", "tab")
 	d.typeText("fix/PLAT-7")
 	d.key("enter")
