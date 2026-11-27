@@ -55,6 +55,14 @@ branch starts from the member's base, the branch it will merge into, or from wha
 every active member that has it, and --from MEMBER=REF for one. It cannot name the
 session's own branch.
 
+How --from spells a branch says which copy is meant, and which one update then
+follows:
+
+  origin/main       the remote's branch, as of the fetch the new session makes
+  refs/heads/main   your local branch, whatever the remote has
+  main              whichever of the two is further ahead, and yours if each has
+                    commits the other lacks
+
 When the branch is already on a member's remote, such as a teammate's or an open
 pull request's, nothing is created unless you pass --track to work on it. A member
 whose remote lacks it then gets a new branch of that name.
@@ -67,7 +75,7 @@ See ` + "`vmono help concepts`" + ` for the terms.`,
 		Example: `  vmono session new payments token-refresh
   vmono session new payments PLAT-412 --prefix fix
   vmono session new payments timeout --prefix fix --track
-  vmono session new payments retry-ui --from feat/retry --from web=main
+  vmono session new payments retry-ui --from origin/feat/retry --from web=refs/heads/main
   vmono session new payments try-v2 --from contracts=v2`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {

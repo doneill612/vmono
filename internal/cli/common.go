@@ -121,7 +121,7 @@ func (f *sessionFlags) add(cmd *cobra.Command, intro string) {
 	fs := cmd.Flags()
 	fs.StringVar(&f.prefix, "prefix", "", intro+"put PREFIX/ before the session's name in its branch: feat gives feat/SESSION")
 	fs.BoolVar(&f.track, "track", false, intro+"if the session's branch is already on a member's remote, work on it there")
-	fs.StringArrayVar(&f.from, "from", nil, intro+"build on this instead of the member's base: REF for every active member that has it, or MEMBER=REF for one; for a read-only member, what to check out (repeatable)")
+	fs.StringArrayVar(&f.from, "from", nil, intro+"build on this instead of the member's base: REF for every active member that has it, or MEMBER=REF for one; for a read-only member, what to check out. origin/NAME is the remote's branch, refs/heads/NAME yours, and NAME whichever is further ahead (repeatable)")
 	fs.BoolVar(&f.reuse, "reuse-branch", false, intro+"check out the branch if it already exists in a source repo")
 }
 

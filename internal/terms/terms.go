@@ -66,7 +66,10 @@ var Entries = []Entry{
 		Short: "start new branches somewhere other than the base",
 		Long: "--from, when starting a session: start new branches on something other " +
 			"than the base, for work stacked on a branch that has not merged yet. It can " +
-			"differ for each member, and is never the session's own branch.",
+			"differ for each member, and is never the session's own branch. A local " +
+			"branch and the remote's are separate choices: origin/main is the remote's. " +
+			"On the command line refs/heads/main is yours, and a plain main is whichever " +
+			"is further ahead.",
 	},
 	{
 		Term:  "prefix",
