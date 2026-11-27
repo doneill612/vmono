@@ -203,7 +203,7 @@ func (m *sessionPrompt) setFocus(i int) tea.Cmd {
 
 // Update implements screen.
 func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
-	if t, ok := msg.(remotePickedMsg); ok {
+	if t, ok := msg.(branchPickedMsg); ok {
 		if t.owner == m {
 			m.picked(t)
 		}
@@ -253,7 +253,7 @@ func (m *sessionPrompt) openPicker() (screen, tea.Cmd) {
 	if ref := m.focusedRef(); ref != "" {
 		target = pickTarget{member: ref, reference: true}
 	}
-	picker := newRemotePicker(m, m.e.core, p, target)
+	picker := newBranchPicker(m, m.e.core, p, target)
 	if !target.reference {
 		picker.exclude = m.branch()
 		// A member's base only needs choosing when following build on would
@@ -266,7 +266,7 @@ func (m *sessionPrompt) openPicker() (screen, tea.Cmd) {
 }
 
 // picked records a choice made in the picker.
-func (m *sessionPrompt) picked(t remotePickedMsg) {
+func (m *sessionPrompt) picked(t branchPickedMsg) {
 	m.msg = ""
 	switch {
 	case t.target.reference:

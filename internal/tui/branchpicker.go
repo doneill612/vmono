@@ -14,19 +14,19 @@ import (
 	"github.com/doneill612/vmono/internal/core"
 )
 
-// Messages of the remote-branch picker.
+// Messages of the branch picker.
 type (
-	// remoteBranchesMsg delivers the members' remote branches to one picker:
+	// branchListMsg delivers the members' remote branches to one picker:
 	// those on disk, or those seen after a fetch.
-	remoteBranchesMsg struct {
-		owner   *remotePicker
+	branchListMsg struct {
+		owner   *branchPicker
 		list    []core.MemberBranches
 		fetched bool
 	}
-	// remotePickedMsg reports what was chosen to the prompt that opened the
+	// branchPickedMsg reports what was chosen to the prompt that opened the
 	// picker: a branch and the members whose remote has it, or base for the
 	// member's own base, or neither for the row that chooses nothing.
-	remotePickedMsg struct {
+	branchPickedMsg struct {
 		owner   *sessionPrompt
 		target  pickTarget
 		branch  string
@@ -45,23 +45,23 @@ type pickTarget struct {
 	reference bool
 }
 
-// remoteChoice is one row of the picker: a branch merged across the members,
+// branchChoice is one row of the picker: a branch merged across the members,
 // or with no branch, the choice of nothing or of the member's base.
-type remoteChoice struct {
+type branchChoice struct {
 	branch           string
 	base             bool
 	members, missing []string
 	when             time.Time
 }
 
-// remotePicker is the dialog that chooses a branch on the members' remotes for
+// branchPicker is the dialog that chooses a branch on the members' remotes for
 // a new session to build its branches on, or to check a reference member out
 // at. Branches of the same name are one row, saying which members
 // have it; those most members have come first, then the most
 // recent. It opens on what the last fetch saw and fetches meanwhile, so it is
 // usable at once and stays usable offline: a member that cannot be fetched or
 // listed is named in a notice and never blocks a choice.
-type remotePicker struct {
+type branchPicker struct {
 	owner  *sessionPrompt
 	target pickTarget
 	// exclude is a branch that cannot be chosen: the session's own, when the
@@ -73,8 +73,8 @@ type remotePicker struct {
 	p       *core.Package
 	in      textinput.Model
 	spin    spinner.Model
-	all     []remoteChoice
-	shown   []remoteChoice
+	all     []branchChoice
+	shown   []branchChoice
 	notices []string
 	cursor  int
 	offset  int
@@ -84,34 +84,34 @@ type remotePicker struct {
 	closing bool
 }
 
-// newRemotePicker builds the picker for a new session of p.
-func newRemotePicker(owner *sessionPrompt, c *core.Core, p *core.Package, target pickTarget) *remotePicker {
+// newBranchPicker builds the picker for a new session of p.
+func newBranchPicker(owner *sessionPrompt, c *core.Core, p *core.Package, target pickTarget) *branchPicker {
 	in := newTextInput()
 	in.Prompt = "› "
 	in.CharLimit = 200
-	return &remotePicker{owner: owner, target: target, c: c, p: p, in: in, spin: newSpinner()}
+	return &branchPicker{owner: owner, target: target, c: c, p: p, in: in, spin: newSpinner()}
 }
 
 // modal implements modalScreen.
-func (m *remotePicker) modal() {}
+func (m *branchPicker) modal() {}
 
 // capturing implements capturing: the input owns every key.
-func (m *remotePicker) capturing() bool { return true }
+func (m *branchPicker) capturing() bool { return true }
 
 // Init implements screen. It lists what is on disk and fetches side by side.
-func (m *remotePicker) Init() tea.Cmd {
+func (m *branchPicker) Init() tea.Cmd {
 	return tea.Batch(m.in.Focus(), m.spin.Tick, m.load(false), m.load(true))
 }
 
 // load lists the branches, after a fetch when asked, off the UI goroutine.
-func (m *remotePicker) load(fetch bool) tea.Cmd {
+func (m *branchPicker) load(fetch bool) tea.Cmd {
 	return func() tea.Msg {
-		return remoteBranchesMsg{owner: m, list: m.c.RemoteBranches(m.p, m.target.member, fetch), fetched: fetch}
+		return branchListMsg{owner: m, list: m.c.RemoteBranches(m.p, m.target.member, fetch), fetched: fetch}
 	}
 }
 
 // Title implements screen.
-func (m *remotePicker) Title() string {
+func (m *branchPicker) Title() string {
 	switch {
 	case m.target.reference:
 		return "remote branch for " + m.target.member
@@ -122,19 +122,19 @@ func (m *remotePicker) Title() string {
 }
 
 // Crumb implements screen. The dialog adds no breadcrumb.
-func (m *remotePicker) Crumb() string { return "" }
+func (m *branchPicker) Crumb() string { return "" }
 
 // Hints implements screen.
-func (m *remotePicker) Hints() []hint { return nil }
+func (m *branchPicker) Hints() []hint { return nil }
 
 // receive merges the members' branches into rows, keeping the highlighted
 // branch under the cursor when rows arrive or move.
-func (m *remotePicker) receive(list []core.MemberBranches) {
-	var selected remoteChoice
+func (m *branchPicker) receive(list []core.MemberBranches) {
+	var selected branchChoice
 	if m.cursor < len(m.shown) {
 		selected = m.shown[m.cursor]
 	}
-	byName := map[string]*remoteChoice{}
+	byName := map[string]*branchChoice{}
 	var unfetched, unlisted []string
 	for _, mb := range list {
 		if mb.ListErr != nil {
@@ -148,7 +148,7 @@ func (m *remotePicker) receive(list []core.MemberBranches) {
 			}
 			ch := byName[b.Name]
 			if ch == nil {
-				ch = &remoteChoice{branch: b.Name}
+				ch = &branchChoice{branch: b.Name}
 				byName[b.Name] = ch
 			}
 			ch.members = append(ch.members, mb.Member)
@@ -193,16 +193,16 @@ func (m *remotePicker) receive(list []core.MemberBranches) {
 }
 
 // fixed are the rows that are not branches, listed first.
-func (m *remotePicker) fixed() []remoteChoice {
+func (m *branchPicker) fixed() []branchChoice {
 	if m.base != "" {
-		return []remoteChoice{{}, {base: true}}
+		return []branchChoice{{}, {base: true}}
 	}
-	return []remoteChoice{{}}
+	return []branchChoice{{}}
 }
 
 // refilter narrows the rows to those matching the query, best match first. The
 // rows that are not branches are only offered without a query.
-func (m *remotePicker) refilter() {
+func (m *branchPicker) refilter() {
 	q := strings.TrimSpace(m.in.Value())
 	m.cursor, m.offset = 0, 0
 	if q == "" || len(m.all) == 0 {
@@ -221,7 +221,7 @@ func (m *remotePicker) refilter() {
 }
 
 // Update implements screen.
-func (m *remotePicker) Update(msg tea.Msg) (screen, tea.Cmd) {
+func (m *branchPicker) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch t := msg.(type) {
 	case spinner.TickMsg:
 		if m.fetched {
@@ -230,7 +230,7 @@ func (m *remotePicker) Update(msg tea.Msg) (screen, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(t)
 		return m, cmd
-	case remoteBranchesMsg:
+	case branchListMsg:
 		// A listing from disk that arrives after the fetched one is older.
 		if t.owner != m || (m.fetched && !t.fetched) {
 			return m, nil
@@ -246,7 +246,7 @@ func (m *remotePicker) Update(msg tea.Msg) (screen, tea.Cmd) {
 }
 
 // key handles the picker's keys; anything it does not use is typed.
-func (m *remotePicker) key(k tea.KeyMsg) (screen, tea.Cmd) {
+func (m *branchPicker) key(k tea.KeyMsg) (screen, tea.Cmd) {
 	if m.closing {
 		return m, nil
 	}
@@ -263,7 +263,7 @@ func (m *remotePicker) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			ch := m.shown[m.cursor]
 			m.closing = true
 			return m, tea.Sequence(pop(m), func() tea.Msg {
-				return remotePickedMsg{owner: m.owner, target: m.target, branch: ch.branch, base: ch.base, members: ch.members}
+				return branchPickedMsg{owner: m.owner, target: m.target, branch: ch.branch, base: ch.base, members: ch.members}
 			})
 		}
 	default:
@@ -280,7 +280,7 @@ func (m *remotePicker) key(k tea.KeyMsg) (screen, tea.Cmd) {
 
 // choiceDetail words what stands right of a branch: the members that have it,
 // those that do not, and its age.
-func choiceDetail(ch remoteChoice) string {
+func choiceDetail(ch branchChoice) string {
 	if ch.branch == "" {
 		return ""
 	}
@@ -292,7 +292,7 @@ func choiceDetail(ch remoteChoice) string {
 }
 
 // View implements screen.
-func (m *remotePicker) View(w, h int) string {
+func (m *branchPicker) View(w, h int) string {
 	width := min(76, w-4)
 	inner := max(width-3, 10)
 	rows := max(min(10, h-9-len(m.notices)), 3)
