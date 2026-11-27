@@ -76,9 +76,14 @@ func displayRef(src, ref string) string {
 	return shortRef(ref)
 }
 
+// localRefs begins the full name of a local branch, which is how a session
+// names one that is to be followed whatever its remote copy does.
+const localRefs = "refs/heads/"
+
 // resolveFrom returns the ref that what a member is built on stands for now. A
-// branch name is whichever of the local branch and its remote copy is further
-// ahead. It is "" when nothing by that name exists.
+// plain branch name is whichever of the local branch and its remote copy is
+// further ahead. A full ref, or a remote's branch such as origin/main, is
+// exactly that one. It is "" when nothing by that name exists.
 func resolveFrom(src, from string) string {
 	if gitx.BranchExists(src, from) {
 		ref, _ := freshest(src, from)
@@ -93,6 +98,21 @@ func resolveFrom(src, from string) string {
 	return ""
 }
 
+// fromBranch returns the name of the branch that what a session builds a
+// member on stands for, however it is spelled: main for main, origin/main,
+// refs/heads/main and refs/remotes/origin/main alike. A local branch named in
+// full keeps everything after refs/heads/, remote-like prefix or not.
+func fromBranch(src, from string) string {
+	if name, ok := strings.CutPrefix(from, localRefs); ok {
+		return name
+	}
+	name := strings.TrimPrefix(strings.TrimPrefix(from, "refs/"), "remotes/")
+	if remote, rest, ok := strings.Cut(name, "/"); ok && slices.Contains(gitx.Remotes(src), remote) {
+		return rest
+	}
+	return from
+}
+
 // baseBranches returns the names of the branches a member's work is meant to
 // merge into, which its own branch must never be pushed to: the one its base
 // stands for and, when the session builds it on another, that one.
@@ -102,10 +122,7 @@ func baseBranches(s *Session, mem manifest.Member, src string) []string {
 		out = append(out, b)
 	}
 	if from := s.S.Members[mem.Name].From; from != "" {
-		if remote, rest, ok := strings.Cut(from, "/"); ok && slices.Contains(gitx.Remotes(src), remote) {
-			from = rest
-		}
-		out = append(out, from)
+		out = append(out, fromBranch(src, from))
 	}
 	return out
 }

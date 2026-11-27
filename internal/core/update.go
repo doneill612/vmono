@@ -289,15 +289,21 @@ func (u *updating) planBase(s *Session, mem manifest.Member, base memberBase, ba
 	if base.lost != "" {
 		// What it was built on can only be told by the commit it was at.
 		if rec.BaseTip == "" || mergedInto(u.src, rec.BaseTip, base.manifest) == "" {
-			u.skip("what it is built on, %s, is gone and does not look merged into %s; rebase it onto what it should be built on by hand", base.lost, displayRef(u.src, base.manifest))
+			u.skip("what it is built on, %s, is gone and does not look merged into %s; rebase it onto what it should be built on by hand", shortRef(base.lost), displayRef(u.src, base.manifest))
 			return false
 		}
 		u.retarget = true
 	} else if pub := publicationOf(gitx.LiveRefs(u.src), u.src, bases[len(bases)-1], bases[:len(bases)-1]); pub.remote != "" {
 		u.retarget = mergedInto(u.src, base.ref, base.manifest) != ""
+		// A local branch named in full may only be behind its published one, and
+		// then looks merged while the branch's work is still to come. The
+		// published one has to have merged too.
+		if u.retarget && strings.HasPrefix(rec.From, localRefs) && pub.ref != "" {
+			u.retarget = mergedInto(u.src, pub.ref, base.manifest) != ""
+		}
 	}
 	if u.retarget {
-		u.Notes = append(u.Notes, fmt.Sprintf("%s has merged, so it is now built on %s", rec.From, displayRef(u.src, base.manifest)))
+		u.Notes = append(u.Notes, fmt.Sprintf("%s has merged, so it is now built on %s", shortRef(rec.From), displayRef(u.src, base.manifest)))
 	}
 	return true
 }

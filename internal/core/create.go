@@ -90,7 +90,7 @@ func checkNotSelfBuilt(p *Package, opts SessionOptions, srcs map[string]string, 
 			spellings = append(spellings, tracking, "remotes/"+tracking, "refs/remotes/"+tracking)
 		}
 		if slices.Contains(spellings, from) {
-			return fmt.Errorf("%s: %q is the session's own branch, so it cannot be built on", mem.Name, from)
+			return fmt.Errorf("%s: %q is the session's own branch, so it cannot be built on", mem.Name, shortRef(from))
 		}
 	}
 	return nil
@@ -143,7 +143,7 @@ func resolveFroms(p *Package, ms *manifest.Session, opts SessionOptions, srcs ma
 			continue
 		}
 		if tracked[mem.Name] {
-			warn(mem.Name, fmt.Sprintf("works on %q from its remote, so it is not built on %q", ms.Branch, from))
+			warn(mem.Name, fmt.Sprintf("works on %q from its remote, so it is not built on %q", ms.Branch, shortRef(from)))
 			continue
 		}
 		asked = asked || !named
@@ -151,7 +151,7 @@ func resolveFroms(p *Package, ms *manifest.Session, opts SessionOptions, srcs ma
 		ref := resolveFrom(src, from)
 		if ref == "" {
 			if named {
-				return NotFound("%s: nothing named %q to start from", mem.Name, from)
+				return NotFound("%s: nothing named %q to start from", mem.Name, shortRef(from))
 			}
 			missing = append(missing, mem.Name)
 			continue
@@ -826,7 +826,7 @@ func (c *Core) addMemberSteps(s *Session, mem manifest.Member, src string, plan 
 				return err
 			}
 			if lost != "" {
-				warn(fmt.Sprintf("%s, which the session checks it out at, is gone; using %s", lost, displayRef(src, ref)))
+				warn(fmt.Sprintf("%s, which the session checks it out at, is gone; using %s", shortRef(lost), displayRef(src, ref)))
 			}
 			return gitx.WorktreeAddDetached(src, dst, ref)
 		}, Undo: func() error {

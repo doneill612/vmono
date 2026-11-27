@@ -254,9 +254,9 @@ func (c *Core) moveRef(s *Session, mem manifest.Member, src string) (moved bool,
 	}
 	rec := s.S.Members[mem.Name]
 	if gone != "" && mergedInto(src, head, ref) == "" {
-		return false, fmt.Sprintf("%s is gone and does not look merged into %s; left where it is", gone, displayRef(src, ref))
+		return false, fmt.Sprintf("%s is gone and does not look merged into %s; left where it is", shortRef(gone), displayRef(src, ref))
 	}
-	if rec.Ref != "" && gone == "" && publicationOf(gitx.LiveRefs(src), src, rec.Ref, nil).deleted() {
+	if rec.Ref != "" && gone == "" && publicationOf(gitx.LiveRefs(src), src, strings.TrimPrefix(rec.Ref, localRefs), nil).deleted() {
 		// Only a local branch is left of it, which nothing moves once its work
 		// has merged.
 		own, err := resolveRef(src, mem.Ref, nil)
@@ -269,7 +269,7 @@ func (c *Core) moveRef(s *Session, mem manifest.Member, src string) (moved bool,
 	}
 	if gone != "" {
 		rec.Ref = ""
-		c.warnEvent(mem.Name, "sync refs", fmt.Sprintf("%s has merged, so it is now at %s", gone, displayRef(src, ref)))
+		c.warnEvent(mem.Name, "sync refs", fmt.Sprintf("%s has merged, so it is now at %s", shortRef(gone), displayRef(src, ref)))
 	}
 	target, err := gitx.ResolveRef(src, ref)
 	if err != nil {
