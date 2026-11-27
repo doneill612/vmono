@@ -7,7 +7,7 @@ import (
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
-func TestRemotePickerWorksOffline(t *testing.T) {
+func TestBranchPickerWorksOffline(t *testing.T) {
 	env := testutil.NewEnv(t)
 	useFakeHarness(t, env)
 	a := env.NewSource(t, "alpha")
@@ -24,7 +24,7 @@ func TestRemotePickerWorksOffline(t *testing.T) {
 	d.has("feat/x")
 	d.typeText("feat")
 	d.key("enter")
-	d.has("feat/x  (alpha)")
+	d.has("origin/feat/x  in alpha")
 
 	// Picking none restores the default.
 	d.key("space", "enter")

@@ -18,9 +18,10 @@ import (
 // then what the new branches are built on and what each reference member is
 // checked out at.
 //
-// Build on is only ever picked from the members' remote branches, with space:
-// once for every member, and in the row of each active member that should
-// differ, which may be another branch or its base. It can never be the
+// Build on is only ever picked from the members' branches, local and remote,
+// with space: once for every member, and in the row of each active member that
+// should differ, which may be another branch or its base. Each pick means
+// exactly the branch listed. It can never be the
 // session's own branch, which the dialog says as soon as the two match. A
 // reference member's field holds what it is checked out at in place of the
 // package's ref, typed, or picked with space, which no ref can hold.
@@ -41,9 +42,9 @@ type sessionPrompt struct {
 	width  int
 	// from is the branch picked for every member to build on.
 	from pickedBranch
-	// own is what a member was given in place of from: a branch, or "" for its
+	// own is what a member was given in place of from: a branch, or none for its
 	// base. A member that is absent follows from.
-	own  map[string]string
+	own  map[string]pickedBranch
 	refs refFields
 	// focus is the field with the keyboard, in the order of the constants below
 	// and then one per active member and one per reference member.
@@ -51,11 +52,27 @@ type sessionPrompt struct {
 	msg   string
 }
 
-// pickedBranch is a remote branch chosen in the picker, and the members whose
-// remote has it.
+// pickedBranch is a branch chosen in the picker. The zero value is none.
 type pickedBranch struct {
-	name    string
+	// name is how it is shown, as in main or origin/main; branch is its name
+	// without a remote's; and ref names exactly it.
+	name, branch, ref string
+	remote            bool
+	// members are those that have it.
 	members []string
+}
+
+// render words the branch for a field: a remote one in its colour, and a local
+// one tagged as such, so the two are told apart with or without colour. dim
+// quiets a local one that a row only inherits.
+func (p pickedBranch) render(dim bool) string {
+	switch {
+	case p.remote:
+		return styleRemote.Render(p.name)
+	case dim:
+		return styleDim.Render(p.name + " (local)")
+	}
+	return p.name + styleDim.Render(" (local)")
 }
 
 // Fields of the prompt ahead of the members' fields.
@@ -104,7 +121,7 @@ func newSessionPrompt(e *env, pkg string) *sessionPrompt {
 		name:   input("session:  ", "token-refresh", 64),
 		prefix: input("prefix:   ", "none", 64),
 		bases:  map[string]string{},
-		own:    map[string]string{},
+		own:    map[string]pickedBranch{},
 	}
 	var refs []string
 	at := map[string]string{}
@@ -136,29 +153,29 @@ func (m *sessionPrompt) branch() string {
 	return manifest.DefaultBranch(strings.TrimSpace(m.prefix.Value()), name)
 }
 
-// buildsOn is the picked branch the member's new branch starts on, or "" for
+// buildsOn is the picked branch the member's new branch starts on, or none for
 // its base.
-func (m *sessionPrompt) buildsOn(member string) string {
+func (m *sessionPrompt) buildsOn(member string) pickedBranch {
 	if own, ok := m.own[member]; ok {
 		return own
 	}
 	if contains(m.from.members, member) {
-		return m.from.name
+		return m.from
 	}
-	return ""
+	return pickedBranch{}
 }
 
-// selfBuilt says that a pick to build on is the session's own branch, or "".
-// It is checked on every render, since typing a name can make it true after the
-// pick was made.
+// selfBuilt says that a pick to build on is the session's own branch, local or
+// remote, or "". It is checked on every render, since typing a name can make it
+// true after the pick was made.
 func (m *sessionPrompt) selfBuilt() string {
 	branch := m.branch()
 	if branch == "" {
 		return ""
 	}
-	clash := m.from.name == branch
+	clash := m.from.branch == branch
 	for _, own := range m.own {
-		clash = clash || own == branch
+		clash = clash || own.branch == branch
 	}
 	if !clash {
 		return ""
@@ -258,7 +275,7 @@ func (m *sessionPrompt) openPicker() (screen, tea.Cmd) {
 		picker.exclude = m.branch()
 		// A member's base only needs choosing when following build on would
 		// give it something else.
-		if target.member != "" && m.from.name != "" {
+		if target.member != "" && m.from.ref != "" {
 			picker.base = m.bases[target.member]
 		}
 	}
@@ -270,11 +287,11 @@ func (m *sessionPrompt) picked(t branchPickedMsg) {
 	m.msg = ""
 	switch {
 	case t.target.reference:
-		m.refs.set(t.target.member, t.branch)
+		m.refs.pick(t.target.member, t.pick)
 	case t.target.member == "":
-		m.from = pickedBranch{name: t.branch, members: t.members}
-	case t.branch != "" || t.base:
-		m.own[t.target.member] = t.branch
+		m.from = t.pick
+	case t.pick.ref != "" || t.base:
+		m.own[t.target.member] = t.pick
 	default:
 		delete(m.own, t.target.member)
 	}
@@ -283,8 +300,8 @@ func (m *sessionPrompt) picked(t branchPickedMsg) {
 // fromView renders the field of what every member builds on.
 func (m *sessionPrompt) fromView() string {
 	label, text := "build on: ", styleDim.Render("each member's base branch")
-	if m.from.name != "" {
-		text = m.from.name + styleDim.Render("  ("+strings.Join(m.from.members, ", ")+")")
+	if m.from.ref != "" {
+		text = m.from.render(false) + styleDim.Render("  in "+strings.Join(m.from.members, ", "))
 	}
 	if m.focus == fromField {
 		return styleSelected.Render(label) + text + styleDim.Render("  space to pick")
@@ -293,18 +310,17 @@ func (m *sessionPrompt) fromView() string {
 }
 
 // memberView renders an active member's row under build on: what its new branch
-// starts on, dimmed unless it was chosen for this member.
+// starts on, quiet unless it was chosen for this member.
 func (m *sessionPrompt) memberView(member string) string {
 	own, chosen := m.own[member]
+	from := m.buildsOn(member)
 	var text string
 	switch {
-	case own != "":
-		text = own
-	case chosen:
+	case from.ref != "":
+		text = from.render(!chosen)
+	case chosen && own.ref == "":
 		text = "base (" + m.bases[member] + ")"
-	case m.buildsOn(member) != "":
-		text = styleDim.Render(m.buildsOn(member))
-	case m.from.name != "":
+	case m.from.ref != "":
 		text = styleDim.Render("base (" + m.bases[member] + "), lacks that branch")
 	default:
 		text = styleDim.Render("base (" + m.bases[member] + ")")
@@ -325,8 +341,8 @@ func (m *sessionPrompt) options() core.SessionOptions {
 		FromByMember: m.refs.values(),
 	}
 	for _, name := range m.active {
-		if from := m.buildsOn(name); from != "" {
-			opts.FromByMember[name] = from
+		if from := m.buildsOn(name); from.ref != "" {
+			opts.FromByMember[name] = from.ref
 		}
 	}
 	return opts
@@ -338,17 +354,26 @@ func trackNote(e *core.RemoteBranchExistsError, opts core.SessionOptions) []stri
 	lines := []string{fmt.Sprintf("Branch %q is already on the remote of %s.", e.Branch, strings.Join(e.On, ", "))}
 	for _, name := range e.On {
 		if from := opts.FromByMember[name]; from != "" {
-			lines = append(lines, fmt.Sprintf("%s continues it there, so it is not built on %s.", name, from))
+			lines = append(lines, fmt.Sprintf("%s continues it there, so it is not built on %s.", name, refText(from)))
 		}
 	}
 	for _, name := range e.Lacking {
 		start := "its base"
 		if from := opts.FromByMember[name]; from != "" {
-			start = from
+			start = refText(from)
 		}
 		lines = append(lines, fmt.Sprintf("%s does not have it, and starts a new branch of that name on %s.", name, start))
 	}
 	return lines
+}
+
+// refText words a ref the way a sentence names it: a local branch as yours, a
+// remote one as the remote's, and anything typed as it was typed.
+func refText(ref string) string {
+	if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+		return "your local " + branch
+	}
+	return strings.TrimPrefix(ref, "refs/remotes/")
 }
 
 // hyphenateSpaces rewrites a key press so whitespace reaches the dialog's
@@ -459,8 +484,8 @@ func (m *sessionPrompt) fieldHelp() [2]string {
 		}
 	case fromField:
 		return [2]string{
-			"Optional (--from). Press space to start the new branches on a",
-			"remote branch instead of each member's base. Rows below can differ.",
+			"Optional (--from). Press space to start the new branches on a local",
+			"(main) or remote (origin/main) branch. Rows below can differ.",
 		}
 	}
 	if m.focusedRef() != "" {

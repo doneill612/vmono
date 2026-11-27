@@ -100,11 +100,11 @@ func TestSessionPromptBuildsOnAPickedBranch(t *testing.T) {
 	d.key("right", "n")
 	d.typeText("child")
 	d.key("tab", "tab", "space") // the build on field opens the picker
-	d.has("build on a remote branch", "start from each member's base")
+	d.has("build on a branch", "start from each member's base")
 	d.eventually(func() bool { return containsView(d, "parent") }, "the fetched branch")
 	d.typeText("parent")
 	d.key("enter")
-	d.has("build on: parent  (alpha)", "alpha  parent", "base (origin/HEAD), lacks that branch")
+	d.has("build on: origin/parent  in alpha", "alpha  origin/parent", "base (origin/HEAD), lacks that branch")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 	if got := head(t, env, "child", "alpha"); got != tip {
@@ -138,9 +138,9 @@ func TestSessionPromptBuildsEachMemberOnItsOwnChoice(t *testing.T) {
 
 	d.key("tab")
 	pickBranch(d, "second")
-	d.has("beta   second")
+	d.has("beta   origin/second")
 	d.key("space", "enter") // and back to following build on
-	d.has("beta   parent")
+	d.has("beta   origin/parent")
 	pickBranch(d, "second")
 
 	d.key("enter")
@@ -150,6 +150,77 @@ func TestSessionPromptBuildsEachMemberOnItsOwnChoice(t *testing.T) {
 	}
 	if got := head(t, env, "child", "beta"); got != second {
 		t.Errorf("beta starts at %s, want %s", got, second)
+	}
+}
+
+// divergeBranch leaves branch of src, which must be checked out, one commit
+// ahead of its remote copy and one behind it.
+func divergeBranch(t *testing.T, src, branch string) (local, remote string) {
+	t.Helper()
+	remote = pushBranch(t, src, branch)
+	testutil.Git(t, src, "commit", "--quiet", "--allow-empty", "-m", "unpushed")
+	return testutil.Git(t, src, "rev-parse", "HEAD"), remote
+}
+
+// TestSessionPromptTellsALocalBranchFromTheRemotes covers the two rows a
+// branch has once the local one differs: each is exactly what it says.
+func TestSessionPromptTellsALocalBranchFromTheRemotes(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	a := env.NewSource(t, "alpha")
+	seed(t, env, "pay", a)
+	local, remote := divergeBranch(t, a, "main")
+
+	for session, tc := range map[string]struct {
+		moves int
+		shown string
+		want  string
+	}{
+		"onlocal":  {0, "build on: main (local)  in alpha", local},
+		"onremote": {1, "build on: origin/main  in alpha", remote},
+	} {
+		d := newDriver(t, env, "")
+		d.key("right", "n")
+		d.typeText(session)
+		d.key("tab", "tab", "space")
+		d.eventually(func() bool { return !containsView(d, "fetching") }, "the fetch")
+		d.typeText("main")
+		d.has("1 ahead, 1 behind origin/main", "origin/main")
+		for range tc.moves {
+			d.key("down")
+		}
+		d.key("enter")
+		d.has(tc.shown)
+		d.key("enter")
+		d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+		if got := head(t, env, session, "alpha"); got != tc.want {
+			t.Errorf("%s starts at %s, want %s", session, got, tc.want)
+		}
+	}
+}
+
+func TestSessionPromptChecksAReferenceOutAtALocalBranch(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	a, lib := env.NewSource(t, "alpha"), env.NewSource(t, "lib")
+	seedWithRefs(t, env, "pay", []string{a}, []string{lib})
+	local, _ := divergeBranch(t, lib, "main")
+	d := newDriver(t, env, "")
+
+	d.key("right", "n")
+	d.typeText("work")
+	d.key("tab", "tab", "tab", "tab") // prefix, build on, alpha, lib
+	pickBranch(d, "main")
+	d.has("read-only lib    main (local)")
+	d.key("space", "enter") // none empties it again
+	d.has("origin/HEAD")
+	d.lacks("(local)")
+	pickBranch(d, "main")
+	d.key("enter")
+	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+	dir := filepath.Join(env.PackageRoot, "pay", "work", "_ref", "lib")
+	if got := testutil.Git(t, dir, "rev-parse", "HEAD"); got != local {
+		t.Errorf("lib is at %s, want the local branch %s", got, local)
 	}
 }
 
@@ -202,11 +273,11 @@ func TestSessionPromptAsksBeforeWorkingOnARemoteBranch(t *testing.T) {
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Work on that branch?") }, "the question")
 	d.has(`Branch "feat/x" is already on the remote of alpha.`,
-		"alpha continues it there, so it is not built on parent.",
-		"beta does not have it, and starts a new branch of that name on parent.")
+		"alpha continues it there, so it is not built on origin/parent.",
+		"beta does not have it, and starts a new branch of that name on origin/parent.")
 
 	d.key("n") // back to the form, as it was, with nothing made
-	d.has("new session", "feat/x", "build on: parent", "Names this piece of work")
+	d.has("new session", "feat/x", "build on: origin/parent", "Names this piece of work")
 	if _, err := os.Stat(filepath.Join(env.PackageRoot, "pay", "x")); !os.IsNotExist(err) {
 		t.Error("nothing should be made")
 	}
@@ -245,11 +316,11 @@ func TestSessionPromptPicksWhatAReferenceIsCheckedOutAt(t *testing.T) {
 	d.has("press space to pick")
 	d.key(" ")
 	d.eventually(func() bool { return containsView(d, "feat/api") }, "the fetched branch")
-	d.has("remote branch for lib", "none: the package's ref")
+	d.has("branch for lib", "none: the package's ref")
 	d.lacks("feat/other")
 	d.typeText("feat")
 	d.key("enter")
-	d.has("new session", "read-only lib        feat/api")
+	d.has("new session", "read-only lib        origin/feat/api")
 	d.key("tab")
 	d.typeText("v1")
 	d.key("enter")

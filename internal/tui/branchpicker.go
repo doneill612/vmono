@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -24,14 +25,13 @@ type (
 		fetched bool
 	}
 	// branchPickedMsg reports what was chosen to the prompt that opened the
-	// picker: a branch and the members whose remote has it, or base for the
-	// member's own base, or neither for the row that chooses nothing.
+	// picker: a branch, or base for the member's own base, or neither for the
+	// row that chooses nothing.
 	branchPickedMsg struct {
-		owner   *sessionPrompt
-		target  pickTarget
-		branch  string
-		base    bool
-		members []string
+		owner  *sessionPrompt
+		target pickTarget
+		pick   pickedBranch
+		base   bool
 	}
 )
 
@@ -45,22 +45,73 @@ type pickTarget struct {
 	reference bool
 }
 
-// branchChoice is one row of the picker: a branch merged across the members,
-// or with no branch, the choice of nothing or of the member's base.
+// branchChoice is one row of the picker: a branch merged across the members
+// that have it, or with no branch, the choice of nothing or of the member's
+// base. A local branch and the remote's of the same name are separate rows.
 type branchChoice struct {
-	branch           string
-	base             bool
-	members, missing []string
-	when             time.Time
+	pickedBranch
+	base    bool
+	missing []string
+	when    time.Time
+	// apart holds the members whose local branch differs from their remote's.
+	apart []divergence
 }
 
-// branchPicker is the dialog that chooses a branch on the members' remotes for
-// a new session to build its branches on, or to check a reference member out
-// at. Branches of the same name are one row, saying which members
-// have it; those most members have come first, then the most
-// recent. It opens on what the last fetch saw and fetches meanwhile, so it is
-// usable at once and stays usable offline: a member that cannot be fetched or
-// listed is named in a notice and never blocks a choice.
+// divergence is how far a member's local branch is from counterpart, the branch
+// of the same name on its remote.
+type divergence struct {
+	member, counterpart string
+	ahead, behind       int
+}
+
+// String words the distance, as in "2 ahead, 3 behind origin/main". The row
+// already names the branch, so a long counterpart is cut to its remote.
+func (d divergence) String() string {
+	if remote, _, ok := strings.Cut(d.counterpart, "/"); ok && len(d.counterpart) > 24 {
+		d.counterpart = remote
+	}
+	switch {
+	case d.behind == 0:
+		return fmt.Sprintf("%d ahead of %s", d.ahead, d.counterpart)
+	case d.ahead == 0:
+		return fmt.Sprintf("%d behind %s", d.behind, d.counterpart)
+	}
+	return fmt.Sprintf("%d ahead, %d behind %s", d.ahead, d.behind, d.counterpart)
+}
+
+// marker warns that the local branch of a row is not what the remote has, so
+// that choosing it is a choice. It is "" when every member's is level.
+func (ch branchChoice) marker() string {
+	if len(ch.apart) == 0 {
+		return ""
+	}
+	first := ch.apart[0]
+	alike := len(ch.apart) == len(ch.members)
+	for _, d := range ch.apart {
+		alike = alike && d.counterpart == first.counterpart && d.ahead == first.ahead && d.behind == first.behind
+	}
+	switch {
+	case alike:
+		return first.String()
+	case len(ch.apart) == 1:
+		return first.member + ": " + first.String()
+	}
+	var names []string
+	for _, d := range ch.apart {
+		names = append(names, d.member)
+	}
+	return "differs from the remote in " + strings.Join(names, ", ")
+}
+
+// branchPicker is the dialog that chooses a branch for a new session to build
+// its branches on, or to check a reference member out at. It lists the members'
+// local branches and those on their remotes, a remote one in its own colour and
+// under its remote's name. A branch is one row, saying which members have it. A
+// local row says how far it is from the remote's when they differ. Names most
+// members have come first, then the most recent. It opens on what the last fetch
+// saw and fetches meanwhile, so it is usable at once and stays usable offline: a
+// member that cannot be fetched or listed is named in a notice and never blocks
+// a choice.
 type branchPicker struct {
 	owner  *sessionPrompt
 	target pickTarget
@@ -106,7 +157,7 @@ func (m *branchPicker) Init() tea.Cmd {
 // load lists the branches, after a fetch when asked, off the UI goroutine.
 func (m *branchPicker) load(fetch bool) tea.Cmd {
 	return func() tea.Msg {
-		return branchListMsg{owner: m, list: m.c.RemoteBranches(m.p, m.target.member, fetch), fetched: fetch}
+		return branchListMsg{owner: m, list: m.c.ListBranches(m.p, m.target.member, fetch), fetched: fetch}
 	}
 }
 
@@ -114,11 +165,11 @@ func (m *branchPicker) load(fetch bool) tea.Cmd {
 func (m *branchPicker) Title() string {
 	switch {
 	case m.target.reference:
-		return "remote branch for " + m.target.member
+		return "branch for " + m.target.member
 	case m.target.member != "":
 		return "build " + m.target.member + " on"
 	}
-	return "build on a remote branch"
+	return "build on a branch"
 }
 
 // Crumb implements screen. The dialog adds no breadcrumb.
@@ -128,13 +179,15 @@ func (m *branchPicker) Crumb() string { return "" }
 func (m *branchPicker) Hints() []hint { return nil }
 
 // receive merges the members' branches into rows, keeping the highlighted
-// branch under the cursor when rows arrive or move.
+// branch under the cursor when rows arrive or move. Branches of one name stay
+// together, the local one first; the names most members have come first, then
+// the most recent.
 func (m *branchPicker) receive(list []core.MemberBranches) {
 	var selected branchChoice
 	if m.cursor < len(m.shown) {
 		selected = m.shown[m.cursor]
 	}
-	byName := map[string]*branchChoice{}
+	byRef := map[string]*branchChoice{}
 	var unfetched, unlisted []string
 	for _, mb := range list {
 		if mb.ListErr != nil {
@@ -143,38 +196,60 @@ func (m *branchPicker) receive(list []core.MemberBranches) {
 			unfetched = append(unfetched, mb.Member)
 		}
 		for _, b := range mb.Branches {
-			if b.Name == m.exclude {
+			if b.Branch == m.exclude {
 				continue
 			}
-			ch := byName[b.Name]
+			ch := byRef[b.Ref]
 			if ch == nil {
-				ch = &branchChoice{branch: b.Name}
-				byName[b.Name] = ch
+				ch = &branchChoice{pickedBranch: pickedBranch{name: b.Name, branch: b.Branch, ref: b.Ref, remote: b.Remote}}
+				byRef[b.Ref] = ch
 			}
 			ch.members = append(ch.members, mb.Member)
 			if b.When.After(ch.when) {
 				ch.when = b.When
 			}
+			if b.Ahead+b.Behind > 0 {
+				ch.apart = append(ch.apart, divergence{member: mb.Member, counterpart: b.Counterpart, ahead: b.Ahead, behind: b.Behind})
+			}
 		}
 	}
+	// A name ranks by the widest and the latest of its rows.
+	type rank struct {
+		members int
+		when    time.Time
+	}
+	ranks := map[string]rank{}
 	m.all = nil
-	for _, ch := range byName {
+	for _, ch := range byRef {
 		for _, mb := range list {
 			if !contains(ch.members, mb.Member) {
 				ch.missing = append(ch.missing, mb.Member)
 			}
 		}
+		r := ranks[ch.branch]
+		r.members = max(r.members, len(ch.members))
+		if ch.when.After(r.when) {
+			r.when = ch.when
+		}
+		ranks[ch.branch] = r
 		m.all = append(m.all, *ch)
 	}
 	sort.Slice(m.all, func(i, j int) bool {
 		a, b := m.all[i], m.all[j]
-		if len(a.members) != len(b.members) {
-			return len(a.members) > len(b.members)
+		if a.branch != b.branch {
+			ra, rb := ranks[a.branch], ranks[b.branch]
+			if ra.members != rb.members {
+				return ra.members > rb.members
+			}
+			if !ra.when.Equal(rb.when) {
+				return ra.when.After(rb.when)
+			}
+			return a.branch < b.branch
 		}
-		if !a.when.Equal(b.when) {
-			return a.when.After(b.when)
+		if a.remote != b.remote {
+			return b.remote
 		}
-		return a.branch < b.branch
+		return a.name < b.name
 	})
 	m.all = append(m.fixed(), m.all...)
 	m.notices = nil
@@ -186,7 +261,7 @@ func (m *branchPicker) receive(list []core.MemberBranches) {
 	}
 	m.refilter()
 	for i, ch := range m.shown {
-		if ch.branch == selected.branch && ch.base == selected.base {
+		if ch.ref == selected.ref && ch.base == selected.base {
 			m.cursor = i
 		}
 	}
@@ -212,7 +287,7 @@ func (m *branchPicker) refilter() {
 	rows := m.all[len(m.fixed()):]
 	hay := make([]string, len(rows))
 	for i, ch := range rows {
-		hay[i] = ch.branch
+		hay[i] = ch.name
 	}
 	m.shown = nil
 	for _, match := range fuzzy.Find(q, hay) {
@@ -263,7 +338,7 @@ func (m *branchPicker) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			ch := m.shown[m.cursor]
 			m.closing = true
 			return m, tea.Sequence(pop(m), func() tea.Msg {
-				return branchPickedMsg{owner: m.owner, target: m.target, branch: ch.branch, base: ch.base, members: ch.members}
+				return branchPickedMsg{owner: m.owner, target: m.target, pick: ch.pickedBranch, base: ch.base}
 			})
 		}
 	default:
@@ -276,6 +351,36 @@ func (m *branchPicker) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// fitRow cuts the parts of a picker row to width columns. What is left of
+// detail gives way first, then the marker; the branch is kept whole while it
+// fits on its own.
+func fitRow(width int, label, marker, detail string) (string, string, string) {
+	cut := func(s string, n int) string {
+		if lipgloss.Width(s) <= n {
+			return s
+		}
+		if n < 4 {
+			return ""
+		}
+		return fit(s, n, false)
+	}
+	mark := 0
+	if marker != "" {
+		mark = 2 + lipgloss.Width(marker)
+	}
+	// Half the row is the most the detail takes, and it keeps two spaces
+	// before it.
+	room := min(width/2, width-lipgloss.Width(label)-mark-2)
+	if room < 8 {
+		room = 0
+	}
+	detail = cut(detail, room)
+	left := width - lipgloss.Width(detail) - 2
+	label = cut(label, max(left, 4))
+	marker = cut(marker, left-lipgloss.Width(label)-2)
+	return label, marker, detail
 }
 
 // choiceDetail words what stands right of a branch: the members that have it,
@@ -314,7 +419,7 @@ func (m *branchPicker) View(w, h int) string {
 	}
 	for i := m.offset; i < len(m.shown) && i < m.offset+rows; i++ {
 		ch := m.shown[i]
-		label := ch.branch
+		label := ch.name
 		switch {
 		case label != "":
 		case ch.base:
@@ -326,16 +431,21 @@ func (m *branchPicker) View(w, h int) string {
 		default:
 			label = "none: start from each member's base"
 		}
-		detail := choiceDetail(ch)
-		if detail != "" {
-			detail = fit(detail, max(min(lipgloss.Width(detail), inner/2), 4), false)
+		label, marker, detail := fitRow(inner-4, label, ch.marker(), choiceDetail(ch))
+		used := lipgloss.Width(label) + lipgloss.Width(detail)
+		if marker != "" {
+			used += 2 + lipgloss.Width(marker)
 		}
-		dw := lipgloss.Width(detail)
-		label = fit(label, max(min(lipgloss.Width(label), inner-dw-6), 4), false)
-		gap := strings.Repeat(" ", max(inner-4-lipgloss.Width(label)-dw, 1))
+		gap := strings.Repeat(" ", max(inner-4-used, 2))
 		cursor := "  "
-		if i == m.cursor {
+		switch {
+		case i == m.cursor:
 			cursor, label = styleSelected.Render("▸ "), styleSelected.Render(label)
+		case ch.remote:
+			label = styleRemote.Render(label)
+		}
+		if marker != "" {
+			label += "  " + styleWarn.Render(marker)
 		}
 		b.WriteString(" " + cursor + label + gap + styleDim.Render(detail) + "\n")
 	}

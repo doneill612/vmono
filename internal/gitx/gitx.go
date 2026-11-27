@@ -740,31 +740,47 @@ func UpstreamOf(repo, branch string) (Tracking, bool) {
 	return newTracking(tracked{ref: ref, remote: strings.TrimSpace(remote)})
 }
 
-// RemoteBranch is a branch of a remote as of the last fetch.
-type RemoteBranch struct {
-	// Name is the branch's name on the remote, without the remote's.
+// ListedBranch is a branch as listed, of a repo or of one of its remotes.
+type ListedBranch struct {
+	// Name is the branch's name, without a remote's.
 	Name string
+	// Tip is the commit it is at.
+	Tip string
 	// When is the time of its latest commit.
 	When time.Time
 }
 
 // RemoteBranches lists the branches of remote as of the last fetch, the one
 // with the most recent commit first.
-func RemoteBranches(repo, remote string) ([]RemoteBranch, error) {
-	prefix := "refs/remotes/" + remote + "/"
-	out, err := run(repo, "for-each-ref", "--sort=-committerdate", "--format=%(committerdate:unix) %(refname)", prefix)
+func RemoteBranches(repo, remote string) ([]ListedBranch, error) {
+	return listBranches(repo, "refs/remotes/"+remote+"/")
+}
+
+// LocalBranches lists the branches of repo itself, the one with the most recent
+// commit first.
+func LocalBranches(repo string) ([]ListedBranch, error) {
+	return listBranches(repo, "refs/heads/")
+}
+
+// listBranches lists the branches whose refs begin with prefix, leaving out a
+// remote's HEAD.
+func listBranches(repo, prefix string) ([]ListedBranch, error) {
+	out, err := run(repo, "for-each-ref", "--sort=-committerdate", "--format=%(committerdate:unix) %(objectname) %(refname)", prefix)
 	if err != nil {
 		return nil, err
 	}
-	var list []RemoteBranch
+	var list []ListedBranch
 	for _, line := range strings.Split(out, "\n") {
-		when, ref, _ := strings.Cut(strings.TrimSpace(line), " ")
-		name := strings.TrimPrefix(ref, prefix)
+		f := strings.SplitN(strings.TrimSpace(line), " ", 3)
+		if len(f) != 3 {
+			continue
+		}
+		name := strings.TrimPrefix(f[2], prefix)
 		if name == "" || name == "HEAD" {
 			continue
 		}
-		sec, _ := strconv.ParseInt(when, 10, 64)
-		list = append(list, RemoteBranch{Name: name, When: time.Unix(sec, 0)})
+		sec, _ := strconv.ParseInt(f[0], 10, 64)
+		list = append(list, ListedBranch{Name: name, Tip: f[1], When: time.Unix(sec, 0)})
 	}
 	return list, nil
 }

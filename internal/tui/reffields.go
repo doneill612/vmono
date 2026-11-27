@@ -15,12 +15,14 @@ import (
 type refFields struct {
 	members []string
 	inputs  []textinput.Model
+	// picked is the branch last chosen in the picker for each member.
+	picked map[string]pickedBranch
 }
 
 // newRefFields builds an empty field for each member, labeled read-only with the
 // member's name in a column of the given width.
 func newRefFields(width int, members []string) refFields {
-	f := refFields{members: members}
+	f := refFields{members: members, picked: map[string]pickedBranch{}}
 	for _, name := range members {
 		in := newTextInput()
 		in.Prompt = fmt.Sprintf("read-only %-*s  ", width, name)
@@ -71,33 +73,53 @@ func (f *refFields) update(i int, msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// set fills in the named member's field.
-func (f *refFields) set(member, text string) {
+// pick fills in the named member's field with a branch chosen in the picker,
+// or empties it for none.
+func (f *refFields) pick(member string, branch pickedBranch) {
 	for i, name := range f.members {
 		if name == member {
-			f.inputs[i].SetValue(text)
+			f.inputs[i].SetValue(branch.name)
 			f.inputs[i].CursorEnd()
+			f.picked[member] = branch
 		}
 	}
 }
 
-// values returns what was typed for each member, leaving out empty fields, which
-// stand for the package's ref.
+// standing is the picked branch field i still holds. Typing over it makes the
+// field's text what counts.
+func (f *refFields) standing(i int) (pickedBranch, bool) {
+	p, ok := f.picked[f.members[i]]
+	return p, ok && p.ref != "" && f.inputs[i].Value() == p.name
+}
+
+// values returns what each member is to be checked out at, leaving out empty
+// fields, which stand for the package's ref: the exact ref of a picked branch,
+// and otherwise what was typed.
 func (f *refFields) values() map[string]string {
 	out := map[string]string{}
 	for i, name := range f.members {
-		if v := strings.TrimSpace(f.inputs[i].Value()); v != "" {
+		if p, ok := f.standing(i); ok {
+			out[name] = p.ref
+		} else if v := strings.TrimSpace(f.inputs[i].Value()); v != "" {
 			out[name] = v
 		}
 	}
 	return out
 }
 
-// view renders the fields, one per line.
+// view renders the fields, one per line. A field holding a pick shows it the
+// way the build on rows do, until it is typed over.
 func (f *refFields) view() string {
 	var b strings.Builder
-	for _, in := range f.inputs {
-		b.WriteString(" " + in.View() + "\n")
+	for i, in := range f.inputs {
+		line := in.View()
+		if p, ok := f.standing(i); ok {
+			line = in.PromptStyle.Render(in.Prompt) + p.render(false)
+			if in.Focused() {
+				line = styleSelected.Render(in.Prompt) + p.render(false) + styleDim.Render("  space to pick")
+			}
+		}
+		b.WriteString(" " + line + "\n")
 	}
 	return b.String()
 }
