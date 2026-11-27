@@ -36,8 +36,8 @@ var Entries = []Entry{
 	{
 		Term:  "active",
 		Short: "a member you change, commit to and push",
-		Long: "A member checked out on a branch of the session's own. The agent may edit " +
-			"it and commit to it, and you push it.",
+		Long: "A member checked out on the session's branch. The agent may edit it and " +
+			"commit to it, and you push it.",
 	},
 	{
 		Term:  "read-only",
@@ -45,6 +45,14 @@ var Entries = []Entry{
 		Long: "A reference member, checked out under _ref/ with no branch. It is context " +
 			"to read. It is checked out at the package's ref (a branch, tag or commit), " +
 			"or at what a session names with --from MEMBER=REF.",
+	},
+	{
+		Term:  "branch",
+		Short: "the session's name, which active members are on",
+		Long: "The one branch a session's active members are on, and what you push: the " +
+			"session's name, after the prefix and a slash if there is one. When it is " +
+			"already on a remote, vmono asks before working on it there (--track on the " +
+			"command line).",
 	},
 	{
 		Term:  "base",
@@ -56,15 +64,9 @@ var Entries = []Entry{
 	{
 		Term:  "build on",
 		Short: "start new branches somewhere other than the base",
-		Long: "--from, when starting a session: build the new branch on something other " +
-			"than the base, for work stacked on a branch that has not merged yet.",
-	},
-	{
-		Term:  "work on",
-		Short: "continue a branch already on the remote",
-		Long: "--track, when starting a session: work on a branch that is already on the " +
-			"remote, such as a teammate's or an open pull request's, in place of " +
-			"starting a new one.",
+		Long: "--from, when starting a session: start new branches on something other " +
+			"than the base, for work stacked on a branch that has not merged yet. It can " +
+			"differ for each member, and is never the session's own branch.",
 	},
 	{
 		Term:  "prefix",

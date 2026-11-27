@@ -104,7 +104,7 @@ func TestHelpIsAModalOverTheScreen(t *testing.T) {
 	d.has("help", "GLOBAL", "payments") // the table stays visible underneath
 	d.has("what vmono's terms mean")
 	d.key("t")
-	d.has("TERMS", "read-only", "build on", "work on")
+	d.has("TERMS", "read-only", "branch", "build on")
 	d.lacks("GLOBAL")
 	d.key("t")
 	d.has("GLOBAL")
