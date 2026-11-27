@@ -45,7 +45,7 @@ None of which you have to use.
 | `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, update, copy path, push, delete |
 | `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
-| `n` | Start a new session: a name, and optionally a prefix, a branch, a remote branch to work on (`work on`, which is `--track`, also `ctrl+t`) or to build on (`build on`, which is `--from`), a branch per active member, and a ref per read-only member (typed, or `space` to pick a remote branch). Empty fields show the branch or ref they will use, and the dialog explains the field you are in |
+| `n` | Start a new session: a name and optionally a prefix, which together are the branch of every active member; `build on`, which is `--from`, to start the new branches on a remote branch instead of each member's base, with a row per member to differ; and a ref per read-only member. `space` picks a remote branch (a ref can be typed too). If the branch is already on a remote, you are asked whether to work on it; no returns to the form with nothing created |
 | `P` | [Push](sessions.md#pushing) the session: shows where each member's branch goes, what is uncommitted and left out, or what blocks it, then `y` pushes. Never forced |
 | `m` / `d` | Members of the session / describe it |
 | `u` | [Update](sessions.md#updating) the session: rebase branches that are not pushed, and merge what is new into those that are |

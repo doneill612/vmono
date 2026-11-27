@@ -10,8 +10,8 @@ Every read command takes `--json`. Anything that could discard work refuses unle
 | `vmono help concepts` | What package, session, member and the other [terms](concepts.md) mean |
 | `vmono init [--source-root P]... [--package-root P]` | Write the global config without prompts |
 | `vmono ls` / `vmono repos` | List packages / known repos |
-| `vmono new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--prefix P] [--branch [MEMBER=]B]... [--track [MEMBER=]B]... [--from [MEMBER=]REF]... [--reuse-branch]]` | Define a package, and optionally start its first session |
-| `vmono session new [pkg] <name> [--prefix P] [--branch [MEMBER=]B]... [--track [MEMBER=]B]... [--from [MEMBER=]REF]... [--reuse-branch]` | Start a session: a worktree of every member, each active one on a branch. See [Starting a session](sessions.md#starting-a-session) |
+| `vmono new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--prefix P] [--from [MEMBER=]REF]... [--track] [--reuse-branch]]` | Define a package, and optionally start its first session |
+| `vmono session new [pkg] <name> [--prefix P] [--from [MEMBER=]REF]... [--track] [--reuse-branch]` | Start a session: a worktree of every member, the active ones all on one branch. See [Starting a session](sessions.md#starting-a-session) |
 | `vmono session ls [pkg]` | List a package's sessions and whether each is in progress, pushed or merged |
 | `vmono session update [pkg/session] [--member NAME]... [--no-fetch] [--dry-run] [--json]` | Fetch, then rebase each branch that is not pushed onto its base, and merge what is new into each that is. See [Updating](sessions.md#updating) |
 | `vmono session review [pkg/session] [--member NAME]... [--json]` | Show what a push would publish, changing nothing (the read-only form of `session push`) |
