@@ -18,14 +18,14 @@ A session is one piece of work on a [package](concepts.md). Every active member 
 
 | To | Pass |
 | --- | --- |
-| Name the branch | the session's name: `token-refresh` is on `token-refresh`. Names take letters, digits, hyphens and underscores |
+| Name the branch | the session's name: `token-refresh` is on `token-refresh`. Names take letters, digits, hyphens and underscores, and start and end with a letter or digit |
 | Put a prefix in front | `--prefix feat`: `feat/token-refresh` |
 | Work on that branch when it is already on a remote, such as a teammate's or an open pull request's | `--track`, or answer yes in the TUI |
 | Build on something other than the base | `--from REF` or `--from MEMBER=REF` |
 | Read a reference member at something other than the package's ref | `--from MEMBER=REF`, or its `read-only` field in the TUI |
 | Take up a local branch that already exists | `--reuse-branch` |
 
-Every new session fetches the sources first, even with `fetch_on_create` off, to learn whether its branch is already on a remote. If it is, nothing is created until you say to work on it: the TUI asks, and the command line needs `--track`. So to continue `fix/PLAT-412`, start the session `PLAT-412` with the prefix `fix`.
+Every new session fetches the sources first, even with `fetch_on_create` off, to learn whether its branch is already on a remote. If it is, nothing is created until you say to work on it: the TUI asks, and the command line needs `--track`. So to continue `fix/PLAT-412`, start the session `PLAT-412` with the prefix `fix`. A branch whose last part holds anything a session name cannot, such as the dot in `release/v1.2`, cannot be worked on in a session.
 
 Working on it checks the branch out itself, tracking the remote one. A local copy is brought up to it when it is only behind. A member whose remote lacks the branch gets a new one of that name, with a warning, and `--track` fails (exit `3`) when no member's remote has it. A remote branch that differs from the session's only in case is refused: spell the name and prefix like it. A branch that is checked out elsewhere, your source repo included, cannot be in a session at the same time, so switch the source to another branch first.
 
@@ -143,6 +143,8 @@ There is no command that merges into a local branch. To do that yourself, update
 The vmono skill teaches the agent to commit in every member, preview with `vmono session review`, and report. It runs `vmono session push` only when you ask (in Claude Code, `/vmono:push` asks for you), and Claude Code and OpenCode still ask for permission. It never pushes with `git push`, forces, rebases commits that were pushed, deletes a branch, or removes a session; it tells you when a session is merged and how to remove it. See [What your harness enforces](safety.md#what-your-harness-enforces).
 
 ## Sessions and packages from earlier versions
+
+Earlier versions let a new session name its branch, one for each member if need be. Now every active member of a new session is on `[PREFIX/]SESSION`. `--branch` is gone and `--track` takes no value, so a script that passed `--track fix/timeout` now starts the session `timeout` with `--prefix fix --track`. In the TUI, the `branch` and `track` fields are gone, `from` is called `build on`, and you are asked about a branch that is already on a remote. Sessions made with other branch names work as they are.
 
 Earlier versions kept a session's work on a private branch and landed it on another with `vmono session finish`. Such a session works as it is, and pushes its own branch under the name it has. `vmono doctor --fix` converts it: the file is rewritten, an upstream of `origin/main` that git gave the branch is dropped, and any landing branch with work that is on no remote is listed, since vmono no longer pushes those. A `post_finish` hook is ignored with a notice; use `post_push`. The `branch_prefix` setting is no longer read; pass `--prefix` when starting a session.
 

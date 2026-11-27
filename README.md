@@ -54,14 +54,14 @@ vmono open project/token-refresh   # launches your default harness at the sessio
 vmono session new project spike    # more work on the same repos: a new session
 ```
 
-Every member works on a branch of its own repo. When the work is done, `vmono session push` publishes the branches for you to open pull requests from, and `vmono session rm` clears the session away once they merge. Nothing is pushed unless you ask.
+Every active member works on the session's branch, in its own repo. When the work is done, `vmono session push` publishes the branches for you to open pull requests from, and `vmono session rm` clears the session away once they merge. Nothing is pushed unless you ask.
 
 Add `eval "$(vmono shell-init zsh)"` (or `bash`, `fish`, `pwsh`) to your shell rc for a `vcd <pkg>[/session]` function.
 
 ## Key ideas
 
 - **Package**: the members (source repos), a purpose, context, notes and a role per member. Defined once, shared by every session.
-- **Session**: one piece of work: a worktree of every member, each on a branch you push. A harness opens it.
+- **Session**: one piece of work: a worktree of every member, the active ones all on one branch, which you push. A harness opens it.
 - **Active members** are checked out on a branch and can be edited; **reference members** are detached at a fixed ref under `_ref/` and are read-only.
 
 See [Concepts](docs/concepts.md) for the full vocabulary and what a package looks like on disk.
