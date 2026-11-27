@@ -52,7 +52,9 @@ func TestSessionEncodeRoundTrip(t *testing.T) {
 
 func TestSessionValidate(t *testing.T) {
 	cases := map[string]func(*Session){
-		"bad name":      func(s *Session) { s.Name = "Bad_Name" },
+		"spaced name":   func(s *Session) { s.Name = "bad name" },
+		"leading mark":  func(s *Session) { s.Name = "-bad" },
+		"trailing mark": func(s *Session) { s.Name = "bad_" },
 		"dotted name":   func(s *Session) { s.Name = ".vmono" },
 		"bad package":   func(s *Session) { s.Package = "" },
 		"empty branch":  func(s *Session) { s.Branch = " " },
@@ -68,6 +70,13 @@ func TestSessionValidate(t *testing.T) {
 	}
 	if err := sampleSession().Validate(); err != nil {
 		t.Errorf("valid session rejected: %v", err)
+	}
+	for _, name := range []string{"PLAT-412", "user_auth", "a--b__c"} {
+		s := sampleSession()
+		s.Name = name
+		if err := s.Validate(); err != nil {
+			t.Errorf("%s rejected: %v", name, err)
+		}
 	}
 }
 

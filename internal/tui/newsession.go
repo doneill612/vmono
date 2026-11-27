@@ -313,7 +313,7 @@ func hyphenateSpaces(k tea.KeyMsg) tea.KeyMsg {
 // submit validates the name and starts the create on the progress screen.
 func (m *sessionPrompt) submit() (screen, tea.Cmd) {
 	name := strings.TrimSpace(m.name.Value())
-	if err := manifest.ValidateName(name); err != nil {
+	if err := manifest.ValidateSessionName(name); err != nil {
 		m.msg = err.Error()
 		return m, m.setFocus(0)
 	}
@@ -323,9 +323,12 @@ func (m *sessionPrompt) submit() (screen, tea.Cmd) {
 		m.msg = err.Error()
 		return m, nil
 	}
-	if names, _ := p.Sessions(); contains(names, name) {
-		m.msg = fmt.Sprintf("%s already has a session named %q", pkg, name)
-		return m, m.setFocus(0)
+	names, _ := p.Sessions()
+	for _, other := range names {
+		if strings.EqualFold(other, name) {
+			m.msg = fmt.Sprintf("%s already has a session named %q", pkg, other)
+			return m, m.setFocus(0)
+		}
 	}
 	opts := m.options()
 	return m, goTo(m, newProgress(m.e, operation{

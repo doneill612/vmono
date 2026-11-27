@@ -135,6 +135,18 @@ func TestCreateSessionRefusesBranchesItCannotWorkOn(t *testing.T) {
 	refused(t, p, "main", "named main", err, "--prefix")
 }
 
+func TestSessionNamesDifferingOnlyInCaseAreRefused(t *testing.T) {
+	c, env := newCore(t)
+	p := mustPackage(t, c, request("cases", []string{env.NewSource(t, "alpha")}, nil))
+	if _, err := c.CreateSession(p, "Work_1", SessionOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.CreateSession(p, "work_1", SessionOptions{Prefix: "other"})
+	if err == nil || !strings.Contains(err.Error(), "differing only in case") {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestReusedBranchIsNotRecordedAsCreated(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")

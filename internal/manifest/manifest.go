@@ -130,6 +130,19 @@ type Manifest struct {
 	Notes   []Note    `toml:"note"`
 }
 
+// sessionNameRE is looser than slugRE: a session's name is the last part of its
+// branch, so it has to be able to match a branch someone else named.
+var sessionNameRE = regexp.MustCompile(`^[A-Za-z0-9]+([_-]+[A-Za-z0-9]+)*$`)
+
+// ValidateSessionName checks a session name: letters of either case, digits,
+// hyphens and underscores, starting and ending with a letter or digit.
+func ValidateSessionName(name string) error {
+	if !sessionNameRE.MatchString(name) {
+		return fmt.Errorf("invalid session name %q: use letters, digits, hyphens and underscores, starting and ending with a letter or digit", name)
+	}
+	return nil
+}
+
 // ValidateName checks a package or member name against the slug rules.
 func ValidateName(name string) error {
 	if !slugRE.MatchString(name) {

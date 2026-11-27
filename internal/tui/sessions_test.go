@@ -60,11 +60,11 @@ func TestSessionPromptValidatesAndOverridesBranch(t *testing.T) {
 	d.key("right", "n")
 	d.has("new session", "<session>")
 	d.key("enter") // empty name
-	d.has("invalid name")
-	d.typeText("Bad Name")
+	d.has("invalid session name")
+	d.typeText("bad.name")
 	d.key("enter")
-	d.has("invalid name")
-	for range "Bad Name" {
+	d.has("invalid session name")
+	for range "bad.name" {
 		d.key("backspace")
 	}
 	d.typeText("work") // already taken by the seeded session

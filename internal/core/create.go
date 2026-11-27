@@ -592,7 +592,7 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	if err := gitx.CheckVersion(); err != nil {
 		return nil, err
 	}
-	if err := manifest.ValidateName(name); err != nil {
+	if err := manifest.ValidateSessionName(name); err != nil {
 		return nil, err
 	}
 	if err := opts.check(p); err != nil {
@@ -601,6 +601,15 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	ms := opts.session(p, name)
 	if err := ms.Validate(); err != nil {
 		return nil, err
+	}
+	taken, err := p.Sessions()
+	if err != nil {
+		return nil, err
+	}
+	for _, other := range taken {
+		if other != name && strings.EqualFold(other, name) {
+			return nil, fmt.Errorf("package %s already has a session %q, and a name differing only in case would share its directory on some filesystems", p.Name, other)
+		}
 	}
 	dir := p.SessionDir(name)
 	if _, err := os.Stat(dir); err == nil {
