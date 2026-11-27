@@ -5,6 +5,7 @@
 A session is one piece of work on a [package](concepts.md). Every active member gets a worktree on a branch, and that branch is the result: it is what you push, and what you open a pull request from. This page covers a session's life: `new`, work, `push`, `rm`, with `update` whenever you need it.
 
 - [Starting a session](#starting-a-session)
+- [What a new branch starts from](#what-a-new-branch-starts-from)
 - [Pushing](#pushing)
 - [Updating](#updating)
 - [After your pull request merges](#after-your-pull-request-merges)
@@ -28,11 +29,35 @@ Every new session fetches the sources first, even with `fetch_on_create` off, to
 
 Working on it checks the branch out itself, tracking the remote one. A local copy is brought up to it when it is only behind. A member whose remote lacks the branch gets a new one of that name, with a warning, and `--track` fails (exit `3`) when no member's remote has it. A remote branch that differs from the session's only in case is refused: spell the name and prefix like it. A branch that is checked out elsewhere, your source repo included, cannot be in a session at the same time, so switch the source to another branch first.
 
-`--from` is for work stacked on a branch that has not merged. `--from REF` is for every active member that has it, and the rest start from their base; `--from MEMBER=REF` is for one. In the TUI, `build on` picks a remote branch for every member, and the row under it for each member picks another, or its base. It cannot be the session's own branch, and does not apply to a member that works on the branch from its remote. The session remembers it, measures your commits against it, and follows it on `update`.
+`--from` is for work stacked on a branch that has not merged. `--from REF` is for every active member that has it, and the rest start from their base; `--from MEMBER=REF` is for one. In the TUI, [`build on`](tui.md#the-new-session-dialog) picks a branch for every member, and the row under it for each member picks another, or its base. It cannot be the session's own branch, and does not apply to a member that works on the branch from its remote. The session remembers it, measures your commits against it, and follows it on `update`. Whether that is your local branch or the remote's depends on [how you name it](#what-a-new-branch-starts-from).
 
-For a reference member, `--from MEMBER=REF` is what it is checked out at in this session: a branch (local or remote, whichever is further ahead), a tag or a commit. Use it when your work depends on changes there that have not merged. `--from REF`, for every member, leaves reference members at the package's ref. The session remembers the ref, and `vmono sync --refs` moves a clean reference member to its newest commit. If the branch's remote copy is deleted, `sync --refs` returns the member to the package's ref once that has the branch's work, and leaves it where it is until then.
+For a reference member, `--from MEMBER=REF` is what it is checked out at in this session: a branch, named [the same ways](#what-a-new-branch-starts-from), a tag or a commit. Use it when your work depends on changes there that have not merged. `--from REF`, for every member, leaves reference members at the package's ref. The session remembers the ref, and `vmono sync --refs` moves a clean reference member to its newest commit. If the branch's remote copy is deleted, `sync --refs` returns the member to the package's ref once that has the branch's work, and leaves it where it is until then.
 
 A name is also refused if its branch is the one the work merges into, or if it already exists locally (without `--reuse-branch`; the TUI asks). Two packages that share a repo cannot have a session branch of the same name checked out at once; a prefix keeps them apart.
+
+## What a new branch starts from
+
+Your local branches and the ones on the remote are often at different commits. Every new session fetches first, but a fetch only updates what is known of the remote, such as `origin/main`. It never moves a local branch such as `main`. So what a new branch starts from depends on which of the two is named.
+
+| Named | The new branch starts at |
+| --- | --- |
+| Nothing, with the default base `origin/HEAD` | The remote's default branch, as just fetched |
+| Nothing, with a base such as `origin/develop` in the package | The remote's `develop`, as just fetched |
+| Nothing, with a base given as a plain name such as `develop` | **Your local** `develop`, which may be behind. It has to exist locally |
+| `origin/x`: the `origin/x` row in the TUI, or `--from origin/x` | The remote's `x`, as just fetched |
+| Your local `x`: the `x` row in the TUI, or `--from refs/heads/x` | Your local `x`, even when it is behind, with any commits you have not pushed |
+| `--from x`, a plain name on the command line | Whichever of local and remote `x` is further ahead, and your local one if each has commits the other lacks. When only one exists, that one |
+
+The first two rows are what you get by leaving `build on` empty, and are never affected by the state of your local branches.
+
+`update` follows the same choice for as long as the session is built on that branch: pick `origin/x` and it takes in what is pushed to `x`; pick your local `x` and it takes in what you commit to it, and nothing that is only on the remote.
+
+Building on a local branch with commits that were never pushed puts them in the session's branch. Once the session has commits of its own, pushing it publishes those commits too, and `vmono session review` counts them.
+
+Two things leave a new branch further back than the table says, each with a warning:
+
+- A source that cannot be fetched, for lack of a network or credentials, is used as of its last fetch.
+- A source with no `origin/HEAD` gives the default base as whatever the source repo has checked out.
 
 ## Pushing
 
@@ -53,13 +78,13 @@ Nothing is forced, and a branch is never pushed to the branch it is meant to mer
 
 ## Updating
 
-`vmono session update [pkg/session] [--member NAME]... [--no-fetch] [--dry-run]`, or `u` in the TUI, fetches and takes in what is new. Your local `main` is neither read nor moved.
+`vmono session update [pkg/session] [--member NAME]... [--no-fetch] [--dry-run]`, or `u` in the TUI, fetches and takes in what is new. Your local branches are never moved, and are read only where something is built on one: a base given as a plain name, or a session built on a [local branch](#what-a-new-branch-starts-from).
 
 | Branch | What update does |
 | --- | --- |
 | Not pushed | Rebases your commits onto the base. Nobody else has them |
 | Pushed | Merges its remote copy and then the base, fast-forwarding where it can, so pushing again never needs force |
-| Built on another branch with `--from` | Follows that branch; once it has merged, moves to the base, leaving its commits behind |
+| Built on another branch with `--from` | Follows that branch, local or remote as chosen; once it has merged, moves to the base, leaving its commits behind. A local branch that is only behind its remote copy does not count as merged |
 | Already merged | Leaves it alone |
 | Remote branch deleted | Skips it |
 | Its history, or the remote copy's, was rewritten | Skips it: merging would bring the old commits back |

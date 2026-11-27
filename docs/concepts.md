@@ -11,7 +11,7 @@
 | Reference member | Checked out detached under `_ref/`, at the package's `ref` or what a session names with `--from MEMBER=REF`. Read-only context, and shown as `read-only` in the TUI. |
 | Base | What a member's branch is built on and merges into: the `base` in the package manifest (default `origin/HEAD`), or what a session names with `--from`. Shown as `built on` in the TUI. |
 | Branch | The one branch a session's active members are on: the session's name, after the prefix if there is one. |
-| Build on | Start a session's new branches on something other than the base, per member if they differ: `--from`, or `build on` in the TUI. |
+| Build on | Start a session's new branches on something other than the base, per member if they differ: `--from`, or `build on` in the TUI. A local branch and the remote's are [separate choices](sessions.md#what-a-new-branch-starts-from). |
 | Prefix | What goes before the session's name, with a slash, in its branch: `--prefix`. |
 | Published | How far an active member's branch has got: no commits yet, commits to push, pushed, behind, diverged or merged. |
 | Overview | What an agent learned by exploring the members, recorded by `vmono package init`. Kept apart from the text you write. |

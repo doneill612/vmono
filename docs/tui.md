@@ -45,7 +45,7 @@ None of which you have to use.
 | `enter` | Open the menu: launch, launch with…, members, describe, sync, fetch, update, copy path, push, delete |
 | `o` | Launch the default harness in the session |
 | `l` | Pick a harness |
-| `n` | Start a new session: a name and optionally a prefix, which together are the branch of every active member; `build on`, which is `--from`, to start the new branches on a remote branch instead of each member's base, with a row per member to differ; and a ref per read-only member. `space` picks a remote branch (a ref can be typed too). If the branch is already on a remote, you are asked whether to work on it; no returns to the form with nothing created |
+| `n` | Start a new session: see [the new session dialog](#the-new-session-dialog) |
 | `P` | [Push](sessions.md#pushing) the session: shows where each member's branch goes, what is uncommitted and left out, or what blocks it, then `y` pushes. Never forced |
 | `m` / `d` | Members of the session / describe it |
 | `u` | [Update](sessions.md#updating) the session: rebase branches that are not pushed, and merge what is new into those that are |
@@ -62,6 +62,37 @@ None of which you have to use.
 Members, repos and harnesses have menus too (`enter`), with the same keys where they apply. The members preview shows what each branch is built on, its commits, and how far it is published or how it merged; a session's preview sums what is left to push. Sorting is only in the palette (`sort by name`, `sort by opened`, …); choosing the same column again reverses it.
 
 Creating a package returns to the packages screen; start a session from there (`enter`, then `New session`, or `→` then `n`) when you want one.
+
+## The new session dialog
+
+| Field | What it is |
+| --- | --- |
+| `session` | The name of this piece of work. A space types a hyphen |
+| `prefix` | Optional. Goes before the name, with a slash. Together they are the branch every active member is on |
+| `build on` | Optional. A branch every new branch starts on, in place of each member's base |
+| a row per active member | What that member starts on: `build on` unless you choose another branch for it, or its base |
+| `read-only` per reference member | What it is checked out at, in place of the package's ref |
+
+`tab` and `shift+tab` move between fields, the dialog explains the one you are in, `enter` starts the session and `esc` cancels. `space` on a `build on`, member or `read-only` field opens the branch picker; a `read-only` field also takes a typed branch, tag or commit.
+
+### Picking a branch
+
+The picker lists your local branches and the remote's as separate rows, since they are often at different commits:
+
+```text
+▸ none: start from each member's base
+  main          2 behind origin/main      alpha billing · 3d ago
+  origin/main                             alpha billing · 1h ago
+```
+
+- `origin/main`, in its own colour, is the remote's branch as of the fetch.
+- `main` is your local branch, exactly as it is. The dialog tags it `(local)` once picked.
+- A local row says how far it is from the remote's when they differ, for example `2 behind origin/main` or `1 ahead, 2 behind origin/main`. A member's name comes first when only that member differs.
+- A row says which members have the branch. Those without it start from their base.
+
+It opens on what the last fetch saw and fetches meanwhile, so it works offline too. Type to filter. [What a new branch starts from](sessions.md#what-a-new-branch-starts-from) covers what each choice does later, on `update` and `push`.
+
+`build on` cannot be the session's own branch, local or remote; the dialog says so as soon as the two match. If that branch is already on a remote, creating the session asks whether to work on it. Yes continues it there, and members without it get a new branch of that name. No returns to the dialog with nothing created. If the branch exists only locally, you are asked whether to reuse it.
 
 ## The repo finder
 
