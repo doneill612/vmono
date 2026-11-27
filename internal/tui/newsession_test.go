@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/doneill612/vmono/internal/testutil"
 )
 
@@ -37,6 +39,26 @@ func TestSessionPromptPrefixAndMemberBranches(t *testing.T) {
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 	if got := sessionBranches(t, env, "retry", "alpha", "beta"); got[0] != "feat/retry" || got[1] != "other" {
+		t.Errorf("branches = %v", got)
+	}
+}
+
+func TestSessionPromptTypesHyphensForSpaces(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	seed(t, env, "pay", env.NewSource(t, "alpha"))
+	d := newDriver(t, env, "")
+
+	d.key("right", "n")
+	d.typeText("token")
+	d.key("space")
+	d.typeText("refresh")
+	d.key("tab")
+	d.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("my feat"), Paste: true})
+	d.has("session:  token-refresh", "branch:   my-feat/token-refresh")
+	d.key("enter")
+	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+	if got := sessionBranches(t, env, "token-refresh", "alpha"); got[0] != "my-feat/token-refresh" {
 		t.Errorf("branches = %v", got)
 	}
 }

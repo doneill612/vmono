@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -229,6 +230,7 @@ func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
 		return m.submit()
 	}
 	m.msg = ""
+	msg = hyphenateSpaces(k)
 	var cmd tea.Cmd
 	switch m.focus {
 	case nameField:
@@ -283,6 +285,29 @@ func (m *sessionPrompt) options() core.SessionOptions {
 		}
 	}
 	return opts
+}
+
+// hyphenateSpaces rewrites a key press so whitespace reaches the dialog's
+// fields as hyphens. Every field takes a session name, branch or ref, none of
+// which may hold whitespace, so a space bar press types "-" and pasted text has
+// each whitespace rune replaced, rather than leaving a name that is only
+// rejected on submit. Keys the dialog acts on itself (a space that opens a
+// picker) are handled before this is called; other keys pass through as is.
+func hyphenateSpaces(k tea.KeyMsg) tea.KeyMsg {
+	switch k.Type {
+	case tea.KeySpace:
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'-'}, Alt: k.Alt}
+	case tea.KeyRunes:
+		runes := make([]rune, len(k.Runes))
+		for i, r := range k.Runes {
+			if unicode.IsSpace(r) {
+				r = '-'
+			}
+			runes[i] = r
+		}
+		k.Runes = runes
+	}
+	return k
 }
 
 // submit validates the name and starts the create on the progress screen.
