@@ -21,7 +21,9 @@ func NewRoot(runTUI func() error) *cobra.Command {
 them a session: a directory with a worktree of every repo, ready for a coding agent.
 
 Run vmono with no arguments for the terminal UI. Run ` + "`vmono help concepts`" + ` to
-learn what the terms in these commands mean.`,
+learn what the terms in these commands mean.
+
+` + agentHelp,
 		Version:       buildinfo.Version(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -57,6 +59,7 @@ learn what the terms in these commands mean.`,
 		newSyncCmd(),
 		newDoctorCmd(),
 		newInspectCmd(),
+		newSkillCmd(),
 		newHookCmd(),
 		newConceptsTopic(),
 	)
