@@ -224,7 +224,10 @@ func newAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add [pkg] <repo> [--ref] [--role TEXT]",
 		Short: "Add a member to the package, and so to every session (a known repo name or a path to any git repo)",
-		Args:  cobra.RangeArgs(1, 2),
+		Example: `  vmono add payments ~/src/billing
+  vmono add payments web --base origin/develop
+  vmono add payments contracts --ref --base v2`,
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg, rest := splitPkgArgs(args, 2)
 			c, p, err := resolve(pkg)
@@ -260,10 +263,10 @@ func newAddCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.BoolVar(&reference, "ref", false, "add as a read-only reference member")
+	f.BoolVar(&reference, "ref", false, "add as a read-only reference member, there to read and not to change")
 	f.StringVar(&role, "role", "", "one-line role of the member")
 	f.StringVar(&name, "name", "", "member name (default: the repo directory name)")
-	f.StringVar(&base, "base", "", "base ref for an active member, or the ref for a reference member (default origin/HEAD)")
+	f.StringVar(&base, "base", "", "what new branches are built on and merge into; with --ref, the branch, tag or commit to check out (default origin/HEAD)")
 	f.StringSliceVar(&copyGlobs, "copy", nil, "untracked file globs to copy from the source repo")
 	f.BoolVar(&reuse, "reuse-branch", false, "check out each session branch if it already exists in the repo")
 	return cmd

@@ -4,12 +4,17 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/doneill612/vmono/internal/terms"
 )
 
-// helpModel is the key reference dialog opened with "?". It lists the keys
-// of the screen underneath, then the keys every screen shares.
+// helpModel is the reference dialog opened with "?". It lists the keys of the
+// screen underneath, then the keys every screen shares. "t" swaps the keys for
+// what vmono's terms mean, and back. The two do not fit one dialog on an
+// ordinary terminal, which cannot scroll it.
 type helpModel struct {
-	view []hint
+	view  []hint
+	terms bool
 }
 
 // newHelp builds the dialog for a screen's hints.
@@ -45,6 +50,8 @@ func (h *helpModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 		switch k.String() {
 		case "esc", "q", "?", "enter":
 			return h, pop(h)
+		case "t":
+			h.terms = !h.terms
 		}
 	}
 	return h, nil
@@ -81,9 +88,19 @@ func (h *helpModel) View(w, ht int) string {
 			b.WriteString("  " + styleKey.Render(fit(x.key, 11, false)) + " " + truncate(x.label, width-17) + "\n")
 		}
 	}
-	section("View", h.view)
-	section("Global", globalHints)
-	section("Navigation", navHints)
+	if h.terms {
+		var words []hint
+		for _, e := range terms.Entries {
+			words = append(words, hint{e.Term, e.Short})
+		}
+		section("Terms", words)
+		b.WriteString("\n " + keyHelp("t", "keys", "esc", "close"))
+	} else {
+		b.WriteString(" " + keyHelp("t", "what vmono's terms mean") + "\n")
+		section("View", h.view)
+		section("Global", globalHints)
+		section("Navigation", navHints)
+	}
 	body := strings.TrimRight(b.String(), "\n")
 	return dialog("help", body, width)
 }

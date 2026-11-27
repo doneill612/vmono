@@ -18,15 +18,17 @@ func newNewCmd() *cobra.Command {
 	var purposeFile, contextFile, harness, session string
 	var flags sessionFlags
 	cmd := &cobra.Command{
-		Use:   "new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--prefix P] [--branch B] [--track B] [--from REF]]",
+		Use:   "new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--prefix P] [--from REF] [--track]]",
 		Short: "Define a package, and optionally start its first session",
-		Args:  cobra.ExactArgs(1),
+		Example: `  vmono new payments --active api,web --ref contracts
+  vmono new payments --active api --session token-refresh --prefix feat`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(active)+len(refs) == 0 {
 				return errors.New("a package needs at least one member: pass --active and/or --ref")
 			}
 			if session == "" && flags.given() {
-				return errors.New("--prefix, --branch, --track, --from and --reuse-branch belong to a session: pass --session NAME, or use `vmono session new`")
+				return errors.New("--prefix, --from, --track and --reuse-branch belong to a session: pass --session NAME, or use `vmono session new`")
 			}
 			opts, err := flags.options()
 			if err != nil {
@@ -90,8 +92,8 @@ func newNewCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringSliceVar(&active, "active", nil, "repos to include as active members (names or paths, comma-separated)")
-	f.StringSliceVar(&refs, "ref", nil, "repos to include as read-only reference members")
+	f.StringSliceVar(&active, "active", nil, "repos to include as active members, which you change and push (names or paths, comma-separated)")
+	f.StringSliceVar(&refs, "ref", nil, "repos to include as read-only reference members, there to read (names or paths, comma-separated)")
 	f.StringVar(&purposeFile, "purpose-file", "", "file holding the package purpose (- for stdin)")
 	f.StringVar(&contextFile, "context-file", "", "file holding extra context (- for stdin)")
 	f.StringVar(&harness, "harness", "", "default harness for this package")

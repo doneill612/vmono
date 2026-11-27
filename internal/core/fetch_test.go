@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -78,27 +79,23 @@ func TestCreateSessionFetchesAllSourcesInOneStepFirst(t *testing.T) {
 	}
 }
 
-func TestCreateSessionWithFetchOnCreateOffSkipsFetch(t *testing.T) {
+// TestCreateSessionFetchesWithFetchOnCreateOff covers the setting that turns
+// fetching off elsewhere: a new session has to know what is on the remotes to
+// tell whether its branch is already there.
+func TestCreateSessionFetchesWithFetchOnCreateOff(t *testing.T) {
 	c, env := newCore(t)
 	c.Cfg.FetchOnCreate = false
 	a := env.NewSource(t, "alpha")
 	publishBranch(t, env, a, "feature")
 
 	p := mustPackage(t, c, request("nofetch", []string{a}, nil))
-	var err error
-	evs := collect(c, func() {
-		_, err = c.CreateSession(p, "work", SessionOptions{})
-	})
-	if err != nil {
-		t.Fatal(err)
+	_, err := c.CreateSession(p, "feature", SessionOptions{})
+	var re *RemoteBranchExistsError
+	if !errors.As(err, &re) {
+		t.Errorf("err = %v", err)
 	}
-	for _, ev := range evs {
-		if ev.Step == "fetch" {
-			t.Fatalf("unexpected fetch event: %+v", ev)
-		}
-	}
-	if gitx.RefExists(a, "origin/feature") {
-		t.Error("source must not be fetched when fetch_on_create is off")
+	if !gitx.RefExists(a, "origin/feature") {
+		t.Error("the source should have been fetched")
 	}
 }
 

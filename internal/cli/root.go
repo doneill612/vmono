@@ -15,8 +15,13 @@ import (
 // runTUI is invoked when vmono is run with no arguments.
 func NewRoot(runTUI func() error) *cobra.Command {
 	root := &cobra.Command{
-		Use:           "vmono",
-		Short:         "Manage packages of repos, and the sessions that work on them",
+		Use:   "vmono",
+		Short: "Manage packages of repos, and the sessions that work on them",
+		Long: `vmono keeps repos that go together in a package, and gives each piece of work on
+them a session: a directory with a worktree of every repo, ready for a coding agent.
+
+Run vmono with no arguments for the terminal UI. Run ` + "`vmono help concepts`" + ` to
+learn what the terms in these commands mean.`,
 		Version:       buildinfo.Version(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -53,6 +58,7 @@ func NewRoot(runTUI func() error) *cobra.Command {
 		newDoctorCmd(),
 		newInspectCmd(),
 		newHookCmd(),
+		newConceptsTopic(),
 	)
 	return root
 }

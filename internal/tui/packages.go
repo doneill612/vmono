@@ -217,9 +217,9 @@ func packageRow(s core.Summary) row {
 			},
 		}
 	}
-	members := fmt.Sprintf("%dA", s.Active)
+	members := fmt.Sprintf("%d active", s.Active)
 	if s.Reference > 0 {
-		members += fmt.Sprintf(" %dR", s.Reference)
+		members += fmt.Sprintf(", %d read-only", s.Reference)
 	}
 	state, stateKey := styled("clean", styleOK), "0"
 	if s.Dirty {

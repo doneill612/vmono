@@ -153,7 +153,7 @@ func (s *Session) Validate() error {
 	if err := ValidateName(s.Package); err != nil {
 		return fmt.Errorf("session package: %w", err)
 	}
-	if err := ValidateName(s.Name); err != nil {
+	if err := ValidateSessionName(s.Name); err != nil {
 		return fmt.Errorf("session name: %w", err)
 	}
 	if strings.TrimSpace(s.Branch) == "" {

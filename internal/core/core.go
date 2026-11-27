@@ -162,7 +162,7 @@ func (c *Core) Load(name string) (*Package, error) {
 
 // LoadSession reads one session of a package.
 func (c *Core) LoadSession(p *Package, name string) (*Session, error) {
-	if err := manifest.ValidateName(name); err != nil {
+	if err := manifest.ValidateSessionName(name); err != nil {
 		return nil, NotFound("package %s has no session %q", p.Name, name)
 	}
 	dir := p.SessionDir(name)

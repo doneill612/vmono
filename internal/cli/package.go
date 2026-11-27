@@ -44,7 +44,9 @@ func newPackageCloneCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "clone <src> <new> [--all-active | --all-ref] [--active a,b] [--ref c]",
 		Short: "Copy a package under a new name, changing which members are active",
-		Args:  cobra.ExactArgs(2),
+		Example: `  vmono package clone docs payments --all-active
+  vmono package clone payments review --all-ref --active api`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, src, err := resolve(args[0])
 			if err != nil {
@@ -75,10 +77,10 @@ func newPackageCloneCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringSliceVar(&active, "active", nil, "members of the source to make active (names, comma-separated)")
-	f.StringSliceVar(&refs, "ref", nil, "members of the source to make read-only references")
+	f.StringSliceVar(&active, "active", nil, "members of the source to make active, to change and push (names, comma-separated)")
+	f.StringSliceVar(&refs, "ref", nil, "members of the source to make read-only references (names, comma-separated)")
 	f.BoolVar(&allActive, "all-active", false, "make every member active, except those named by --ref")
-	f.BoolVar(&allRef, "all-ref", false, "make every member a reference, except those named by --active")
+	f.BoolVar(&allRef, "all-ref", false, "make every member a read-only reference, except those named by --active")
 	cmd.MarkFlagsMutuallyExclusive("all-active", "all-ref")
 	return cmd
 }

@@ -12,7 +12,8 @@ import (
 // Palette uses adaptive colors so the TUI reads on light and dark terminals.
 // The chrome is deliberately quiet: dim gray for borders, column heads and
 // secondary text, one accent for the badge, the selection and dialog titles,
-// and the green, amber and red trio reserved for state.
+// and the green, amber and red trio reserved for state. Violet marks a branch
+// that is on a remote, wherever one is listed beside local branches.
 var (
 	colAccent = lipgloss.AdaptiveColor{Light: "#0E7490", Dark: "#5FD7FF"}
 	colFrame  = lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#4B5563"}
@@ -22,6 +23,7 @@ var (
 	colOK     = lipgloss.AdaptiveColor{Light: "#15803D", Dark: "#4ADE80"}
 	colWarn   = lipgloss.AdaptiveColor{Light: "#B45309", Dark: "#FBBF24"}
 	colErr    = lipgloss.AdaptiveColor{Light: "#B91C1C", Dark: "#F87171"}
+	colRemote = lipgloss.AdaptiveColor{Light: "#7E22CE", Dark: "#C084FC"}
 )
 
 var (
@@ -30,6 +32,7 @@ var (
 	styleOK       = lipgloss.NewStyle().Foreground(colOK)
 	styleWarn     = lipgloss.NewStyle().Foreground(colWarn)
 	styleErr      = lipgloss.NewStyle().Foreground(colErr)
+	styleRemote   = lipgloss.NewStyle().Foreground(colRemote)
 	styleSelected = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
 	styleLabel    = lipgloss.NewStyle().Bold(true)
 

@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -70,7 +71,7 @@ func TestRemovingASessionKeepsItsCommits(t *testing.T) {
 	if sha(t, srcs["alpha"], "refs/heads/"+s.S.Branch) != tip {
 		t.Error("the branch must be kept as it was")
 	}
-	again, err := c.CreateSession(s.Pkg, "again", SessionOptions{Branch: s.S.Branch, ReuseBranch: true})
+	again, err := c.CreateSession(s.Pkg, "work", SessionOptions{Prefix: path.Dir(s.S.Branch), ReuseBranch: true})
 	if err != nil || sha(t, filepath.Join(again.Dir, "alpha"), "HEAD") != tip {
 		t.Errorf("taking it up again: %v", err)
 	}

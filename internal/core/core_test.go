@@ -42,7 +42,7 @@ func request(name string, active, refs []string) *manifest.Manifest {
 }
 
 // newWork creates a package from m and one session named "work" on branch
-// vmono/<package>, the single-state shape most tests need. Tests of the
+// vmono/<package>/work, the single-state shape most tests need. Tests of the
 // default branch and of several sessions call CreateSession themselves.
 func newWork(t *testing.T, c *Core, m *manifest.Manifest) (*Package, *Session) {
 	t.Helper()
@@ -50,7 +50,7 @@ func newWork(t *testing.T, c *Core, m *manifest.Manifest) (*Package, *Session) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := c.CreateSession(p, "work", SessionOptions{Branch: "vmono/" + m.Name})
+	s, err := c.CreateSession(p, "work", SessionOptions{Prefix: "vmono/" + m.Name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,14 +206,14 @@ func TestTwoSessionsSideBySide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	two, err := c.CreateSession(p, "two", SessionOptions{Branch: "feat/PLAT-412"})
+	two, err := c.CreateSession(p, "two", SessionOptions{Prefix: "feat"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := gitx.CurrentBranch(filepath.Join(one.Dir, "alpha")); got != "one" {
 		t.Errorf("session one branch = %q", got)
 	}
-	if got := gitx.CurrentBranch(filepath.Join(two.Dir, "alpha")); got != "feat/PLAT-412" {
+	if got := gitx.CurrentBranch(filepath.Join(two.Dir, "alpha")); got != "feat/two" {
 		t.Errorf("session two branch = %q", got)
 	}
 	if list, _ := gitx.WorktreeList(a); len(list) != 3 {
@@ -347,11 +347,11 @@ func TestSessionBranchRefConflictIsExplained(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = c.CreateSession(p, "next", SessionOptions{Prefix: "feat"})
-	if err == nil || !strings.Contains(err.Error(), "conflicts with existing branch \"feat\"") || !strings.Contains(err.Error(), "different branch name") {
+	if err == nil || !strings.Contains(err.Error(), "conflicts with existing branch \"feat\"") || !strings.Contains(err.Error(), "choose another session name or --prefix") {
 		t.Fatalf("want a conflict explanation, got %v", err)
 	}
-	if _, err := c.CreateSession(p, "next", SessionOptions{Branch: "fix/next"}); err != nil {
-		t.Errorf("an explicit branch should work around it: %v", err)
+	if _, err := c.CreateSession(p, "next", SessionOptions{Prefix: "fix"}); err != nil {
+		t.Errorf("another prefix should work around it: %v", err)
 	}
 }
 
@@ -502,10 +502,10 @@ func TestDeleteRefusesLostWorkThenForce(t *testing.T) {
 	}
 	// alpha's branch has nothing on it, so it goes. beta's has a commit that is
 	// not merged, so it is kept even with force.
-	if gitx.BranchExists(a, "vmono/del") {
+	if gitx.BranchExists(a, "vmono/del/work") {
 		t.Error("an empty branch should be deleted")
 	}
-	if !gitx.BranchExists(b, "vmono/del") {
+	if !gitx.BranchExists(b, "vmono/del/work") {
 		t.Error("unmerged branch must be kept")
 	}
 	if len(res.BranchesDeleted) != 1 || len(res.BranchesKept) != 1 {
@@ -558,7 +558,7 @@ func TestStatusAndMissingMember(t *testing.T) {
 	_, s := newWork(t, c, request("st", []string{a}, nil))
 	testutil.WriteFile(t, filepath.Join(s.Dir, "alpha", "README.md"), "changed")
 	st := c.Status(s)
-	if len(st.Members) != 1 || st.Members[0].Dirty != 1 || st.Members[0].Branch != "vmono/st" || st.Session != "work" || st.Package != "st" {
+	if len(st.Members) != 1 || st.Members[0].Dirty != 1 || st.Members[0].Branch != "vmono/st/work" || st.Session != "work" || st.Package != "st" {
 		t.Errorf("status = %+v", st)
 	}
 	if err := os.RemoveAll(filepath.Join(s.Dir, "alpha")); err != nil {

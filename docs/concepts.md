@@ -5,13 +5,19 @@
 | Term | Meaning |
 | --- | --- |
 | Package | A definition under the package root (default `~/.vmono`): the members, a purpose, context, notes and a role per member. It has its own small git repo, and holds no worktrees. |
-| Session | One piece of work on a package: a directory with its own git repo and a worktree of every member, each active one on a branch. It is what a harness opens. A package has any number of them side by side. |
+| Session | One piece of work on a package: a directory with its own git repo and a worktree of every member, the active ones all on one branch. It is what a harness opens. A package has any number of them side by side. |
 | Member | A source repo included in a package. Every session has a worktree of every member. |
-| Active member | Checked out on a branch, named after the session unless you say otherwise. The agent may edit it and commit to it, and you push it. |
-| Reference member | Checked out detached under `_ref/`, at the package's `ref` or what a session names with `--from MEMBER=REF`. Read-only context. |
-| Base | What a member's branch is built on and merges into: the `base` in the package manifest (default `origin/HEAD`), or what a session names with `--from`. |
+| Active member | Checked out on the session's branch. The agent may edit it and commit to it, and you push it. |
+| Reference member | Checked out detached under `_ref/`, at the package's `ref` or what a session names with `--from MEMBER=REF`. Read-only context, and shown as `read-only` in the TUI. |
+| Base | What a member's branch is built on and merges into: the `base` in the package manifest (default `origin/HEAD`), or what a session names with `--from`. Shown as `built on` in the TUI. |
+| Branch | The one branch a session's active members are on: the session's name, after the prefix if there is one. |
+| Build on | Start a session's new branches on something other than the base, per member if they differ: `--from`, or `build on` in the TUI. A local branch and the remote's are [separate choices](sessions.md#what-a-new-branch-starts-from). |
+| Prefix | What goes before the session's name, with a slash, in its branch: `--prefix`. |
+| Published | How far an active member's branch has got: no commits yet, commits to push, pushed, behind, diverged or merged. |
 | Overview | What an agent learned by exploring the members, recorded by `vmono package init`. Kept apart from the text you write. |
 | Purpose / Context / Notes / Role | Free text that belongs to the package: what the work is, what to know, a dated log, and what each member contributes. Sessions share it; they have none of their own. |
+
+`vmono help concepts` explains these in a terminal, and `?` then `t` in the [TUI](tui.md).
 
 ## Layout on disk
 
@@ -38,7 +44,7 @@ Everything except the manifest, the session file and your own text in `AGENTS.md
 
 ## Branches
 
-A member's branch is the session's name, after a `--prefix` if you give one, or whatever you pass with `--branch` or `--track`. It is the branch you push, so the name is public. A branch can be checked out in only one worktree at a time, and git cannot hold both `feat` and `feat/spike`. If a name in the way already exists, locally or on the remote, vmono says so; it never renames branches.
+A session's branch is its name, after a `--prefix` if you give one, and every active member is on it. It is the branch you push, so the name is public. When it is already on a remote, vmono asks before working on it there. A branch can be checked out in only one worktree at a time, and git cannot hold both `feat` and `feat/spike`. If a name in the way already exists locally, vmono says so; it never renames branches.
 
 ## Where to next
 

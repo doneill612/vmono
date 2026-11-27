@@ -79,8 +79,6 @@ func TestFromChecksAReferenceOutElsewhere(t *testing.T) {
 	}{
 		"all members": {SessionOptions{From: "feat"}, "no member"},
 		"missing":     {SessionOptions{FromByMember: map[string]string{"lib": "nope"}}, "lib"},
-		"branch":      {SessionOptions{BranchByMember: map[string]string{"lib": "x"}}, "--from lib=REF"},
-		"track":       {SessionOptions{TrackByMember: map[string]string{"lib": "feat"}}, "--from lib=REF"},
 	} {
 		_, err := c.CreateSession(p, "again", tc.opts)
 		refused(t, p, "again", what, err, tc.want)

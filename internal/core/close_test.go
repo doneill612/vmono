@@ -17,7 +17,7 @@ func TestRemovingASessionClosesItsTerminalLast(t *testing.T) {
 	c, env := newCore(t)
 	a := env.NewSource(t, "alpha")
 	p, s := newWork(t, c, request("cl", []string{a}, nil))
-	two, err := c.CreateSession(p, "two", SessionOptions{Branch: "vmono/cl-two"})
+	two, err := c.CreateSession(p, "two", SessionOptions{Prefix: "vmono/cl"})
 	if err != nil {
 		t.Fatal(err)
 	}

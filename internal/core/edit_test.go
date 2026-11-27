@@ -138,7 +138,7 @@ func TestAddMemberAndRemoveMember(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.BranchesDeleted) != 1 || gitx.BranchExists(b, "vmono/grow") {
+	if len(res.BranchesDeleted) != 1 || gitx.BranchExists(b, "vmono/grow/work") {
 		t.Errorf("merged branch should be deleted: %+v", res)
 	}
 	if _, err := os.Stat(filepath.Join(s.Dir, "beta")); !os.IsNotExist(err) {
@@ -171,7 +171,7 @@ func TestAddMemberFailureLeavesManifestAlone(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.Dir, "beta")); !os.IsNotExist(err) {
 		t.Error("failed add must be rolled back")
 	}
-	if gitx.BranchExists(b, "vmono/safe") {
+	if gitx.BranchExists(b, "vmono/safe/work") {
 		t.Error("created branch must be removed on rollback")
 	}
 	if list, _ := gitx.WorktreeList(b); len(list) != 1 {
@@ -179,7 +179,7 @@ func TestAddMemberFailureLeavesManifestAlone(t *testing.T) {
 	}
 
 	// Branch already exists in the new member's source.
-	testutil.Git(t, b, "branch", "vmono/safe")
+	testutil.Git(t, b, "branch", "vmono/safe/work")
 	var be *BranchExistsError
 	if _, err := c.AddMember(p, AddOptions{Source: b}); !errors.As(err, &be) {
 		t.Errorf("want BranchExistsError, got %v", err)
@@ -207,7 +207,7 @@ func TestShow(t *testing.T) {
 		t.Error("notes should be distinct")
 	}
 	m := sh.Members[0]
-	if m.Dirty != 1 || m.Mode != manifest.ModeActive || m.Branch != "vmono/view" || m.Source == "" || m.Role == "" {
+	if m.Dirty != 1 || m.Mode != manifest.ModeActive || m.Branch != "vmono/view/work" || m.Source == "" || m.Role == "" {
 		t.Errorf("member = %+v", m)
 	}
 }
@@ -258,7 +258,7 @@ func TestApplyEditAddRemoveSwitchAndMeta(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.Dir, "beta")); !os.IsNotExist(err) {
 		t.Error("old active worktree should be gone")
 	}
-	if !gitx.BranchExists(b, "vmono/diff") {
+	if !gitx.BranchExists(b, "vmono/diff/work") {
 		t.Error("switching modes must keep the branch")
 	}
 	e = edited(p)
@@ -324,7 +324,7 @@ func TestApplyEditRejectsIdentityChangesAndReplacesSource(t *testing.T) {
 	if err != nil || len(plan.Remove) != 1 || len(plan.Add) != 1 {
 		t.Fatalf("replace edit: %+v, %v", plan, err)
 	}
-	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "vmono/ident" {
+	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "vmono/ident/work" {
 		t.Errorf("replaced worktree branch = %q", br)
 	}
 }

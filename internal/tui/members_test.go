@@ -18,7 +18,7 @@ func TestEnterDrillsIntoSessionsThenMembersAndEscReturns(t *testing.T) {
 	d.has("Sessions · payments (1)", "work", "packages › payments")
 	d.key("m")
 	d.has("Members · payments/work (2)", "alpha", "beta", "active", "role", "packages › payments › work")
-	d.has("untr")
+	d.has("checked out", "changed", "new", "published")
 	if r, _ := d.app.top().(*membersModel).tb.selected(); r.id != "alpha" {
 		t.Fatalf("selected %q", r.id)
 	}
@@ -70,7 +70,7 @@ func TestDescribePackageAndMember(t *testing.T) {
 	d.has("Sessions · payments")
 
 	d.key("m", "d")
-	d.has("Describe · payments/work/alpha", "LOCATION", "Source repo", "STATE", "Branch/ref", "0 modified")
+	d.has("Describe · payments/work/alpha", "LOCATION", "Source repo", "STATE", "Checked out", "Built on", "0 modified")
 	d.key("esc")
 	d.has("Members · payments/work")
 }

@@ -21,7 +21,7 @@ func newSessionCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newSessionNewCmd(), newSessionLsCmd(), newSessionUpdateCmd(), newSessionReviewCmd(), newSessionPushCmd(), newSessionRmCmd(),
 		newRemovedCmd("finish", "a session's branches are now what you push: preview with `vmono session review`, publish with `vmono session push`, and remove the session with `vmono session rm`"),
-		newRemovedCmd("into", "sessions no longer land on other branches: name the branch to work on with `vmono session new --branch` or `--track`"))
+		newRemovedCmd("into", "sessions no longer land on other branches: name the session after the branch to work on, and pass `vmono session new --track`"))
 	return cmd
 }
 
@@ -44,18 +44,39 @@ func newRemovedCmd(name, instead string) *cobra.Command {
 func newSessionNewCmd() *cobra.Command {
 	var flags sessionFlags
 	cmd := &cobra.Command{
-		Use:   "new [pkg] <name> [--prefix P] [--branch [MEMBER=]B]... [--track [MEMBER=]B]... [--from [MEMBER=]REF]... [--reuse-branch]",
+		Use:   "new [pkg] <name> [--prefix P] [--from [MEMBER=]REF]... [--track] [--reuse-branch]",
 		Short: "Start a session: a worktree of every member, each on a branch of its own",
-		Long: `Start a session. Every active member gets a worktree on a branch, which is the
-branch you push and open a pull request from. It is named after the session unless
-you say otherwise, starts from the member's base, and belongs to the session: a name
-that is already on the member's remote is refused.
+		Long: `Start a session. Every member gets a worktree in it.
 
---track works on a branch that is already there, such as a teammate's or an open pull
-request's. --from builds the new branch on something other than the base, for work
-stacked on a branch that has not merged. Naming a reference member with it
-(--from MEMBER=REF) checks that member out at REF in place of the package's ref, for
-work that depends on changes there that have not merged.`,
+Every active member is on one branch, which is what you push and open a pull
+request from: the session's name, after PREFIX/ when you pass --prefix. A new
+branch starts from the member's base, the branch it will merge into, or from what
+--from names, for work stacked on a branch that has not merged. --from REF is for
+every active member that has it, and --from MEMBER=REF for one. It cannot name the
+session's own branch.
+
+How --from spells a branch says which copy is meant, and which one update then
+follows:
+
+  origin/main       the remote's branch, as of the fetch the new session makes
+  refs/heads/main   your local branch, whatever the remote has
+  main              whichever of the two is further ahead, and yours if each has
+                    commits the other lacks
+
+When the branch is already on a member's remote, such as a teammate's or an open
+pull request's, nothing is created unless you pass --track to work on it. A member
+whose remote lacks it then gets a new branch of that name.
+
+A read-only (reference) member gets no branch. It is checked out at the package's
+ref, or at what --from MEMBER=REF names, for work that depends on changes there that
+have not merged.
+
+See ` + "`vmono help concepts`" + ` for the terms.`,
+		Example: `  vmono session new payments token-refresh
+  vmono session new payments PLAT-412 --prefix fix
+  vmono session new payments timeout --prefix fix --track
+  vmono session new payments retry-ui --from origin/feat/retry --from web=refs/heads/main
+  vmono session new payments try-v2 --from contracts=v2`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg, rest := splitPkgArgs(args, 2)
@@ -371,8 +392,8 @@ workspace it runs in, along with everything else running there and even when tha
 where you are. It is left open only when an agent running there removes the session.
 
 It is refused while a member has uncommitted work, or commits that are on no branch,
-unless forced. To work on its branches again, start a session with --track, or with
---reuse-branch for one that was never pushed.
+unless forced. To work on its branch again, start a session of the same name and
+prefix with --track, or with --reuse-branch for one that was never pushed.
 
 ` + branchesHelp,
 		Args: cobra.ExactArgs(1),

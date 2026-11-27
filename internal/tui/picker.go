@@ -11,6 +11,7 @@ import (
 	"github.com/doneill612/vmono/internal/discover"
 	"github.com/doneill612/vmono/internal/manifest"
 	"github.com/doneill612/vmono/internal/paths"
+	"github.com/doneill612/vmono/internal/terms"
 )
 
 // pickSel is one repo chosen in the picker, with the mode it was given.
@@ -47,7 +48,7 @@ type pickerModel struct {
 func newPicker(e *env, initial map[string]string, extra []discover.Repo,
 	done func([]pickSel) screen, cancel func() screen) *pickerModel {
 	m := &pickerModel{e: e, chosen: map[string]string{}, spin: newSpinner(), done: done, cancel: cancel,
-		tb: newTable([]column{{title: " ", max: 3}, {title: "name", max: 28}, {title: "mode", max: 5}, {title: "branch", max: 24}, {title: "path", flex: true}})}
+		tb: newTable([]column{{title: " ", max: 3}, {title: "name", max: 28}, {title: "mode", max: 9}, {title: "branch", max: 24}, {title: "path", flex: true}})}
 	for k, v := range initial {
 		m.chosen[k] = v
 	}
@@ -82,7 +83,7 @@ func (m *pickerModel) Crumb() string { return "repos" }
 // Hints implements screen.
 func (m *pickerModel) Hints() []hint {
 	return []hint{
-		{"space", "Toggle"}, {"a", "Active"}, {"r", "Reference"}, {"p", "Find by path"},
+		{"space", "Toggle"}, {"a", "Active"}, {"r", "Read-only"}, {"p", "Find by path"},
 		{"/", "Filter"}, {"enter", "Done"}, {"esc", "Cancel"},
 	}
 }
@@ -104,10 +105,7 @@ func (m *pickerModel) fill() {
 		mark, mode := styled("[ ]", styleDim), plain("")
 		if md, ok := m.chosen[r.Path]; ok {
 			mark = styled("[x]", styleOK)
-			mode = styled("active", styleOK)
-			if md == manifest.ModeReference {
-				mode = styled("ref", styleOK)
-			}
+			mode = styled(terms.ModeLabel(md, false), styleOK)
 		}
 		rows = append(rows, row{
 			id:     r.Path,

@@ -52,7 +52,7 @@ func TestLaunchPickerBackdropShowsTheNewSession(t *testing.T) {
 	d.lacks("No sessions yet")
 }
 
-func TestSessionPromptValidatesAndOverridesBranch(t *testing.T) {
+func TestSessionPromptValidatesTheName(t *testing.T) {
 	env := testutil.NewEnv(t)
 	seed(t, env, "pay", env.NewSource(t, "alpha"))
 	d := newDriver(t, env, "")
@@ -60,31 +60,28 @@ func TestSessionPromptValidatesAndOverridesBranch(t *testing.T) {
 	d.key("right", "n")
 	d.has("new session", "<session>")
 	d.key("enter") // empty name
-	d.has("invalid name")
-	d.typeText("Bad Name")
+	d.has("invalid session name")
+	d.typeText("bad.name")
 	d.key("enter")
-	d.has("invalid name")
-	for range "Bad Name" {
+	d.has("invalid session name")
+	for range "bad.name" {
 		d.key("backspace")
 	}
-	d.typeText("work") // already taken by the seeded session
+	d.typeText("Work") // the seeded session's name in another case
 	d.key("enter")
 	d.has("already has a session named \"work\"")
-	for range "work" {
+	for range "Work" {
 		d.key("backspace")
 	}
-	d.typeText("hotfix")
-	d.has("branch:  hotfix") // the placeholder follows the name
-	d.key("tab", "tab")
-	d.typeText("fix/PLAT-7")
+	d.typeText("Hot_Fix")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
-	br := testutil.Git(t, filepath.Join(env.PackageRoot, "pay", "hotfix", "alpha"), "branch", "--show-current")
-	if br != "fix/PLAT-7" {
-		t.Errorf("branch = %q, want the override", br)
+	br := testutil.Git(t, filepath.Join(env.PackageRoot, "pay", "Hot_Fix", "alpha"), "branch", "--show-current")
+	if br != "Hot_Fix" {
+		t.Errorf("branch = %q", br)
 	}
 	d.key("esc")
-	d.has("Sessions · pay (2)", "hotfix", "work")
+	d.has("Sessions · pay (2)", "Hot_Fix", "work")
 }
 
 func TestPromptEscCancelsWithoutCreating(t *testing.T) {

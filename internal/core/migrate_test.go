@@ -288,7 +288,7 @@ func landingSession(t *testing.T, c *Core, env *testutil.Env) (*Session, string)
 	t.Helper()
 	a := env.NewSource(t, "alpha")
 	p := mustPackage(t, c, request("old", []string{a}, nil))
-	s, err := c.CreateSession(p, "work", SessionOptions{Branch: "vmono/old/work"})
+	s, err := c.CreateSession(p, "work", SessionOptions{Prefix: "vmono/old"})
 	if err != nil {
 		t.Fatal(err)
 	}

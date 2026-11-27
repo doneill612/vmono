@@ -134,7 +134,7 @@ func TestHomeListsFiltersAndPreviews(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(env.PackageRoot, "auth-rework", "work", "beta", "wip.txt"), "x")
 
 	d := newDriver(t, env, "")
-	d.has("payments", "auth-rework", "1A", "sessions")
+	d.has("payments", "auth-rework", "1 active", "sessions")
 	d.has("dirty", "clean") // auth-rework has untracked work
 
 	d.key("/")

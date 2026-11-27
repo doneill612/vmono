@@ -31,7 +31,7 @@ func TestCreateSessionOverStaleWorktreeRecordsOfAHandDeletedPackage(t *testing.T
 	if err := os.RemoveAll(p.Dir); err != nil {
 		t.Fatal(err)
 	}
-	if at, _ := gitx.BranchCheckedOutAt(a, "vmono/again"); at != "" {
+	if at, _ := gitx.BranchCheckedOutAt(a, "vmono/again/work"); at != "" {
 		t.Fatalf("a stale worktree must not count as holding the branch: %s", at)
 	}
 
@@ -41,12 +41,12 @@ func TestCreateSessionOverStaleWorktreeRecordsOfAHandDeletedPackage(t *testing.T
 		err     error
 	)
 	evs := collect(c, func() {
-		created, err = c.CreateSession(np, "work", SessionOptions{Branch: "vmono/again", ReuseBranch: true})
+		created, err = c.CreateSession(np, "work", SessionOptions{Prefix: "vmono/again", ReuseBranch: true})
 	})
 	if err != nil {
 		t.Fatalf("recreating over stale records must work: %v", err)
 	}
-	if br := gitx.CurrentBranch(created.MemberDir(created.Pkg.M.Members[0])); br != "vmono/again" {
+	if br := gitx.CurrentBranch(created.MemberDir(created.Pkg.M.Members[0])); br != "vmono/again/work" {
 		t.Errorf("branch = %q", br)
 	}
 	if pruned := countPruned(evs); pruned != 2 {
