@@ -84,12 +84,6 @@ func (o SessionOptions) check(p *Package) error {
 	return nil
 }
 
-// refreshes reports whether the options name something that may have appeared
-// on a remote since the last fetch.
-func (o SessionOptions) refreshes() bool {
-	return o.Track != "" || len(o.TrackByMember) > 0 || o.From != "" || len(o.FromByMember) > 0
-}
-
 // trackFor returns the remote branch the member is to work on, "" for none, and
 // whether it was named for that member.
 func (o SessionOptions) trackFor(member string) (branch string, named bool) {
@@ -630,15 +624,16 @@ func (c *Core) CreateSession(p *Package, name string, opts SessionOptions) (*Ses
 	if err != nil {
 		return nil, err
 	}
-	// What is on the remotes decides where branches start and which names are
-	// taken, so the fetch comes ahead of the rest rather than as a step of it.
-	if opts.refreshes() || c.Cfg.FetchOnCreate {
-		if err := (&apply.Runner{Events: c.Events}).Run([]apply.Step{{Name: "fetch", Run: func(warn func(string)) error {
-			fetchSources(srcList, warn)
-			return nil
-		}}}); err != nil {
-			return nil, err
-		}
+	// What is on the remotes decides where branches start and whether the
+	// session's branch is already someone's, so the fetch comes ahead of the
+	// rest rather than as a step of the create. It happens even with
+	// fetch_on_create off, since an answer from stale refs could start a second
+	// branch of a name that is taken.
+	if err := (&apply.Runner{Events: c.Events}).Run([]apply.Step{{Name: "fetch", Run: func(warn func(string)) error {
+		fetchSources(srcList, warn)
+		return nil
+	}}}); err != nil {
+		return nil, err
 	}
 	warn := func(step string) func(member, msg string) {
 		return func(member, msg string) { c.warnEvent(member, step, msg) }
