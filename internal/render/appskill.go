@@ -2,10 +2,15 @@ package render
 
 import "strings"
 
+//go:generate go run ./gen
+
 // AppSkillName is the directory name of the app skill. It differs from
 // SkillName on purpose: a harness reads a user's global skills beside a
 // session's own, and a global skill called "vmono" would shadow or collide
 // with the one every session carries.
+//
+// A copy of the skill is committed under skills/ for installing from the
+// repository; run `go generate ./internal/render` after changing it.
 const AppSkillName = "vmono-app"
 
 // appSkillDoc is one reference of the app skill: a file under references/
