@@ -42,6 +42,16 @@ goreleaser release --snapshot --clean
 
 For installing and uninstalling by hand on Windows, see [Installation](installation.md). [GoReleaser](https://goreleaser.com) is only needed for the dry run.
 
+## The app skill
+
+The text of the [`vmono-app` skill](skills.md) is in `internal/render/appskilltext.go`. `skills/vmono-app/` is the committed copy that `npx skills` installs, so after changing the text, regenerate it:
+
+```sh
+go generate ./internal/render
+```
+
+A test fails until the two match. Describe what vmono does and name commands without their flags, which the skill tells agents to read from `--help`; a test checks that too.
+
 ## Contributing changes
 
 Changes reach `main` through a pull request, and `main` can't be force-pushed or deleted. Admins can bypass the pull request requirement.

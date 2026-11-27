@@ -17,6 +17,7 @@ vmono manages **packages** and their **sessions**. A package is a set of git rep
 - The package's purpose, context, notes and each member's role are written once and rendered into every session's `AGENTS.md` / `CLAUDE.md`.
 - A harness opened at a session root works with no changes. Claude Code, OpenCode, Codex and Pi work out of the box; Claude Code and OpenCode also get generated config, and Codex and Pi get the skill.
 - A skill teaches the harness running inside a session to read the package, and to write back to it only what every future session needs. Claude Code gets it as a [plugin](docs/claude-code-plugin.md) that also adds commands and live session state.
+- A second skill, `vmono-app`, teaches an agent outside a session to define packages, start sessions and see what is in progress. Add it with `npx skills add doneill612/vmono -g`; see [Agent skills](docs/skills.md).
 - Runs on macOS, Linux and Windows, without admin rights.
 
 ## Install
@@ -86,6 +87,7 @@ Install one with `vmono integration install <name>`. See [Integrations](docs/int
 | [Initializing a package](docs/package-init.md) | Have an agent explore the members and record an overview |
 | [Setup, teardown and hooks](docs/setup-and-teardown.md) | Install dependencies per worktree; run commands around session events |
 | [The Claude Code plugin](docs/claude-code-plugin.md) | The skill, commands and live state each session gets |
+| [Agent skills](docs/skills.md) | The skill you install for agents outside a session, and the one inside it |
 | [Integrations](docs/integrations.md) | Run each session in its own tmux session or herdr workspace |
 | [Command reference](docs/commands.md) | Every command, and exit codes |
 | [Configuration](docs/configuration.md) | `config.toml`, harnesses and adapters, git authentication |
