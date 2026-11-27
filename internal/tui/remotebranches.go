@@ -23,38 +23,52 @@ type (
 		list    []core.MemberBranches
 		fetched bool
 	}
-	// remotePickedMsg reports the branch chosen, "" for none, and the members
-	// whose remote has it, to the prompt that opened the picker. from and ref are
-	// the picker's.
+	// remotePickedMsg reports what was chosen to the prompt that opened the
+	// picker: a branch and the members whose remote has it, or base for the
+	// member's own base, or neither for the row that chooses nothing.
 	remotePickedMsg struct {
 		owner   *sessionPrompt
-		from    bool
-		ref     string
+		target  pickTarget
 		branch  string
+		base    bool
 		members []string
 	}
 )
 
-// remoteChoice is one branch of the picker, merged across the members.
+// pickTarget says what a branch is being picked for.
+type pickTarget struct {
+	// member is the one the choice is for, which is then the only one listed,
+	// or "" for every active member.
+	member string
+	// reference is set when member is a reference member, and the choice is
+	// what it is checked out at rather than what it is built on.
+	reference bool
+}
+
+// remoteChoice is one row of the picker: a branch merged across the members,
+// or with no branch, the choice of nothing or of the member's base.
 type remoteChoice struct {
 	branch           string
+	base             bool
 	members, missing []string
 	when             time.Time
 }
 
 // remotePicker is the dialog that chooses a branch on the members' remotes for
-// a new session to work on, to build its branches on, or to check a reference
-// member out at. Branches of the same name are one row, saying which members
+// a new session to build its branches on, or to check a reference member out
+// at. Branches of the same name are one row, saying which members
 // have it; those most members have come first, then the most
 // recent. It opens on what the last fetch saw and fetches meanwhile, so it is
 // usable at once and stays usable offline: a member that cannot be fetched or
 // listed is named in a notice and never blocks a choice.
 type remotePicker struct {
-	owner *sessionPrompt
-	// from is true when the choice is what to build on, rather than work on.
-	from bool
-	// ref is the reference member the choice is for, the only one listed then.
-	ref     string
+	owner  *sessionPrompt
+	target pickTarget
+	// exclude is a branch that cannot be chosen: the session's own, when the
+	// choice is what to build on.
+	exclude string
+	// base, when set, offers the member's base, which it names, as a choice.
+	base    string
 	c       *core.Core
 	p       *core.Package
 	in      textinput.Model
@@ -71,11 +85,11 @@ type remotePicker struct {
 }
 
 // newRemotePicker builds the picker for a new session of p.
-func newRemotePicker(owner *sessionPrompt, c *core.Core, p *core.Package, from bool) *remotePicker {
+func newRemotePicker(owner *sessionPrompt, c *core.Core, p *core.Package, target pickTarget) *remotePicker {
 	in := newTextInput()
 	in.Prompt = "› "
 	in.CharLimit = 200
-	return &remotePicker{owner: owner, from: from, c: c, p: p, in: in, spin: newSpinner()}
+	return &remotePicker{owner: owner, target: target, c: c, p: p, in: in, spin: newSpinner()}
 }
 
 // modal implements modalScreen.
@@ -92,19 +106,19 @@ func (m *remotePicker) Init() tea.Cmd {
 // load lists the branches, after a fetch when asked, off the UI goroutine.
 func (m *remotePicker) load(fetch bool) tea.Cmd {
 	return func() tea.Msg {
-		return remoteBranchesMsg{owner: m, list: m.c.RemoteBranches(m.p, m.ref, fetch), fetched: fetch}
+		return remoteBranchesMsg{owner: m, list: m.c.RemoteBranches(m.p, m.target.member, fetch), fetched: fetch}
 	}
 }
 
 // Title implements screen.
 func (m *remotePicker) Title() string {
-	if m.ref != "" {
-		return "remote branch for " + m.ref
+	switch {
+	case m.target.reference:
+		return "remote branch for " + m.target.member
+	case m.target.member != "":
+		return "build " + m.target.member + " on"
 	}
-	if m.from {
-		return "build on a remote branch"
-	}
-	return "work on a remote branch"
+	return "build on a remote branch"
 }
 
 // Crumb implements screen. The dialog adds no breadcrumb.
@@ -116,9 +130,9 @@ func (m *remotePicker) Hints() []hint { return nil }
 // receive merges the members' branches into rows, keeping the highlighted
 // branch under the cursor when rows arrive or move.
 func (m *remotePicker) receive(list []core.MemberBranches) {
-	selected := ""
+	var selected remoteChoice
 	if m.cursor < len(m.shown) {
-		selected = m.shown[m.cursor].branch
+		selected = m.shown[m.cursor]
 	}
 	byName := map[string]*remoteChoice{}
 	var unfetched, unlisted []string
@@ -129,6 +143,9 @@ func (m *remotePicker) receive(list []core.MemberBranches) {
 			unfetched = append(unfetched, mb.Member)
 		}
 		for _, b := range mb.Branches {
+			if b.Name == m.exclude {
+				continue
+			}
 			ch := byName[b.Name]
 			if ch == nil {
 				ch = &remoteChoice{branch: b.Name}
@@ -159,7 +176,7 @@ func (m *remotePicker) receive(list []core.MemberBranches) {
 		}
 		return a.branch < b.branch
 	})
-	m.all = append([]remoteChoice{{}}, m.all...)
+	m.all = append(m.fixed(), m.all...)
 	m.notices = nil
 	if len(unfetched) > 0 {
 		m.notices = append(m.notices, "couldn't fetch "+strings.Join(unfetched, ", ")+"; showing the last fetch")
@@ -169,14 +186,22 @@ func (m *remotePicker) receive(list []core.MemberBranches) {
 	}
 	m.refilter()
 	for i, ch := range m.shown {
-		if ch.branch == selected {
+		if ch.branch == selected.branch && ch.base == selected.base {
 			m.cursor = i
 		}
 	}
 }
 
+// fixed are the rows that are not branches, listed first.
+func (m *remotePicker) fixed() []remoteChoice {
+	if m.base != "" {
+		return []remoteChoice{{}, {base: true}}
+	}
+	return []remoteChoice{{}}
+}
+
 // refilter narrows the rows to those matching the query, best match first. The
-// row for no branch is only offered without a query.
+// rows that are not branches are only offered without a query.
 func (m *remotePicker) refilter() {
 	q := strings.TrimSpace(m.in.Value())
 	m.cursor, m.offset = 0, 0
@@ -184,7 +209,7 @@ func (m *remotePicker) refilter() {
 		m.shown = m.all
 		return
 	}
-	rows := m.all[1:]
+	rows := m.all[len(m.fixed()):]
 	hay := make([]string, len(rows))
 	for i, ch := range rows {
 		hay[i] = ch.branch
@@ -226,7 +251,7 @@ func (m *remotePicker) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		return m, nil
 	}
 	switch k.String() {
-	case "esc", "ctrl+t":
+	case "esc":
 		m.closing = true
 		return m, pop(m)
 	case "up", "ctrl+k":
@@ -238,7 +263,7 @@ func (m *remotePicker) key(k tea.KeyMsg) (screen, tea.Cmd) {
 			ch := m.shown[m.cursor]
 			m.closing = true
 			return m, tea.Sequence(pop(m), func() tea.Msg {
-				return remotePickedMsg{owner: m.owner, from: m.from, ref: m.ref, branch: ch.branch, members: ch.members}
+				return remotePickedMsg{owner: m.owner, target: m.target, branch: ch.branch, base: ch.base, members: ch.members}
 			})
 		}
 	default:
@@ -290,13 +315,16 @@ func (m *remotePicker) View(w, h int) string {
 	for i := m.offset; i < len(m.shown) && i < m.offset+rows; i++ {
 		ch := m.shown[i]
 		label := ch.branch
-		if label == "" {
-			label = "none: start a new branch"
-			if m.ref != "" {
-				label = "none: the package's ref"
-			} else if m.from {
-				label = "none: start from each member's base"
-			}
+		switch {
+		case label != "":
+		case ch.base:
+			label = "its base: " + m.base
+		case m.target.reference:
+			label = "none: the package's ref"
+		case m.target.member != "":
+			label = "same as build on above"
+		default:
+			label = "none: start from each member's base"
 		}
 		detail := choiceDetail(ch)
 		if detail != "" {

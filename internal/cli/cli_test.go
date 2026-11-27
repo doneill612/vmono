@@ -581,8 +581,8 @@ func TestNewWithoutSessionMakesOnlyThePackage(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
 
-	if _, _, err := run(t, "new", "p", "--active", a, "--branch", "x"); err == nil || ExitCode(err) != ExitError {
-		t.Errorf("--branch without --session must be rejected: %v", err)
+	if _, _, err := run(t, "new", "p", "--active", a, "--prefix", "x"); err == nil || ExitCode(err) != ExitError {
+		t.Errorf("--prefix without --session must be rejected: %v", err)
 	}
 	out, _, err := run(t, "new", "p", "--active", a)
 	if err != nil {
@@ -661,7 +661,7 @@ func TestSessionNewLsRmAndSelection(t *testing.T) {
 		t.Fatalf("%v\n%s", err, stderr)
 	}
 	one := strings.TrimSpace(out)
-	out, _, err = run(t, "session", "new", "duo", "two", "--branch", "feat/PLAT-1")
+	out, _, err = run(t, "session", "new", "duo", "PLAT-1", "--prefix", "feat")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -670,7 +670,7 @@ func TestSessionNewLsRmAndSelection(t *testing.T) {
 		t.Error("a duplicate session name must fail")
 	}
 	if got := testutil.Git(t, filepath.Join(two, "alpha"), "branch", "--show-current"); got != "feat/PLAT-1" {
-		t.Errorf("--branch ignored: %q", got)
+		t.Errorf("--prefix ignored: %q", got)
 	}
 	if got := testutil.Git(t, filepath.Join(one, "alpha"), "branch", "--show-current"); got != "one" {
 		t.Errorf("default branch = %q", got)
@@ -696,10 +696,10 @@ func TestSessionNewLsRmAndSelection(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(env.Root, "cfg", "config.toml"), "default_harness = \"fake\"\n[harness.fake]\ncommand = \"sh\"\n")
 
 	_, _, err = run(t, "open", "duo")
-	if ExitCode(err) != ExitNotFound || !strings.Contains(err.Error(), "duo/NAME") || !strings.Contains(err.Error(), "one, two") {
+	if ExitCode(err) != ExitNotFound || !strings.Contains(err.Error(), "duo/NAME") || !strings.Contains(err.Error(), "PLAT-1, one") {
 		t.Fatalf("ambiguous open: exit %d, %v", ExitCode(err), err)
 	}
-	if _, _, err := run(t, "open", "duo/two"); err != nil {
+	if _, _, err := run(t, "open", "duo/PLAT-1"); err != nil {
 		t.Fatal(err)
 	}
 	if len(launched) != 1 || launched[0].Dir != two {
@@ -714,7 +714,7 @@ func TestSessionNewLsRmAndSelection(t *testing.T) {
 			pkg = strings.TrimPrefix(kv, "VMONO_PACKAGE=")
 		}
 	}
-	if sess != "two" || pkg != "duo" {
+	if sess != "PLAT-1" || pkg != "duo" {
 		t.Errorf("env session=%q package=%q", sess, pkg)
 	}
 
@@ -831,17 +831,18 @@ func TestPackageChangesReachEverySessionFromTheCLI(t *testing.T) {
 func TestBranchFlagsBelongToASession(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
-	for _, flag := range [][]string{{"--prefix", "feat"}, {"--branch", "x"}, {"--track", "x"}, {"--from", "x"}, {"--reuse-branch"}} {
+	testutil.Git(t, b, "push", "--quiet", "origin", "main:parent")
+	for _, flag := range [][]string{{"--prefix", "feat"}, {"--track"}, {"--from", "x"}, {"--reuse-branch"}} {
 		if _, _, err := run(t, append([]string{"new", "demo", "--active", a}, flag...)...); err == nil {
 			t.Errorf("%v without --session must be rejected", flag)
 		}
 	}
-	if _, stderr, err := run(t, "new", "demo", "--active", a+","+b, "--session", "work", "--prefix", "feat", "--branch", "beta=other"); err != nil {
+	if _, stderr, err := run(t, "new", "demo", "--active", a+","+b, "--session", "work", "--prefix", "feat", "--from", "beta=parent"); err != nil {
 		t.Fatalf("%v\n%s", err, stderr)
 	}
-	for member, want := range map[string]string{"alpha": "feat/work", "beta": "other"} {
-		if got := testutil.Git(t, filepath.Join(env.PackageRoot, "demo", "work", member), "branch", "--show-current"); got != want {
-			t.Errorf("%s is on %q, want %q", member, got, want)
+	for _, member := range []string{"alpha", "beta"} {
+		if got := testutil.Git(t, filepath.Join(env.PackageRoot, "demo", "work", member), "branch", "--show-current"); got != "feat/work" {
+			t.Errorf("%s is on %q", member, got)
 		}
 	}
 	out, _, _ := run(t, "session", "ls", "demo", "--json")
@@ -849,10 +850,12 @@ func TestBranchFlagsBelongToASession(t *testing.T) {
 		t.Errorf("ls --json = %s", out)
 	}
 	for name, args := range map[string][]string{
-		"two branches for all": {"--branch", "a", "--branch", "b"},
-		"empty member":         {"--branch", "=x"},
-		"empty branch":         {"--from", "alpha="},
-		"unknown member":       {"--branch", "ghost=x"},
+		"two refs for all": {"--from", "a", "--from", "b"},
+		"empty member":     {"--from", "=x"},
+		"empty ref":        {"--from", "alpha="},
+		"unknown member":   {"--from", "ghost=x"},
+		"its own branch":   {"--from", "two"},
+		"removed flag":     {"--branch", "x"},
 	} {
 		if _, _, err := run(t, append([]string{"session", "new", "demo", "two"}, args...)...); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -1038,13 +1041,20 @@ func TestSessionNewTrack(t *testing.T) {
 	env := testutil.NewEnv(t)
 	a := env.NewSource(t, "alpha")
 	testutil.Git(t, a, "push", "--quiet", "origin", "main:feat/x")
-	if _, _, err := run(t, "new", "demo", "--active", a, "--session", "one", "--track", "feat/x"); err != nil {
+	if _, _, err := run(t, "new", "demo", "--active", a); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := testutil.Git(t, filepath.Join(env.PackageRoot, "demo", "one", "alpha"), "rev-parse", "HEAD"), testutil.Git(t, a, "rev-parse", "origin/feat/x"); got != want {
-		t.Errorf("the session starts at %s, want %s", got, want)
+	_, _, err := run(t, "session", "new", "demo", "x", "--prefix", "feat")
+	if ExitCode(err) != ExitError || !strings.Contains(err.Error(), "--track") {
+		t.Errorf("a branch on the remote must not be taken without --track: %v", err)
 	}
-	if _, _, err := run(t, "session", "new", "demo", "two", "--track", "alpha=nope"); ExitCode(err) != ExitNotFound {
+	if _, stderr, err := run(t, "session", "new", "demo", "x", "--prefix", "feat", "--track"); err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	if got := testutil.Git(t, filepath.Join(env.PackageRoot, "demo", "x", "alpha"), "rev-parse", "--abbrev-ref", "@{upstream}"); got != "origin/feat/x" {
+		t.Errorf("upstream = %q", got)
+	}
+	if _, _, err := run(t, "session", "new", "demo", "nope", "--track"); ExitCode(err) != ExitNotFound {
 		t.Errorf("missing branch = %v", err)
 	}
 }

@@ -94,7 +94,7 @@ func TestDoctorRelocatesMovedSourceByRemote(t *testing.T) {
 	if !strings.HasSuffix(reloaded.M.Members[0].Source, "alpha-renamed") {
 		t.Errorf("source not relocated: %q", reloaded.M.Members[0].Source)
 	}
-	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "vmono/moved" {
+	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "vmono/moved/work" {
 		t.Errorf("worktree not rebuilt from the new source: %q", br)
 	}
 }
@@ -170,7 +170,7 @@ func TestInspect(t *testing.T) {
 	m := r.Members[0]
 	want, _ := filepath.EvalSymlinks(filepath.Join(a, ".git"))
 	got, _ := filepath.EvalSymlinks(m.GitCommonDir)
-	if !m.Exists || got != want || m.Branch != "vmono/insp" || !filepath.IsAbs(m.Path) || m.RelPath != "alpha" {
+	if !m.Exists || got != want || m.Branch != "vmono/insp/work" || !filepath.IsAbs(m.Path) || m.RelPath != "alpha" {
 		t.Errorf("active member = %+v", m)
 	}
 	if r.Members[1].Ref != "origin/HEAD" || r.Members[1].RelPath != "_ref/contracts" {

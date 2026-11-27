@@ -48,7 +48,7 @@ func TestSyncRecreatesMissingWorktreeAndWarnsOnUnlisted(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.Dir, "alpha", "README.md")); err != nil {
 		t.Error("alpha not recreated")
 	}
-	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "vmono/heal" {
+	if br := gitx.CurrentBranch(filepath.Join(s.Dir, "alpha")); br != "vmono/heal/work" {
 		t.Errorf("recreated branch = %q (existing branch must be reused)", br)
 	}
 	if st, _ := gitx.StatusOf(filepath.Join(s.Dir, "_ref", "contracts")); !st.Detached {

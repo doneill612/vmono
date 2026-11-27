@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 	"unicode"
@@ -12,49 +13,55 @@ import (
 	"github.com/doneill612/vmono/internal/manifest"
 )
 
-// sessionPrompt is the dialog that starts a session of a package: a name, and
-// optionally which branches it works on. Empty fields show the branch they will
-// use as their placeholder: the session's name, after the prefix and a slash
-// when there is one, unless the branch field names another, and for a member
-// the session's branch. The track and from fields open a picker of the members'
-// remote branches. Tracking works on the branch itself, in each member whose
-// remote has it; the others get a new branch of that name. From builds new
-// branches on the one picked, in each member that has it, in place of its base.
-// A reference member's field holds what it is checked out at in place of the
-// package's ref, typed, or picked from its remote branches with space, which no
-// ref can hold.
-// Enter runs the create on the progress screen, which ends at the harness
+// sessionPrompt is the dialog that starts a session of a package: a name and
+// an optional prefix, which together are the branch every active member is on,
+// then what the new branches are built on and what each reference member is
+// checked out at.
+//
+// Build on is only ever picked from the members' remote branches, with space:
+// once for every member, and in the row of each active member that should
+// differ, which may be another branch or its base. It can never be the
+// session's own branch, which the dialog says as soon as the two match. A
+// reference member's field holds what it is checked out at in place of the
+// package's ref, typed, or picked with space, which no ref can hold.
+//
+// Enter runs the create on the progress screen, which asks whether to work on
+// the branch when it is already on a member's remote, and ends at the harness
 // picker, so creating a package and starting its first session still ends at a
 // running harness.
 type sessionPrompt struct {
-	e       *env
-	pkg     string
-	name    textinput.Model
-	prefix  textinput.Model
-	branch  textinput.Model
-	members branchFields
-	refs    branchFields
-	// track and from are the remote branches picked, and the members whose
-	// remote has each.
-	track, from pickedBranch
+	e      *env
+	pkg    string
+	name   textinput.Model
+	prefix textinput.Model
+	// active names the active members, and bases what the package builds each
+	// one on. width is the column their names and the references' are set in.
+	active []string
+	bases  map[string]string
+	width  int
+	// from is the branch picked for every member to build on.
+	from pickedBranch
+	// own is what a member was given in place of from: a branch, or "" for its
+	// base. A member that is absent follows from.
+	own  map[string]string
+	refs refFields
 	// focus is the field with the keyboard, in the order of the constants below
 	// and then one per active member and one per reference member.
 	focus int
 	msg   string
 }
 
-// pickedBranch is a remote branch chosen in the picker.
+// pickedBranch is a remote branch chosen in the picker, and the members whose
+// remote has it.
 type pickedBranch struct {
 	name    string
 	members []string
 }
 
-// Fields of the prompt ahead of the members' branch fields.
+// Fields of the prompt ahead of the members' fields.
 const (
 	nameField = iota
 	prefixField
-	branchField
-	trackField
 	fromField
 	firstMember
 )
@@ -63,7 +70,15 @@ const (
 func (m *sessionPrompt) promptFields() int { return m.firstRef() + m.refs.count() }
 
 // firstRef is the first of the reference members' fields.
-func (m *sessionPrompt) firstRef() int { return firstMember + m.members.count() }
+func (m *sessionPrompt) firstRef() int { return firstMember + len(m.active) }
+
+// focusedMember is the active member whose field has the keyboard, or "".
+func (m *sessionPrompt) focusedMember() string {
+	if i := m.focus - firstMember; i >= 0 && i < len(m.active) {
+		return m.active[i]
+	}
+	return ""
+}
 
 // focusedRef is the reference member whose field has the keyboard, or "".
 func (m *sessionPrompt) focusedRef() string {
@@ -84,65 +99,71 @@ func newSessionPrompt(e *env, pkg string) *sessionPrompt {
 		in.Width = 48
 		return in
 	}
-	var members, refs []string
+	m := &sessionPrompt{
+		e: e, pkg: pkg,
+		name:   input("session:  ", "token-refresh", 64),
+		prefix: input("prefix:   ", "none", 64),
+		bases:  map[string]string{},
+		own:    map[string]string{},
+	}
+	var refs []string
 	at := map[string]string{}
-	width := 0
 	if p, err := e.core.Load(pkg); err == nil {
 		for _, mem := range p.M.Members {
-			width = max(width, len(mem.Name))
+			m.width = max(m.width, len(mem.Name))
 			if mem.Mode == manifest.ModeActive {
-				members = append(members, mem.Name)
+				m.active = append(m.active, mem.Name)
+				m.bases[mem.Name] = cmp.Or(mem.Base, "origin/HEAD")
 			} else {
 				refs = append(refs, mem.Name)
 				at[mem.Name] = mem.Ref
 			}
 		}
 	}
-	m := &sessionPrompt{
-		e: e, pkg: pkg,
-		name:    input("session:  ", "token-refresh", 64),
-		prefix:  input("prefix:   ", "none", 64),
-		branch:  input("branch:   ", "", 200),
-		members: newBranchFields("branch", width, members),
-		refs:    newBranchFields("read-only", width, refs),
-	}
+	m.refs = newRefFields(m.width, refs)
 	for name, ref := range at {
 		m.refs.placeholder(name, ref)
 	}
-	m.sync()
 	return m
 }
 
-// sessionBranch is the branch members with no branch of their own work on.
-func (m *sessionPrompt) sessionBranch() string {
-	if b := strings.TrimSpace(m.branch.Value()); b != "" {
-		return b
-	}
-	return m.defaultBranch()
-}
-
-// defaultBranch is the branch used when the branch field is left empty.
-func (m *sessionPrompt) defaultBranch() string {
-	if m.track.name != "" {
-		return m.track.name
-	}
+// branch is the session's branch as the fields stand, "" until it has a name.
+func (m *sessionPrompt) branch() string {
 	name := strings.TrimSpace(m.name.Value())
 	if name == "" {
-		name = "<session>"
+		return ""
 	}
 	return manifest.DefaultBranch(strings.TrimSpace(m.prefix.Value()), name)
 }
 
-// sync keeps the placeholders in step with what has been typed and picked.
-func (m *sessionPrompt) sync() {
-	m.branch.Placeholder = m.defaultBranch()
-	for _, name := range m.members.members {
-		text := m.sessionBranch()
-		if contains(m.track.members, name) {
-			text = m.track.name
-		}
-		m.members.placeholder(name, text)
+// buildsOn is the picked branch the member's new branch starts on, or "" for
+// its base.
+func (m *sessionPrompt) buildsOn(member string) string {
+	if own, ok := m.own[member]; ok {
+		return own
 	}
+	if contains(m.from.members, member) {
+		return m.from.name
+	}
+	return ""
+}
+
+// selfBuilt says that a pick to build on is the session's own branch, or "".
+// It is checked on every render, since typing a name can make it true after the
+// pick was made.
+func (m *sessionPrompt) selfBuilt() string {
+	branch := m.branch()
+	if branch == "" {
+		return ""
+	}
+	clash := m.from.name == branch
+	for _, own := range m.own {
+		clash = clash || own == branch
+	}
+	if !clash {
+		return ""
+	}
+	return fmt.Sprintf("build on cannot be %s, the session's own branch", branch)
 }
 
 // modal implements modalScreen.
@@ -168,17 +189,14 @@ func (m *sessionPrompt) Hints() []hint { return nil }
 func (m *sessionPrompt) setFocus(i int) tea.Cmd {
 	n := m.promptFields()
 	m.focus = (i + n) % n
-	for _, in := range []*textinput.Model{&m.name, &m.prefix, &m.branch} {
-		in.Blur()
-	}
-	cmd := tea.Batch(m.members.focus(m.focus-firstMember), m.refs.focus(m.focus-m.firstRef()))
+	m.name.Blur()
+	m.prefix.Blur()
+	cmd := m.refs.focus(m.focus - m.firstRef())
 	switch m.focus {
 	case nameField:
 		return m.name.Focus()
 	case prefixField:
 		return m.prefix.Focus()
-	case branchField:
-		return m.branch.Focus()
 	}
 	return cmd
 }
@@ -187,16 +205,7 @@ func (m *sessionPrompt) setFocus(i int) tea.Cmd {
 func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
 	if t, ok := msg.(remotePickedMsg); ok {
 		if t.owner == m {
-			picked := pickedBranch{name: t.branch, members: t.members}
-			switch {
-			case t.ref != "":
-				m.refs.set(t.ref, t.branch)
-			case t.from:
-				m.from = picked
-			default:
-				m.track = picked
-			}
-			m.sync()
+			m.picked(t)
 		}
 		return m, nil
 	}
@@ -205,19 +214,9 @@ func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
 		return m, nil
 	}
 	key := k.String()
-	onPicker := (m.focus == trackField || m.focus == fromField) && (key == "enter" || key == " ")
-	onRef := m.focusedRef() != "" && key == " "
-	if key == "ctrl+t" || onPicker || onRef {
-		p, err := m.e.core.Load(m.pkg)
-		if err != nil {
-			m.msg = err.Error()
-			return m, nil
-		}
-		picker := newRemotePicker(m, m.e.core, p, onPicker && m.focus == fromField)
-		if onRef {
-			picker.ref = m.focusedRef()
-		}
-		return m, push(m, picker)
+	picks := m.focus == fromField || m.focusedMember() != "" || m.focusedRef() != ""
+	if key == " " && picks {
+		return m.openPicker()
 	}
 	switch key {
 	case "esc":
@@ -237,54 +236,119 @@ func (m *sessionPrompt) Update(msg tea.Msg) (screen, tea.Cmd) {
 		m.name, cmd = m.name.Update(msg)
 	case prefixField:
 		m.prefix, cmd = m.prefix.Update(msg)
-	case branchField:
-		m.branch, cmd = m.branch.Update(msg)
-	case trackField, fromField:
 	default:
-		cmd = tea.Batch(m.members.update(m.focus-firstMember, msg), m.refs.update(m.focus-m.firstRef(), msg))
+		cmd = m.refs.update(m.focus-m.firstRef(), msg)
 	}
-	m.sync()
 	return m, cmd
 }
 
-// pickView renders the field of a picked branch.
-func (m *sessionPrompt) pickView(field int, label, none string, picked pickedBranch) string {
-	text := styleDim.Render(none)
-	if picked.name != "" {
-		text = picked.name + styleDim.Render("  ("+strings.Join(picked.members, ", ")+")")
+// openPicker opens the remote branches for the focused field.
+func (m *sessionPrompt) openPicker() (screen, tea.Cmd) {
+	p, err := m.e.core.Load(m.pkg)
+	if err != nil {
+		m.msg = err.Error()
+		return m, nil
 	}
-	if m.focus == field {
+	target := pickTarget{member: m.focusedMember()}
+	if ref := m.focusedRef(); ref != "" {
+		target = pickTarget{member: ref, reference: true}
+	}
+	picker := newRemotePicker(m, m.e.core, p, target)
+	if !target.reference {
+		picker.exclude = m.branch()
+		// A member's base only needs choosing when following build on would
+		// give it something else.
+		if target.member != "" && m.from.name != "" {
+			picker.base = m.bases[target.member]
+		}
+	}
+	return m, push(m, picker)
+}
+
+// picked records a choice made in the picker.
+func (m *sessionPrompt) picked(t remotePickedMsg) {
+	m.msg = ""
+	switch {
+	case t.target.reference:
+		m.refs.set(t.target.member, t.branch)
+	case t.target.member == "":
+		m.from = pickedBranch{name: t.branch, members: t.members}
+	case t.branch != "" || t.base:
+		m.own[t.target.member] = t.branch
+	default:
+		delete(m.own, t.target.member)
+	}
+}
+
+// fromView renders the field of what every member builds on.
+func (m *sessionPrompt) fromView() string {
+	label, text := "build on: ", styleDim.Render("each member's base branch")
+	if m.from.name != "" {
+		text = m.from.name + styleDim.Render("  ("+strings.Join(m.from.members, ", ")+")")
+	}
+	if m.focus == fromField {
 		return styleSelected.Render(label) + text + styleDim.Render("  space to pick")
 	}
 	return label + text
 }
 
+// memberView renders an active member's row under build on: what its new branch
+// starts on, dimmed unless it was chosen for this member.
+func (m *sessionPrompt) memberView(member string) string {
+	own, chosen := m.own[member]
+	var text string
+	switch {
+	case own != "":
+		text = own
+	case chosen:
+		text = "base (" + m.bases[member] + ")"
+	case m.buildsOn(member) != "":
+		text = styleDim.Render(m.buildsOn(member))
+	case m.from.name != "":
+		text = styleDim.Render("base (" + m.bases[member] + "), lacks that branch")
+	default:
+		text = styleDim.Render("base (" + m.bases[member] + ")")
+	}
+	name := fit(member, m.width, false)
+	hint := ""
+	if m.focusedMember() == member {
+		name = styleSelected.Render(name)
+		hint = styleDim.Render("  space to pick")
+	}
+	return strings.Repeat(" ", len("build on: ")) + name + "  " + text + hint
+}
+
 // options turns the fields into what core takes.
 func (m *sessionPrompt) options() core.SessionOptions {
 	opts := core.SessionOptions{
-		Branch:         strings.TrimSpace(m.branch.Value()),
-		BranchByMember: m.members.values(),
-		TrackByMember:  map[string]string{},
-		FromByMember:   m.refs.values(),
+		Prefix:       strings.TrimSpace(m.prefix.Value()),
+		FromByMember: m.refs.values(),
 	}
-	if opts.Branch == "" {
-		opts.Branch = m.track.name
-	}
-	if opts.Branch == "" {
-		opts.Prefix = strings.TrimSpace(m.prefix.Value())
-	}
-	for _, name := range m.track.members {
-		// A field filled in for the member wins over the branch picked.
-		if opts.BranchByMember[name] == "" {
-			opts.TrackByMember[name] = m.track.name
-		}
-	}
-	for _, name := range m.from.members {
-		if opts.TrackByMember[name] == "" {
-			opts.FromByMember[name] = m.from.name
+	for _, name := range m.active {
+		if from := m.buildsOn(name); from != "" {
+			opts.FromByMember[name] = from
 		}
 	}
 	return opts
+}
+
+// trackNote words what working on a branch that is already on a remote means
+// for each member, ahead of asking whether to.
+func trackNote(e *core.RemoteBranchExistsError, opts core.SessionOptions) []string {
+	lines := []string{fmt.Sprintf("Branch %q is already on the remote of %s.", e.Branch, strings.Join(e.On, ", "))}
+	for _, name := range e.On {
+		if from := opts.FromByMember[name]; from != "" {
+			lines = append(lines, fmt.Sprintf("%s continues it there, so it is not built on %s.", name, from))
+		}
+	}
+	for _, name := range e.Lacking {
+		start := "its base"
+		if from := opts.FromByMember[name]; from != "" {
+			start = from
+		}
+		lines = append(lines, fmt.Sprintf("%s does not have it, and starts a new branch of that name on %s.", name, start))
+	}
+	return lines
 }
 
 // hyphenateSpaces rewrites a key press so whitespace reaches the dialog's
@@ -310,12 +374,15 @@ func hyphenateSpaces(k tea.KeyMsg) tea.KeyMsg {
 	return k
 }
 
-// submit validates the name and starts the create on the progress screen.
+// submit validates the fields and starts the create on the progress screen.
 func (m *sessionPrompt) submit() (screen, tea.Cmd) {
 	name := strings.TrimSpace(m.name.Value())
 	if err := manifest.ValidateSessionName(name); err != nil {
 		m.msg = err.Error()
 		return m, m.setFocus(0)
+	}
+	if m.selfBuilt() != "" {
+		return m, nil
 	}
 	c, pkg := m.e.core, m.pkg
 	p, err := c.Load(pkg)
@@ -340,7 +407,12 @@ func (m *sessionPrompt) submit() (screen, tea.Cmd) {
 			_, err := c.CreateSession(p, name, opts)
 			return err
 		},
-		back: func() screen { return m },
+		trackNote: func(e *core.RemoteBranchExistsError) []string { return trackNote(e, opts) },
+		track:     func() { opts.Track = true },
+		back: func() screen {
+			m.setFocus(nameField)
+			return m
+		},
 	}))
 }
 
@@ -350,18 +422,18 @@ func (m *sessionPrompt) View(w, h int) string {
 	b.WriteString(" " + styleDim.Render("package ") + styleLabel.Render(m.pkg) + "\n\n")
 	b.WriteString(" " + m.name.View() + "\n")
 	b.WriteString(" " + m.prefix.View() + "\n")
-	b.WriteString(" " + m.branch.View() + "\n")
-	b.WriteString(" " + m.pickView(trackField, "work on:  ", "nothing: start a new branch", m.track) + "\n")
-	b.WriteString(" " + m.pickView(fromField, "build on: ", "each member's base branch", m.from) + "\n")
-	b.WriteString(m.members.view())
+	b.WriteString(" " + m.fromView() + "\n")
+	for _, name := range m.active {
+		b.WriteString(" " + m.memberView(name) + "\n")
+	}
 	b.WriteString(m.refs.view())
 	help := m.fieldHelp()
 	b.WriteString("\n " + styleDim.Render(help[0]) + "\n")
 	b.WriteString(" " + styleDim.Render(help[1]) + "\n")
-	if m.msg != "" {
-		b.WriteString(" " + styleErr.Render(m.msg) + "\n")
+	if msg := cmp.Or(m.selfBuilt(), m.msg); msg != "" {
+		b.WriteString(" " + styleErr.Render(msg) + "\n")
 	}
-	b.WriteString("\n " + keyHelp("enter", "start", "tab", "next field", "ctrl+t", "remote branch", "esc", "cancel"))
+	b.WriteString("\n " + keyHelp("enter", "start", "tab", "next field", "space", "pick a branch", "esc", "cancel"))
 	width := w - 8
 	if width > 76 {
 		width = 76
@@ -373,31 +445,22 @@ func (m *sessionPrompt) View(w, h int) string {
 // `vmono session new` that does the same. A line longer than 68 columns is cut
 // off on a terminal 80 wide.
 func (m *sessionPrompt) fieldHelp() [2]string {
+	branch := cmp.Or(m.branch(), manifest.DefaultBranch(strings.TrimSpace(m.prefix.Value()), "<session>"))
 	switch m.focus {
 	case nameField:
 		return [2]string{
-			"Names this piece of work. Active members get a branch of this name",
-			"unless a field below says otherwise.",
+			"Names this piece of work, and the branch every active member is on:",
+			truncate(branch, 68),
 		}
 	case prefixField:
 		return [2]string{
 			"Optional (--prefix). Goes before the session name in the branch:",
-			"feat gives feat/<session>. Unused if you name or work on a branch.",
-		}
-	case branchField:
-		return [2]string{
-			"Optional (--branch). The branch the active members work on, which",
-			"is what you push. Leave empty to use the one shown.",
-		}
-	case trackField:
-		return [2]string{
-			"Optional (--track). Continue a branch already on the remote, such",
-			"as a teammate's. Members whose remote lacks it start a new one.",
+			truncate(branch, 68),
 		}
 	case fromField:
 		return [2]string{
-			"Optional (--from). Start the new branch here instead of on each",
-			"member's base, for work stacked on a branch that has not merged.",
+			"Optional (--from). Press space to start the new branches on a",
+			"remote branch instead of each member's base. Rows below can differ.",
 		}
 	}
 	if m.focusedRef() != "" {
@@ -407,8 +470,8 @@ func (m *sessionPrompt) fieldHelp() [2]string {
 		}
 	}
 	return [2]string{
-		"Optional (--branch MEMBER=BRANCH). A different branch for this",
-		"member only. Leave empty to use the one shown.",
+		"Press space to choose what this member's new branch starts on",
+		"(--from MEMBER=REF), if it should differ from build on above.",
 	}
 }
 

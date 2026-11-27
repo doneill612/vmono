@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -56,10 +57,9 @@ func TestCreateSessionNamesBranches(t *testing.T) {
 		opts        SessionOptions
 		alpha, beta string
 	}{
-		"plain":    {SessionOptions{}, "plain", "plain"},
-		"prefixed": {SessionOptions{Prefix: "feat/"}, "feat/prefixed", "feat/prefixed"},
-		"named":    {SessionOptions{Branch: "fix/x"}, "fix/x", "fix/x"},
-		"mixed":    {SessionOptions{Prefix: "feat", BranchByMember: map[string]string{"beta": "other"}}, "feat/mixed", "other"},
+		"plain":      {SessionOptions{}, "plain", "plain"},
+		"prefixed":   {SessionOptions{Prefix: "feat/"}, "feat/prefixed", "feat/prefixed"},
+		"PLAT-412_b": {SessionOptions{Prefix: "fix"}, "fix/PLAT-412_b", "fix/PLAT-412_b"},
 	} {
 		s, err := c.CreateSession(p, name, tc.opts)
 		if err != nil {
@@ -109,41 +109,50 @@ func TestCreateSessionRefusesBranchesItCannotWorkOn(t *testing.T) {
 	p := mustPackage(t, c, request("bad", []string{a}, nil))
 
 	for what, tc := range map[string]struct {
+		name string
 		opts SessionOptions
 		want string
 	}{
-		"not a name":        {SessionOptions{Branch: "a..b"}, "not a valid branch name"},
-		"git rejects it":    {SessionOptions{Branch: "a@{b"}, "not a valid branch name"},
-		"option":            {SessionOptions{Branch: "-x"}, "not a valid branch name"},
-		"base":              {SessionOptions{Branch: "main"}, "its work merges into"},
-		"git cannot hold":   {SessionOptions{Branch: "feat/x"}, "conflicts with existing branch"},
-		"exists locally":    {SessionOptions{Branch: "taken"}, "already exists"},
-		"exists on remote":  {SessionOptions{Branch: "theirs"}, "already on origin"},
-		"unknown member":    {SessionOptions{BranchByMember: map[string]string{"ghost": "x"}}, "not a member"},
-		"branch and track":  {SessionOptions{Branch: "x", Track: "theirs"}, "--branch and --track"},
-		"prefix and branch": {SessionOptions{Prefix: "p", Branch: "x"}, "--prefix"},
+		"not a session name": {"a b", SessionOptions{}, "invalid session name"},
+		"not a branch":       {"work", SessionOptions{Prefix: "a..b"}, "not a valid branch name"},
+		"git rejects it":     {"work", SessionOptions{Prefix: "a@{b"}, "not a valid branch name"},
+		"option":             {"work", SessionOptions{Prefix: "-x"}, "not a valid branch name"},
+		"git cannot hold":    {"x", SessionOptions{Prefix: "feat"}, "conflicts with existing branch"},
+		"exists locally":     {"taken", SessionOptions{}, "already exists"},
+		"exists on remote":   {"theirs", SessionOptions{}, "already on the remote of alpha"},
+		"unknown member":     {"work", SessionOptions{FromByMember: map[string]string{"ghost": "x"}}, "not a member"},
+		// A session named after the base branch is the likeliest way to hit it,
+		// and is refused rather than offered to be worked on.
+		"named main":      {"main", SessionOptions{}, "--prefix"},
+		"working on main": {"main", SessionOptions{Track: true}, "its work merges into"},
 	} {
-		_, err := c.CreateSession(p, "work", tc.opts)
-		refused(t, p, "work", what, err, tc.want)
+		_, err := c.CreateSession(p, tc.name, tc.opts)
+		refused(t, p, tc.name, what, err, tc.want)
 	}
 	var re *RemoteBranchExistsError
-	if _, err := c.CreateSession(p, "work", SessionOptions{Branch: "theirs"}); !errors.As(err, &re) || re.Member != "alpha" || re.Remote != "origin" {
+	if _, err := c.CreateSession(p, "theirs", SessionOptions{}); !errors.As(err, &re) || re.Branch != "theirs" || !slices.Equal(re.On, []string{"alpha"}) || len(re.Lacking) != 0 {
 		t.Errorf("err = %v", err)
 	}
-	// A session named after the base branch is the likeliest way to hit it.
-	_, err := c.CreateSession(p, "main", SessionOptions{})
-	refused(t, p, "main", "named main", err, "--prefix")
 }
 
 func TestSessionNamesDifferingOnlyInCaseAreRefused(t *testing.T) {
 	c, env := newCore(t)
-	p := mustPackage(t, c, request("cases", []string{env.NewSource(t, "alpha")}, nil))
-	if _, err := c.CreateSession(p, "Work_1", SessionOptions{}); err != nil {
+	a := env.NewSource(t, "alpha")
+	testutil.Git(t, a, "push", "--quiet", "origin", "main:feat/Theirs")
+	p := mustPackage(t, c, request("cases", []string{a}, nil))
+	if _, err := c.CreateSession(p, "Work", SessionOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := c.CreateSession(p, "work_1", SessionOptions{Prefix: "other"})
+	_, err := c.CreateSession(p, "work", SessionOptions{Prefix: "other"})
 	if err == nil || !strings.Contains(err.Error(), "differing only in case") {
-		t.Errorf("err = %v", err)
+		t.Errorf("session name: %v", err)
+	}
+	for _, track := range []bool{false, true} {
+		_, err := c.CreateSession(p, "theirs", SessionOptions{Prefix: "feat", Track: track})
+		refused(t, p, "theirs", "remote branch", err, `"feat/Theirs"`)
+	}
+	if _, err := c.CreateSession(p, "Theirs", SessionOptions{Prefix: "feat", Track: true}); err != nil {
+		t.Errorf("the exact spelling works on it: %v", err)
 	}
 }
 
@@ -152,7 +161,7 @@ func TestReusedBranchIsNotRecordedAsCreated(t *testing.T) {
 	a := env.NewSource(t, "alpha")
 	tip := featureBranch(t, a, "mine")
 	p := mustPackage(t, c, request("reuse", []string{a}, nil))
-	s, err := c.CreateSession(p, "work", SessionOptions{Branch: "mine", ReuseBranch: true})
+	s, err := c.CreateSession(p, "mine", SessionOptions{ReuseBranch: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,8 +204,9 @@ func TestFromBuildsOnAnotherBranch(t *testing.T) {
 	}{
 		"nobody has it":   {SessionOptions{From: "nope"}, "no member"},
 		"member lacks it": {SessionOptions{FromByMember: map[string]string{"beta": "parent"}}, "beta"},
-		"itself":          {SessionOptions{From: "again"}, "built on itself"},
-		"with track":      {SessionOptions{Track: "x", From: "parent"}, "--track and --from"},
+		"itself":          {SessionOptions{From: "again"}, "the session's own branch"},
+		"itself, one":     {SessionOptions{FromByMember: map[string]string{"alpha": "origin/again"}}, "the session's own branch"},
+		"itself, in full": {SessionOptions{FromByMember: map[string]string{"beta": "refs/remotes/origin/again"}}, "the session's own branch"},
 	} {
 		_, err := c.CreateSession(p, "again", tc.opts)
 		refused(t, p, "again", what, err, tc.want)

@@ -6,24 +6,24 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
-// branchFields is a column of text inputs, one per member, holding the branch
-// each active member works on when that is not the session's, or the ref each
-// reference member is checked out at when that is not the package's. Repos need
-// not share a branch name. The new-session prompt embeds one of each.
-type branchFields struct {
+// refFields is a column of text inputs, one per reference member, holding what
+// the member is checked out at when that is not the package's ref. The
+// new-session prompt embeds one.
+type refFields struct {
 	members []string
 	inputs  []textinput.Model
 }
 
-// newBranchFields builds an empty field for each member, labeled with label and
-// the member's name in a column of the given width.
-func newBranchFields(label string, width int, members []string) branchFields {
-	f := branchFields{members: members}
+// newRefFields builds an empty field for each member, labeled read-only with the
+// member's name in a column of the given width.
+func newRefFields(width int, members []string) refFields {
+	f := refFields{members: members}
 	for _, name := range members {
 		in := newTextInput()
-		in.Prompt = fmt.Sprintf("%-9s %-*s  ", label, width, name)
+		in.Prompt = fmt.Sprintf("read-only %-*s  ", width, name)
 		in.CharLimit = 200
 		// A text input with no width truncates its placeholder to one character.
 		in.Width = 36
@@ -33,20 +33,23 @@ func newBranchFields(label string, width int, members []string) branchFields {
 }
 
 // placeholder sets what the named member's field shows while it is empty.
-func (f *branchFields) placeholder(member, text string) {
+// The input counts its prompt against its width when showing a placeholder, so
+// the field is widened for one that a long member name would otherwise cut.
+func (f *refFields) placeholder(member, text string) {
 	for i, name := range f.members {
 		if name == member {
 			f.inputs[i].Placeholder = text
+			f.inputs[i].Width = max(f.inputs[i].Width, lipgloss.Width(f.inputs[i].Prompt)+lipgloss.Width(text)+1)
 		}
 	}
 }
 
 // count is the number of fields.
-func (f *branchFields) count() int { return len(f.inputs) }
+func (f *refFields) count() int { return len(f.inputs) }
 
 // focus gives the keyboard to field i and takes it from the rest. An index
 // outside the fields only blurs them.
-func (f *branchFields) focus(i int) tea.Cmd {
+func (f *refFields) focus(i int) tea.Cmd {
 	var cmd tea.Cmd
 	for j := range f.inputs {
 		if j == i {
@@ -59,7 +62,7 @@ func (f *branchFields) focus(i int) tea.Cmd {
 }
 
 // update passes a message to field i.
-func (f *branchFields) update(i int, msg tea.Msg) tea.Cmd {
+func (f *refFields) update(i int, msg tea.Msg) tea.Cmd {
 	if i < 0 || i >= len(f.inputs) {
 		return nil
 	}
@@ -69,7 +72,7 @@ func (f *branchFields) update(i int, msg tea.Msg) tea.Cmd {
 }
 
 // set fills in the named member's field.
-func (f *branchFields) set(member, text string) {
+func (f *refFields) set(member, text string) {
 	for i, name := range f.members {
 		if name == member {
 			f.inputs[i].SetValue(text)
@@ -79,8 +82,8 @@ func (f *branchFields) set(member, text string) {
 }
 
 // values returns what was typed for each member, leaving out empty fields, which
-// stand for the session's branch or the package's ref.
-func (f *branchFields) values() map[string]string {
+// stand for the package's ref.
+func (f *refFields) values() map[string]string {
 	out := map[string]string{}
 	for i, name := range f.members {
 		if v := strings.TrimSpace(f.inputs[i].Value()); v != "" {
@@ -91,7 +94,7 @@ func (f *branchFields) values() map[string]string {
 }
 
 // view renders the fields, one per line.
-func (f *branchFields) view() string {
+func (f *refFields) view() string {
 	var b strings.Builder
 	for _, in := range f.inputs {
 		b.WriteString(" " + in.View() + "\n")

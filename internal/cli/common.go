@@ -108,40 +108,33 @@ func printEvent(w io.Writer, ev apply.Event) {
 	}
 }
 
-// sessionFlags are the flags that say which branches a new session works on,
-// shared by the commands that start one.
+// sessionFlags are the flags that say what a new session's branch is called and
+// built on, shared by the commands that start one.
 type sessionFlags struct {
-	prefix              string
-	branch, track, from []string
-	reuse               bool
+	prefix       string
+	from         []string
+	track, reuse bool
 }
 
 // add defines the flags on cmd, their help starting with intro.
 func (f *sessionFlags) add(cmd *cobra.Command, intro string) {
 	fs := cmd.Flags()
 	fs.StringVar(&f.prefix, "prefix", "", intro+"put PREFIX/ before the session's name in its branch: feat gives feat/SESSION")
-	fs.StringArrayVar(&f.branch, "branch", nil, intro+"name the branch to work on: BRANCH for every active member, or MEMBER=BRANCH for one (repeatable; default [PREFIX/]SESSION)")
-	fs.StringArrayVar(&f.track, "track", nil, intro+"work on a branch already on the remote: BRANCH for every member, starting it where a remote lacks it, or MEMBER=BRANCH for one (repeatable); fetches first")
-	fs.StringArrayVar(&f.from, "from", nil, intro+"build on this instead of the member's base: REF for every active member that has it, or MEMBER=REF for one; for a read-only member, what to check out (repeatable); fetches first")
+	fs.BoolVar(&f.track, "track", false, intro+"if the session's branch is already on a member's remote, work on it there")
+	fs.StringArrayVar(&f.from, "from", nil, intro+"build on this instead of the member's base: REF for every active member that has it, or MEMBER=REF for one; for a read-only member, what to check out (repeatable)")
 	fs.BoolVar(&f.reuse, "reuse-branch", false, intro+"check out the branch if it already exists in a source repo")
 }
 
 // given reports whether any of the flags was used.
 func (f *sessionFlags) given() bool {
-	return f.prefix != "" || len(f.branch) > 0 || len(f.track) > 0 || len(f.from) > 0 || f.reuse
+	return f.prefix != "" || f.track || len(f.from) > 0 || f.reuse
 }
 
 // options turns the flags into what core takes.
 func (f *sessionFlags) options() (core.SessionOptions, error) {
-	opts := core.SessionOptions{Prefix: f.prefix, ReuseBranch: f.reuse}
+	opts := core.SessionOptions{Prefix: f.prefix, Track: f.track, ReuseBranch: f.reuse}
 	var err error
-	if opts.Branch, opts.BranchByMember, err = parseBranches("--branch", f.branch); err != nil {
-		return opts, err
-	}
-	if opts.Track, opts.TrackByMember, err = parseBranches("--track", f.track); err != nil {
-		return opts, err
-	}
-	opts.From, opts.FromByMember, err = parseBranches("--from", f.from)
+	opts.From, opts.FromByMember, err = parseFrom(f.from)
 	return opts, err
 }
 
@@ -165,26 +158,26 @@ on the way in, or that resolved a conflict, cannot be told from work that was ne
 merged, so its branch is kept: check, then delete it with git branch -D in the source
 repo. What counts as merged is as of the last fetch.`
 
-// parseBranches splits the values of flag into the branch for every member and
-// the branches for individual members. A value is MEMBER=BRANCH when it has an
-// "=" with a member name before it, and otherwise a branch for every member.
-func parseBranches(flag string, vals []string) (all string, byMember map[string]string, err error) {
+// parseFrom splits the values of --from into the ref for every member and the
+// refs for individual members. A value is MEMBER=REF when it has an "=" with a
+// member name before it, and otherwise a ref for every member.
+func parseFrom(vals []string) (all string, byMember map[string]string, err error) {
 	for _, v := range vals {
-		member, branch, ok := strings.Cut(v, "=")
+		member, ref, ok := strings.Cut(v, "=")
 		if !ok {
 			if all != "" {
-				return "", nil, fmt.Errorf("%s names two branches for every member (%q and %q); use MEMBER=BRANCH for one member", flag, all, v)
+				return "", nil, fmt.Errorf("--from names two refs for every member (%q and %q); use MEMBER=REF for one member", all, v)
 			}
 			all = v
 			continue
 		}
-		if member == "" || branch == "" {
-			return "", nil, fmt.Errorf("%s %q: expected MEMBER=BRANCH", flag, v)
+		if member == "" || ref == "" {
+			return "", nil, fmt.Errorf("--from %q: expected MEMBER=REF", v)
 		}
 		if byMember == nil {
 			byMember = map[string]string{}
 		}
-		byMember[member] = branch
+		byMember[member] = ref
 	}
 	return all, byMember, nil
 }

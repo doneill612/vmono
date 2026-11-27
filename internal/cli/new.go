@@ -18,7 +18,7 @@ func newNewCmd() *cobra.Command {
 	var purposeFile, contextFile, harness, session string
 	var flags sessionFlags
 	cmd := &cobra.Command{
-		Use:   "new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--prefix P] [--branch B] [--track B] [--from REF]]",
+		Use:   "new <pkg> --active a,b [--ref c] [--purpose-file F] [--context-file F] [--harness H] [--session S [--prefix P] [--from REF] [--track]]",
 		Short: "Define a package, and optionally start its first session",
 		Example: `  vmono new payments --active api,web --ref contracts
   vmono new payments --active api --session token-refresh --prefix feat`,
@@ -28,7 +28,7 @@ func newNewCmd() *cobra.Command {
 				return errors.New("a package needs at least one member: pass --active and/or --ref")
 			}
 			if session == "" && flags.given() {
-				return errors.New("--prefix, --branch, --track, --from and --reuse-branch belong to a session: pass --session NAME, or use `vmono session new`")
+				return errors.New("--prefix, --from, --track and --reuse-branch belong to a session: pass --session NAME, or use `vmono session new`")
 			}
 			opts, err := flags.options()
 			if err != nil {

@@ -30,6 +30,11 @@ type operation struct {
 	// force and reuse are passed to run; reuse is also set when the user
 	// answers the branch-exists prompt.
 	force, reuse bool
+	// track, when set, makes the next run work on a branch that is already on a
+	// member's remote. The screen asks before calling it, showing the lines
+	// trackNote gives, and leaves the operation if the answer is no.
+	track     func()
+	trackNote func(*core.RemoteBranchExistsError) []string
 	// reveal is set when the progress screen sits directly above the screen
 	// the operation came from, whether it was pushed there or put in place of
 	// a dialog that was. Leaving it, after a failure or once success is
@@ -71,6 +76,7 @@ const (
 	progDone
 	progFailed
 	progAskReuse
+	progAskTrack
 )
 
 // progressRow is one member step and its live status.
@@ -170,6 +176,8 @@ func (m *progressModel) Hints() []hint {
 	switch m.state {
 	case progAskReuse:
 		return []hint{{"y", "Reuse branch"}, {"n", "Cancel"}}
+	case progAskTrack:
+		return []hint{{"y", "Work on it"}, {"n", "Back"}}
 	case progFailed:
 		if m.op.fixIn != nil {
 			return []hint{{"enter", "Back"}, {"l", "Launch harness in the session"}}
@@ -228,6 +236,7 @@ func (m *progressModel) apply(ev apply.Event) {
 // finish moves to the right end state.
 func (m *progressModel) finish(err error) (screen, tea.Cmd) {
 	var be *core.BranchExistsError
+	var re *core.RemoteBranchExistsError
 	switch {
 	case err == nil:
 		m.state = progDone
@@ -243,6 +252,8 @@ func (m *progressModel) finish(err error) (screen, tea.Cmd) {
 		}
 	case errors.As(err, &be) && !m.op.reuse:
 		m.state, m.fail = progAskReuse, err
+	case errors.As(err, &re) && m.op.track != nil:
+		m.state, m.fail = progAskTrack, err
 	default:
 		m.state, m.fail = progFailed, err
 	}
@@ -256,8 +267,15 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		switch k.String() {
 		case "y":
 			m.op.reuse = true
-			m.rows, m.index = nil, map[string]int{}
-			return m, tea.Batch(m.spin.Tick, m.start())
+			return m.retry()
+		case "n", "esc":
+			return m.leave()
+		}
+	case progAskTrack:
+		switch k.String() {
+		case "y":
+			m.op.track()
+			return m.retry()
 		case "n", "esc":
 			return m.leave()
 		}
@@ -284,6 +302,12 @@ func (m *progressModel) key(k tea.KeyMsg) (screen, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// retry runs the operation again, once a question about it has been answered.
+func (m *progressModel) retry() (screen, tea.Cmd) {
+	m.rows, m.index = nil, map[string]int{}
+	return m, tea.Batch(m.spin.Tick, m.start())
 }
 
 // leave returns to the screen the operation came from: it pops itself when
@@ -341,6 +365,15 @@ func (m *progressModel) View(w, h int) string {
 			" " + styleWarn.Render(fmt.Sprintf("Branch %q already exists in %s.", be.Branch, be.Member)),
 			" Check it out instead of creating it?  " + keyHelp("y", "reuse", "n", "cancel"),
 		}
+	case progAskTrack:
+		var re *core.RemoteBranchExistsError
+		errors.As(m.fail, &re)
+		for _, line := range m.op.trackNote(re) {
+			for _, part := range strings.Split(wrap(line, max(w-2, 20)), "\n") {
+				foot = append(foot, " "+styleWarn.Render(part))
+			}
+		}
+		foot = append(foot, " Work on that branch?  "+keyHelp("y", "yes", "n", "no, back to the form"))
 	}
 	return tb.view(w, h-len(foot)-1) + "\n\n" + strings.Join(foot, "\n")
 }

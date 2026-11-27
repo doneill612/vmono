@@ -85,7 +85,7 @@ func TestCreateFlowEditorPickerProgressLaunch(t *testing.T) {
 	d.eventually(func() bool { return containsView(d, "new session") }, "new session prompt")
 	d.has("package shiny", "<session>")
 	d.typeText("task")
-	d.has("branch:   task")
+	d.has("session:  task")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 	d.has("default", "shiny/task")

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -19,27 +20,26 @@ func sessionBranches(t *testing.T, env *testutil.Env, session string, members ..
 	return out
 }
 
-func TestSessionPromptPrefixAndMemberBranches(t *testing.T) {
+func TestSessionPromptNamesOneBranchFromPrefixAndName(t *testing.T) {
 	env := testutil.NewEnv(t)
 	useFakeHarness(t, env)
 	seed(t, env, "pay", env.NewSource(t, "alpha"), env.NewSource(t, "beta"))
 	d := newDriver(t, env, "")
 
 	d.key("right", "n")
-	d.has("prefix:", "none", "branch    alpha", "branch    beta", "each member's base branch",
-		"work on:", "nothing: start a new branch", "build on:", "Names this piece of work")
-	d.typeText("retry")
+	d.has("session:", "prefix:", "none", "build on:", "each member's base branch",
+		"alpha  base (origin/HEAD)", "beta   base (origin/HEAD)", "Names this piece of work")
+	d.lacks("branch:", "work on")
+	d.typeText("PLAT_412")
 	d.key("tab")
 	d.typeText("feat")
-	d.has("branch:   feat/retry", "branch    alpha  feat/retry")
-	d.key("tab", "tab", "tab", "tab", "tab") // branch, track, from, alpha, beta
-	d.typeText("other")
-	d.key("tab", "shift+tab") // away and back: the text stays
-	d.has("other")
+	d.has("feat/PLAT_412")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
-	if got := sessionBranches(t, env, "retry", "alpha", "beta"); got[0] != "feat/retry" || got[1] != "other" {
-		t.Errorf("branches = %v", got)
+	for _, got := range sessionBranches(t, env, "PLAT_412", "alpha", "beta") {
+		if got != "feat/PLAT_412" {
+			t.Errorf("branch = %q", got)
+		}
 	}
 }
 
@@ -55,7 +55,7 @@ func TestSessionPromptTypesHyphensForSpaces(t *testing.T) {
 	d.typeText("refresh")
 	d.key("tab")
 	d.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("my feat"), Paste: true})
-	d.has("session:  token-refresh", "branch:   my-feat/token-refresh")
+	d.has("session:  token-refresh", "my-feat/token-refresh")
 	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
 	if got := sessionBranches(t, env, "token-refresh", "alpha"); got[0] != "my-feat/token-refresh" {
@@ -63,30 +63,163 @@ func TestSessionPromptTypesHyphensForSpaces(t *testing.T) {
 	}
 }
 
+// pushBranch puts a commit of its own on the remote of src as branch, and
+// returns it.
+func pushBranch(t *testing.T, src, branch string) string {
+	t.Helper()
+	tip := testutil.Git(t, src, "commit-tree", "-m", branch, "-p", "main", "main^{tree}")
+	testutil.Git(t, src, "push", "--quiet", "origin", tip+":refs/heads/"+branch)
+	return tip
+}
+
+// head is the commit a member of a session of pay is at.
+func head(t *testing.T, env *testutil.Env, session, member string) string {
+	t.Helper()
+	return testutil.Git(t, filepath.Join(env.PackageRoot, "pay", session, member), "rev-parse", "HEAD")
+}
+
+// pickBranch opens the picker of the focused field, waits for the branch
+// typed to be listed, and picks it.
+func pickBranch(d *driver, branch string) {
+	d.t.Helper()
+	d.key("space")
+	d.eventually(func() bool { return !containsView(d, "fetching") && containsView(d, branch) }, "the branch "+branch)
+	d.typeText(branch)
+	d.key("enter")
+}
+
 func TestSessionPromptBuildsOnAPickedBranch(t *testing.T) {
 	env := testutil.NewEnv(t)
 	useFakeHarness(t, env)
-	a := env.NewSource(t, "alpha")
-	seed(t, env, "pay", a)
-	tip := testutil.Git(t, a, "commit-tree", "-m", "parent", "-p", "main", "main^{tree}")
-	testutil.Git(t, a, "push", "--quiet", "origin", tip+":refs/heads/parent")
+	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
+	seed(t, env, "pay", a, b)
+	tip := pushBranch(t, a, "parent")
+	main := testutil.Git(t, b, "rev-parse", "main")
 	d := newDriver(t, env, "")
 
 	d.key("right", "n")
 	d.typeText("child")
-	d.key("tab", "tab", "tab", "tab", "enter") // the from field opens the picker
+	d.key("tab", "tab", "space") // the build on field opens the picker
 	d.has("build on a remote branch", "start from each member's base")
 	d.eventually(func() bool { return containsView(d, "parent") }, "the fetched branch")
 	d.typeText("parent")
 	d.key("enter")
-	d.has("new session", "build on: parent  (alpha)", "branch:   child")
-	d.key("tab", "enter")
+	d.has("build on: parent  (alpha)", "alpha  parent", "base (origin/HEAD), lacks that branch")
+	d.key("enter")
 	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
-	if got := sessionBranches(t, env, "child", "alpha"); got[0] != "child" {
-		t.Errorf("branches = %v", got)
+	if got := head(t, env, "child", "alpha"); got != tip {
+		t.Errorf("alpha starts at %s, want %s", got, tip)
 	}
-	if got := testutil.Git(t, filepath.Join(env.PackageRoot, "pay", "child", "alpha"), "rev-parse", "HEAD"); got != tip {
-		t.Errorf("starts at %s, want %s", got, tip)
+	if got := head(t, env, "child", "beta"); got != main {
+		t.Errorf("beta starts at %s, want its base %s", got, main)
+	}
+}
+
+func TestSessionPromptBuildsEachMemberOnItsOwnChoice(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
+	seed(t, env, "pay", a, b)
+	pushBranch(t, a, "parent")
+	pushBranch(t, b, "parent")
+	second := pushBranch(t, b, "second")
+	main := testutil.Git(t, a, "rev-parse", "main")
+	d := newDriver(t, env, "")
+
+	d.key("right", "n")
+	d.typeText("child")
+	d.key("tab", "tab")
+	pickBranch(d, "parent")
+
+	d.key("tab", "space") // alpha takes its base in place of the pick
+	d.has("build alpha on", "same as build on above", "its base: origin/HEAD")
+	d.key("down", "enter")
+	d.has("alpha  base (origin/HEAD)")
+
+	d.key("tab")
+	pickBranch(d, "second")
+	d.has("beta   second")
+	d.key("space", "enter") // and back to following build on
+	d.has("beta   parent")
+	pickBranch(d, "second")
+
+	d.key("enter")
+	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+	if got := head(t, env, "child", "alpha"); got != main {
+		t.Errorf("alpha starts at %s, want its base %s", got, main)
+	}
+	if got := head(t, env, "child", "beta"); got != second {
+		t.Errorf("beta starts at %s, want %s", got, second)
+	}
+}
+
+func TestSessionPromptRefusesBuildingOnItsOwnBranch(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	a := env.NewSource(t, "alpha")
+	seed(t, env, "pay", a)
+	pushBranch(t, a, "parent")
+	d := newDriver(t, env, "")
+	const clash = "build on cannot be parent, the session's own branch"
+
+	// The pick comes first, and the name is then typed to match it.
+	d.key("right", "n", "tab", "tab")
+	pickBranch(d, "parent")
+	d.lacks(clash)
+	d.key("shift+tab", "shift+tab")
+	d.typeText("parent")
+	d.has(clash)
+	d.key("enter")
+	d.has("new session", clash)
+	if _, err := os.Stat(filepath.Join(env.PackageRoot, "pay", "parent")); !os.IsNotExist(err) {
+		t.Error("nothing should be made")
+	}
+
+	// With the name there first, the picker does not offer it.
+	d.key("tab", "tab", "space")
+	d.eventually(func() bool { return !containsView(d, "fetching") }, "the fetch")
+	d.typeText("parent")
+	d.has("no match")
+}
+
+func TestSessionPromptAsksBeforeWorkingOnARemoteBranch(t *testing.T) {
+	env := testutil.NewEnv(t)
+	useFakeHarness(t, env)
+	a, b := env.NewSource(t, "alpha"), env.NewSource(t, "beta")
+	seed(t, env, "pay", a, b)
+	base := pushBranch(t, a, "parent")
+	pushBranch(t, b, "parent")
+	tip := pushBranch(t, a, "feat/x")
+	testutil.Git(t, a, "update-ref", "-d", "refs/remotes/origin/feat/x") // only a fetch reveals it
+	d := newDriver(t, env, "")
+
+	d.key("right", "n")
+	d.typeText("x")
+	d.key("tab")
+	d.typeText("feat")
+	d.key("tab")
+	pickBranch(d, "parent")
+	d.key("enter")
+	d.eventually(func() bool { return containsView(d, "Work on that branch?") }, "the question")
+	d.has(`Branch "feat/x" is already on the remote of alpha.`,
+		"alpha continues it there, so it is not built on parent.",
+		"beta does not have it, and starts a new branch of that name on parent.")
+
+	d.key("n") // back to the form, as it was, with nothing made
+	d.has("new session", "feat/x", "build on: parent", "Names this piece of work")
+	if _, err := os.Stat(filepath.Join(env.PackageRoot, "pay", "x")); !os.IsNotExist(err) {
+		t.Error("nothing should be made")
+	}
+
+	d.key("enter")
+	d.eventually(func() bool { return containsView(d, "Work on that branch?") }, "the question again")
+	d.key("y")
+	d.eventually(func() bool { return containsView(d, "Launch now?") }, "launch prompt")
+	if got := head(t, env, "x", "alpha"); got != tip {
+		t.Errorf("alpha is at %s, want the remote branch %s", got, tip)
+	}
+	if got := head(t, env, "x", "beta"); got == base || got == testutil.Git(t, b, "rev-parse", "main") {
+		t.Errorf("beta should start on its parent branch, not %s", got)
 	}
 }
 
@@ -106,9 +239,9 @@ func TestSessionPromptPicksWhatAReferenceIsCheckedOutAt(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("right", "n")
-	d.has("branch    alpha", "read-only lib        origin/HEAD", "read-only contracts  origin/HEAD")
+	d.has("build on:", "alpha", "read-only lib        origin/HEAD", "read-only contracts  origin/HEAD")
 	d.typeText("work")
-	d.key("tab", "tab", "tab", "tab", "tab", "tab") // prefix, branch, track, from, alpha, lib
+	d.key("tab", "tab", "tab", "tab") // prefix, build on, alpha, lib
 	d.has("press space to pick")
 	d.key(" ")
 	d.eventually(func() bool { return containsView(d, "feat/api") }, "the fetched branch")
@@ -139,11 +272,11 @@ func TestSessionPromptExplainsTheFocusedField(t *testing.T) {
 	d := newDriver(t, env, "")
 
 	d.key("right", "n")
-	// In the order tab visits them: name, prefix, branch, work on, build on,
-	// the active member, the read-only member.
+	// In the order tab visits them: name, prefix, build on, the active member,
+	// the read-only member.
 	for i, want := range []string{
-		"Names this piece of work", "(--prefix)", "(--branch)", "(--track)", "(--from)",
-		"(--branch MEMBER=BRANCH)", "(--from MEMBER=REF)",
+		"Names this piece of work", "(--prefix)", "Optional (--from)",
+		"(--from MEMBER=REF), if", "checked out at (--from MEMBER=REF)",
 	} {
 		if i > 0 {
 			d.key("tab")
