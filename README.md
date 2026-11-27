@@ -5,7 +5,7 @@
   <a href="https://github.com/doneill612/vmono/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/doneill612/vmono?style=flat-square" /></a>
   <a href="https://github.com/doneill612/vmono/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/doneill612/vmono/ci.yml?style=flat-square&label=ci" /></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/doneill612/vmono?style=flat-square" /></a><br>
-  <img src="docs/vmono-ex.png" alt="The vmono TUI showing the packages view">
+  
 </p>
 
 ---
@@ -43,6 +43,8 @@ To pin a version, change the install location, build from source, or uninstall, 
 ```sh
 vmono                      # opens the TUI; first run walks you through setup
 ```
+
+<img src="docs/vmono-ex.png" alt="The vmono TUI showing the packages view">
 
 Or from the command line:
 
